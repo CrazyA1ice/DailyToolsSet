@@ -12,6 +12,7 @@ import re
 import shutil
 import tempfile
 from threading import RLock
+from time import monotonic
 import ntpath
 import os
 from pathlib import Path
@@ -20,7 +21,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 import webbrowser
 import startup
 import explorer_window
@@ -737,6 +738,27 @@ class FolderServer(ThreadingHTTPServer):
         super().__init__(address, Handler)
         self.store = store
         self.token = secrets.token_urlsafe(32)
+        self._backup_ticket_lock = RLock()
+        self._backup_ticket = None
+        self._backup_ticket_until = 0.0
+
+
+    def issue_backup_ticket(self):
+        """Short-lived one-time download authorization, issued by a CSRF-protected POST."""
+        with self._backup_ticket_lock:
+            self._backup_ticket = secrets.token_urlsafe(32)
+            self._backup_ticket_until = monotonic() + 60
+            return self._backup_ticket
+
+    def consume_backup_ticket(self, supplied):
+        with self._backup_ticket_lock:
+            valid = (isinstance(supplied, str) and self._backup_ticket is not None
+                     and monotonic() <= self._backup_ticket_until
+                     and secrets.compare_digest(supplied, self._backup_ticket))
+            if valid:
+                self._backup_ticket = None  # replay and cross-site GET requests cannot download
+                self._backup_ticket_until = 0.0
+            return valid
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -817,7 +839,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200,startup.set_enabled(data.get("enabled")))
             if method=="GET" and path=="/api/storage/status":
                 return self.reply(200,self.server.store.storage_status())
+            if method=="POST" and path=="/api/storage/backup-ticket":
+                self.request_json()
+                return self.reply(200,{"ticket":self.server.issue_backup_ticket()})
             if method=="GET" and path=="/api/storage/backup":
+                tickets = parse_qs(urlparse(self.path).query).get("ticket", [])
+                if len(tickets)!=1 or not self.server.consume_backup_ticket(tickets[0]):
+                    return self.reply(403,{"error":"请从 FolderHub 设置页重新点击完整备份"})
                 filename = self.server.store.make_portable_backup()
                 try:
                     return self.reply_download(filename)

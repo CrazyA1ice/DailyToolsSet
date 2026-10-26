@@ -85,8 +85,24 @@ class PortableBackupTests(unittest.TestCase):
         code, content_type, body = get('/api/storage/status')
         self.assertEqual(code,200)
         self.assertEqual(json.loads(body)['active_modules'],1)
-        code, content_type, body = get('/api/storage/backup')
+        self.assertEqual(get('/api/storage/backup')[0],403)
+        unauthorized=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=6)
+        unauthorized.request('POST','/api/storage/backup-ticket',body='{}',headers={
+            'Host':f'127.0.0.1:{server.server_port}', 'Content-Type':'application/json'})
+        result=unauthorized.getresponse()
+        self.assertEqual(result.status,403)
+        result.read();unauthorized.close()
+        conn = http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=6)
+        conn.request('POST','/api/storage/backup-ticket',body='{}',headers={
+            'Host':f'127.0.0.1:{server.server_port}',
+            'Content-Type':'application/json','X-FolderHub-Token':server.token})
+        resp=conn.getresponse()
+        self.assertEqual(resp.status,200)
+        ticket=json.loads(resp.read())['ticket']
+        conn.close()
+        code, content_type, body = get('/api/storage/backup?ticket='+ticket)
         self.assertEqual((code,content_type),(200,'application/zip'))
+        self.assertEqual(get('/api/storage/backup?ticket='+ticket)[0],403)
         with zipfile.ZipFile(io.BytesIO(body)) as z:
             self.assertIn('data/folderhub.db',z.namelist())
         self.assertFalse(list((self.root/'data').glob('.backup-*')))

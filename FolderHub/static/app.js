@@ -652,10 +652,16 @@ async function refreshStorage(){
       "数据检查正常。完整 ZIP 包含 SQLite、已关联封面和回收站封面（不包含未引用图片）。";
   }catch(e){metrics.textContent="无法检查数据状态";warning.textContent=e.message;}
 }
-function downloadPortableBackup(){
-  // Native navigation handles large ZIP files without a JS Blob copy.
-  if($("#storageBackup").disabled)return;
-  window.location.assign("/api/storage/backup");
+async function downloadPortableBackup(){
+  // A short-lived one-time token prevents cross-site pages from forcing heavy ZIP creation.
+  const button=$("#storageBackup");
+  if(button.disabled)return;
+  button.disabled=true;
+  try{
+    const auth=await mutate("POST","/api/storage/backup-ticket");
+    window.location.assign(`/api/storage/backup?ticket=${encodeURIComponent(auth.ticket)}`);
+  }catch(e){toast("备份下载失败："+e.message,true)}
+  finally{setTimeout(()=>{button.disabled=false},1800)}
 }
 function openSettings(){
   renderThemeOptions();
