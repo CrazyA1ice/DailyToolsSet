@@ -459,3 +459,11 @@ html[data-cover-fit="contain"] .cover-preview img{object-fit:contain}
  border-radius:7px;padding:6px 11px;white-space:nowrap;font-weight:700}
 .toast-action:hover{background:#ffffff42}
 @media(max-width:760px){.trash-card{flex-wrap:wrap;padding:15px}.trash-card-actions{width:100%;justify-content:flex-end}}
+
+/* V2.1: compact local storage health panel (no homepage clutter). */
+.storage-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0 18px}
+.storage-metric{min-width:0;padding:13px;border:1px solid var(--line);background:var(--surface-soft);border-radius:10px;display:flex;flex-direction:column;gap:4px}
+.storage-metric strong{font-size:1.4rem;line-height:1.15;font-weight:750;color:var(--text)}
+.storage-metric span{font-size:.83rem;color:var(--muted)}
+.storage-actions{display:flex;align-items:center;flex-wrap:wrap;gap:9px}
+@media(max-width:640px){.storage-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.settings-tabs button{min-width:0;flex:1;padding:8px 5px;font-size:.82rem}}

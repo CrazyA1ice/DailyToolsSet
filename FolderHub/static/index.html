@@ -54,7 +54,7 @@
 <div id="settingsLayer" class="dialog-layer hidden" role="presentation">
   <div class="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="dialog-header"><div><div class="eyebrow">PERSONALIZE YOUR SPACE</div><h2 id="settingsTitle">外观与启动设置</h2><p class="settings-subtitle">打造属于你的本地文件导航首页</p></div><button id="settingsClose" class="icon-button" title="关闭设置" aria-label="关闭设置">✕</button></div>
-    <div class="settings-tabs" role="tablist" aria-label="设置类别"><button type="button" role="tab" id="settingsTabAppearance" data-settings-tab="appearance" aria-controls="settingsPanelAppearance" aria-selected="true">外观与布局</button><button type="button" role="tab" id="settingsTabLaunch" data-settings-tab="launch" aria-controls="settingsPanelLaunch" aria-selected="false">启动与首页</button></div>
+    <div class="settings-tabs" role="tablist" aria-label="设置类别"><button type="button" role="tab" id="settingsTabAppearance" data-settings-tab="appearance" aria-controls="settingsPanelAppearance" aria-selected="true">外观与布局</button><button type="button" role="tab" id="settingsTabLaunch" data-settings-tab="launch" aria-controls="settingsPanelLaunch" aria-selected="false">启动与首页</button><button type="button" role="tab" id="settingsTabStorage" data-settings-tab="storage" aria-controls="settingsPanelStorage" aria-selected="false">数据与备份</button></div>
     <div id="settingsPanelAppearance" class="settings-page" data-settings-page="appearance" role="tabpanel" aria-labelledby="settingsTabAppearance">
     <section class="settings-section"><div class="setting-heading"><h3>🎨 主题换肤</h3><p>选中的外观会自动保存在此浏览器，下次打开继续使用。</p></div><div class="theme-grid" id="themeOptions" role="group" aria-label="选择主题"></div></section>
     <section class="settings-section"><div class="setting-heading"><h3>布局与显示</h3><p>修改后即时生效，并保存在当前浏览器。适合不同分辨率的桌面屏幕。</p></div>
@@ -82,6 +82,15 @@
       <div class="homepage-row"><code id="homepageUrl">http://127.0.0.1:8765/</code><button type="button" class="outline-btn" id="copyHomepage">复制地址</button></div>
       <p class="settings-note">打开文件夹后会尝试把资源管理器窗口提升到浏览器前方，但 Windows 焦点保护机制可能限制这一操作。</p><p class="settings-note">Chrome：设置 → 启动时 → 打开特定网页；Edge：设置 → 开始、主页和新建标签页。初次登录时若显示无法连接，稍后刷新页面即可。</p>
     </section>
+    </div>
+    <div id="settingsPanelStorage" class="settings-page hidden" data-settings-page="storage" role="tabpanel" aria-labelledby="settingsTabStorage">
+      <section class="settings-section">
+        <div class="setting-heading"><h3>📦 本地数据健康状态</h3><p>只检查 FolderHub 运行数据，不扫描你绑定的真实文件夹。</p></div>
+        <div class="storage-metrics" id="storageMetrics" aria-live="polite"><p>选择「数据与备份」后开始检查。</p></div>
+        <div class="storage-actions"><button id="storageRefresh" type="button" class="outline-btn">重新检查</button><button id="storageBackup" type="button" class="primary-btn" disabled>下载完整 ZIP 备份</button></div>
+        <p id="storageWarning" class="settings-note" role="status">完整备份包含 data/folderhub.db 与全部正在使用及回收站引用的图片。</p>
+        <p class="settings-note">下载文件请妥善保存在项目目录之外。它包含你的本机路径、模块、封面和回收站内容，不要上传到公开 GitHub。恢复前需退出 FolderHub 并备份当前 data/、uploads/，再解压覆盖。</p>
+      </section>
     </div>
     <div class="dialog-footer"><button id="settingsDone" type="button" class="primary-btn">完成设置</button></div>
   </div>

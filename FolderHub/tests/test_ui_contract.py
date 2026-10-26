@@ -92,6 +92,17 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('data-cover-fit="contain"', self.css)
         self.assertIn('data-cover-height="tall"', self.css)
 
+    def test_portable_backup_settings_controls(self):
+        for control in ('settingsTabStorage', 'settingsPanelStorage', 'storageMetrics',
+                        'storageRefresh', 'storageBackup', 'storageWarning'):
+            self.assertIn(f'id="{control}"', self.html)
+            self.assertIn(control, self.js)
+        self.assertIn('function refreshStorage()', self.js)
+        self.assertIn('function downloadPortableBackup()', self.js)
+        self.assertIn('/api/storage/status', self.js)
+        self.assertIn('/api/storage/backup', self.js)
+        self.assertIn('.storage-metrics', self.css)
+
     def test_customization_options_and_persistence(self):
         for pref in ("font", "density", "sidebar", "columns", "accent", "coverHeight", "coverFit"):
             self.assertIn(f'data-pref="{pref}"', self.html)

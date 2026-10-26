@@ -620,7 +620,8 @@ async function refreshStartup(){
   } catch(e) {label.textContent="无法读取启动项："+e.message}
 }
 function selectSettingsTab(tab){
-  const current=tab==="launch"?"launch":"appearance";
+  const current=["launch","appearance","storage"].includes(tab)?tab:"appearance";
+  if(current==="storage")refreshStorage();
   document.querySelectorAll("[data-settings-tab]").forEach(button=>{
     const selected=button.dataset.settingsTab===current;
     button.classList.toggle("selected",selected);
@@ -630,6 +631,31 @@ function selectSettingsTab(tab){
     panel.classList.toggle("hidden",panel.dataset.settingsPage!==current);
   });
   $(".settings-dialog").scrollTop=0;
+}
+async function refreshStorage(){
+  const metrics=$("#storageMetrics"), backup=$("#storageBackup"), warning=$("#storageWarning");
+  backup.disabled=true;
+  metrics.textContent="正在检查本地数据...";
+  try{
+    const info=await api("/api/storage/status");
+    const labels=[
+      ["活动模块",info.active_modules],
+      ["回收站批次",info.trash_batches],
+      ["引用的封面",info.cover_files],
+      ["缺失封面",info.missing_covers],
+      ["未引用图片",info.unused_covers]
+    ];
+    metrics.innerHTML=labels.map(([label,value])=>`<div class="storage-metric"><strong>${Number(value)||0}</strong><span>${label}</span></div>`).join("");
+    backup.disabled=!info.backup_ready;
+    warning.textContent=info.missing_covers?
+      `有 ${info.missing_covers} 个封面文件缺失。为避免生成不完整备份，已暂时禁用完整备份，请先找回 uploads/ 中的图片。`:
+      "数据检查正常。完整 ZIP 包含 SQLite、已关联封面和回收站封面（不包含未引用图片）。";
+  }catch(e){metrics.textContent="无法检查数据状态";warning.textContent=e.message;}
+}
+function downloadPortableBackup(){
+  // Native navigation handles large ZIP files without a JS Blob copy.
+  if($("#storageBackup").disabled)return;
+  window.location.assign("/api/storage/backup");
 }
 function openSettings(){
   renderThemeOptions();
@@ -713,6 +739,8 @@ function bind(){
   $("#sidebarToggle").addEventListener("click",()=>{preferences.sidebarCollapsed=!preferences.sidebarCollapsed;savePreferences()});
   $("#startupToggle").addEventListener("change",e=>changeStartup(e.target.checked));
   $("#copyHomepage").addEventListener("click",copyHomepage);
+  $("#storageRefresh").addEventListener("click",refreshStorage);
+  $("#storageBackup").addEventListener("click",downloadPortableBackup);
   $("#importFile").addEventListener("change",async e=>{await restoreBackup(e.target.files[0]);e.target.value=""});
   $("#entryForm").addEventListener("submit",submitDialog);
   $("#entryType").addEventListener("change",updateEntryType);

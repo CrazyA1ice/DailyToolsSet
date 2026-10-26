@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import zipfile
 import base64
 import binascii
 from contextlib import contextmanager
@@ -293,6 +294,79 @@ class Store:
                 if path.is_file() and IMAGE_FILE_RE.fullmatch("uploads/" + path.name):
                     if "uploads/" + path.name not in referenced:
                         path.unlink(missing_ok=True)
+
+    def storage_status(self):
+        """Read-only inventory of the portable database and its referenced covers."""
+        with self._image_lock:
+            with self.connect() as db:
+                active = db.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+                trash = db.execute("SELECT COUNT(*) FROM trash_batches").fetchone()[0]
+                refs = {r[0] for r in db.execute("SELECT image_path FROM node_images")}
+                refs.update(r[0] for r in db.execute(
+                    "SELECT image_path FROM trash_nodes WHERE image_path IS NOT NULL"))
+            missing = 0
+            for relative in refs:
+                try:
+                    if not self._image_file(relative).is_file():
+                        missing += 1
+                except UserError:
+                    missing += 1
+            unused = sum(1 for f in self.uploads_dir.iterdir()
+                         if f.is_file() and IMAGE_FILE_RE.fullmatch("uploads/" + f.name)
+                         and "uploads/" + f.name not in refs)
+            return {"active_modules": active, "trash_batches": trash,
+                    "cover_files": len(refs), "missing_covers": missing,
+                    "unused_covers": unused, "backup_ready": missing == 0}
+
+    def make_portable_backup(self):
+        """Build a complete consistent SQLite + cover ZIP; caller removes returned temp path.
+
+        SQLite's backup API makes a coherent database snapshot even in WAL mode.
+        Hold the cover lock until all referenced assets are packed, preventing
+        concurrent cover replacement/pruning during the backup.
+        """
+        with self._image_lock:
+            db_temp = None
+            zip_temp = None
+            try:
+                fd, name = tempfile.mkstemp(dir=self.db_path.parent, prefix=".backup-db-", suffix=".db")
+                os.close(fd)
+                db_temp = Path(name)
+                with self.connect() as source, sqlite3.connect(db_temp) as target:
+                    source.backup(target)
+                with sqlite3.connect(db_temp) as snapshot:
+                    refs = {row[0] for row in snapshot.execute("SELECT image_path FROM node_images")}
+                    refs.update(row[0] for row in snapshot.execute(
+                        "SELECT image_path FROM trash_nodes WHERE image_path IS NOT NULL"))
+                    if snapshot.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                        raise UserError("数据库完整性检查未通过，已取消完整备份")
+                covers = []
+                for relative in sorted(refs):
+                    path = self._image_file(relative)
+                    if not path.is_file():
+                        raise UserError("有封面文件丢失，请先检查 data/ 和 uploads/，未生成不完整的备份")
+                    covers.append((relative, path))
+                fd, name = tempfile.mkstemp(dir=self.db_path.parent, prefix=".backup-zip-", suffix=".zip")
+                os.close(fd)
+                zip_temp = Path(name)
+                with zipfile.ZipFile(zip_temp, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+                    archive.write(db_temp, 'data/folderhub.db')
+                    for relative, path in covers:
+                        archive.write(path, relative)
+                    archive.writestr('README-RESTORE.txt',
+                        'FolderHub complete portable backup.\n'
+                        'Stop FolderHub before restoring.\n'
+                        'Extract the data/ and uploads/ folders into FolderHub/.\n'
+                        'Make a copy of existing data/ and uploads/ BEFORE replacing them.\n'
+                        'Folder paths stored in the database may not exist on another PC.\n')
+                return zip_temp
+            except Exception:
+                if zip_temp is not None:
+                    zip_temp.unlink(missing_ok=True)
+                raise
+            finally:
+                if db_temp is not None:
+                    db_temp.unlink(missing_ok=True)
 
     @contextmanager
     def connect(self):
@@ -684,6 +758,20 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def reply_download(self, source_path):
+        """Stream a temporary ZIP to the browser without loading it all into RAM."""
+        source_path = Path(source_path)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", 'attachment; filename="folderhub-portable-backup.zip"')
+        self.send_header("Content-Length", str(source_path.stat().st_size))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Frame-Options", "DENY")
+        self.end_headers()
+        with source_path.open("rb") as source:
+            shutil.copyfileobj(source, self.wfile, length=1024 * 1024)
+
     def check_host(self):
         host = self.headers.get("Host", "")
         return host in (f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}")
@@ -727,6 +815,14 @@ class Handler(BaseHTTPRequestHandler):
             if method=="POST" and path=="/api/startup":
                 data=self.request_json()
                 return self.reply(200,startup.set_enabled(data.get("enabled")))
+            if method=="GET" and path=="/api/storage/status":
+                return self.reply(200,self.server.store.storage_status())
+            if method=="GET" and path=="/api/storage/backup":
+                filename = self.server.store.make_portable_backup()
+                try:
+                    return self.reply_download(filename)
+                finally:
+                    filename.unlink(missing_ok=True)
             if method=="GET" and path=="/api/nodes":
                 return self.reply(200,{"nodes":self.server.store.all()})
             if method=="GET" and path=="/api/trash":
