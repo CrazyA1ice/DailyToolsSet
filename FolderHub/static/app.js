@@ -61,7 +61,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {openingIds:new Set(),nodes:[],trash:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+const state = {openingIds:new Set(),nodes:[],trash:[],recent:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
 // The server is authoritative. localStorage is read ONLY to migrate a legacy browser once.
 let initialExpanded=null;
 let projectSettingsReady=false;
@@ -158,8 +158,8 @@ function expandLineage(id){
   saveTreeState();
 }
 async function refresh(){
-  const [data,bin]=await Promise.all([api("/api/nodes"),api("/api/trash")]);
-  state.nodes=data.nodes;state.trash=bin.items;
+  const [data,bin,usage]=await Promise.all([api("/api/nodes"),api("/api/trash"),api("/api/recent")]);
+  state.nodes=data.nodes;state.trash=bin.items;state.recent=usage.items;
   if(!state.treeInitialized){
     const saved=initialExpanded;
     state.expanded=new Set(Array.isArray(saved)?saved.filter(id=>Number.isInteger(id)):children(null).map(n=>n.id));
@@ -199,6 +199,7 @@ function renderNav(){
   const roots=children(null), fav=state.nodes.filter(n=>n.favorite);
   $("#rootCount").textContent=roots.length;$("#favoriteCount").textContent=fav.length;
   $("#trashCount").textContent=state.trash.length;
+  $("#recentCount").textContent=state.recent.length;
   document.querySelectorAll("#specialNav [data-view]").forEach(el=>el.classList.toggle("active",state.view===el.dataset.view));
   const walk=(nodes) => nodes.map(n=>{
     const sub=children(n.id), expand=sub.length>0 && state.expanded.has(n.id), isLeaf=n.node_type==="leaf";
@@ -222,6 +223,7 @@ function renderCrumb(){
     $("#breadcrumb").innerHTML=bits.join("");return;
   }
   if(state.view==="favorites") bits.push(`<span>›</span><strong>我的收藏</strong>`);
+  if(state.view==="recent") bits.push(`<span>›</span><strong>最近使用</strong>`);
   if(state.view==="trash") bits.push(`<span>›</span><strong>回收站</strong>`);
   if(state.view==="node"){
     for(const n of ancestors(state.selected)){
@@ -235,6 +237,9 @@ function card(n,reorderable=false){
   const linked=!!n.folder_path;
   const leaf=n.node_type==="leaf";
   const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
+  const usage=state.view==="recent" && !state.search ? state.recent.find(item=>item.node_id===n.id) : null;
+  const lastUsed=usage?new Date(usage.last_opened_at):null;
+  const recentCaption=usage?`<div class="entry-lineage">最近打开：${h(lastUsed && !Number.isNaN(lastUsed.getTime()) ? lastUsed.toLocaleString("zh-CN") : "未知时间")} · 累计 ${Number(usage.open_count)||0} 次</div>`:"";
   const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
   return `<article class="entry-card ${leaf?"is-leaf":"is-container"} ${state.openingIds.has(n.id)?"is-opening":""} ${state.selectedIds.has(n.id)?"is-selected":""}" data-id="${n.id}" tabindex="0" aria-label="${h(n.title)}，右键打开快捷菜单">
     <div class="card-cover tone-${n.id%6} ${n.has_image?'with-image':'with-icon'}" aria-hidden="true">
@@ -255,6 +260,7 @@ function card(n,reorderable=false){
       <strong>${h(n.title)}</strong><span class="type-chip ${n.node_type}">${TYPE_LABEL[n.node_type]||'模块'}</span>
       <span class="path" title="${h(n.folder_path||lineage)}">${h(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`))}</span></button>
     ${state.search?`<div class="entry-lineage" title="${h(lineage)}">⌁ ${h(lineage)}</div>`:''}
+    ${recentCaption}
     <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?'● 文件夹入口':`${childCount} 个子模块`}</span>
       <div class="card-links">${!leaf?`<button data-action="enter" data-id="${n.id}">进入 ›</button>`:''}
         ${linked?`<button data-action="open" data-id="${n.id}">打开 ↗</button>`:''}
@@ -296,7 +302,7 @@ function render(){
   if(state.view==="node" && !byId(state.selected)){state.view="all";state.selected=null}
   renderNav();renderCrumb();
   const trashView=state.view==="trash"&&!state.search.trim();
-  $("#newBtn").hidden=trashView;
+  $("#newBtn").hidden=trashView || (state.view==="recent"&&!state.search.trim());
   $("#selectModeBtn").hidden=trashView;
   if(trashView){
     state.visibleIds=[];
@@ -314,6 +320,10 @@ function render(){
   const searching=state.search.trim();
   if(searching){display=searchAll(searching);sectionTitle="全局搜索结果";}
   else if(state.view==="favorites"){display=sorted(state.nodes.filter(n=>n.favorite));sectionTitle="常用入口";}
+  else if(state.view==="recent"){
+    display=state.recent.map(item=>byId(item.node_id)).filter(Boolean);
+    sectionTitle="最近打开的文件夹";
+  }
   else if(state.view==="node"){
     const node=byId(state.selected);
     display=node.node_type==="leaf"?[node]:children(state.selected);
@@ -321,16 +331,24 @@ function render(){
   } else{display=children(null);sectionTitle="根模块";}
   $("#sectionHeading").hidden=state.view==="all"&&!searching;
   $("#sectionTitle").textContent=sectionTitle;
-  $("#sectionMeta").textContent=`共 ${display.length} 个项目 · ${searching?'搜索覆盖整个目录树，结果显示完整所属层级':'叶子模块直接打开文件资源管理器'}`;
+  $("#sectionMeta").textContent=state.view==="recent"&&!searching?
+    "按最近打开时间排列 · 只记录通过 FolderHub 成功打开的文件夹":
+    `共 ${display.length} 个项目 · ${searching?'搜索覆盖整个目录树，结果显示完整所属层级':'叶子模块直接打开文件资源管理器'}`;
   const canAddChild=state.view==="node"&&!searching&&byId(state.selected)?.node_type!=="leaf";
   $("#newBtnText").textContent=canAddChild?"新建子模块":"新建根模块";
   $("#searchHint").textContent=searching?`${display.length} 项结果`:"Ctrl K";
-  $("#sectionOperations").innerHTML=state.view==="node"&&!searching?`<button data-action="edit-current">编辑当前模块</button>`:"";
+  $("#sectionOperations").innerHTML=state.view==="node"&&!searching?
+    `<button data-action="edit-current">编辑当前模块</button>`:
+    state.view==="recent"&&!searching&&state.recent.length?
+      '<button type="button" data-action="clear-recent" title="只清除访问记录，不删除导航模块或实际文件夹">清空访问记录</button>':"";
   $("#entries").className="entries"+(state.layout==="list"?" list":"");
   const reorderable=!state.selectMode && !searching && (state.view==="all" || (state.view==="node" && byId(state.selected)?.node_type!=="leaf"));
   state.visibleIds=display.map(n=>n.id);
   $("#entries").classList.toggle("selection-mode",state.selectMode);
-  $("#entries").innerHTML=display.length?display.map(n=>card(n,reorderable)).join(""):emptyView();
+  $("#entries").innerHTML=display.length?display.map(n=>card(n,reorderable)).join(""):
+    state.view==="recent"&&!searching?
+      '<div class="empty-state"><div class="empty-art">◷</div><h3>还没有最近访问记录</h3><p>通过 FolderHub 打开文件夹后，会自动显示在这里。</p></div>':
+      emptyView();
   updateBatchBar();
 }
 
@@ -511,6 +529,7 @@ async function openFolder(id){
   try{
     await mutate("POST",`/api/nodes/${id}/open`);
     toast("已向 Windows 资源管理器发送打开指令，并尝试将窗口置前");
+    try{state.recent=(await api("/api/recent")).items}catch(_){/* opening succeeded even if history refresh fails */}
   }catch(e){toast(e.message,true)}
   finally{state.openingIds.delete(id);render()}
 }
@@ -528,6 +547,13 @@ async function favoriteNode(id){
   try{await mutate("PATCH",`/api/nodes/${id}`,{favorite:!n.favorite});await refresh()}
   catch(e){toast(e.message,true)}
 }
+async function clearRecentHistory(){
+  if(!confirm("确定清空最近使用记录吗？\\n\\n只清除访问时间和次数，不会删除任何模块或电脑中的文件夹。"))return;
+  try{
+    const result=await mutate("DELETE","/api/recent",{});
+    state.recent=[];render();toast(`已清空 ${result.cleared} 条访问记录`);
+  }catch(e){toast("清空失败："+e.message,true)}
+}
 async function act(action,id){
   switch(action){
     case "primary":{if(state.selectMode){toggleSelected(id);break}const n=byId(id);if(n?.node_type==="leaf")await openFolder(id);else setView("node",id);break}
@@ -541,6 +567,7 @@ async function act(action,id){
     case "favorite":await favoriteNode(id);break;
     case "empty-create":editDialog();break;
     case "edit-current":editDialog(state.selected);break;
+    case "clear-recent":await clearRecentHistory();break;
   }
 }
 // Bulk selection is limited to the current visible list, including search results.

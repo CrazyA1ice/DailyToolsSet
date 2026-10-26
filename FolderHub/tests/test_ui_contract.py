@@ -117,6 +117,15 @@ class AdminUiContractTests(unittest.TestCase):
             self.assertIn(endpoint, self.js)
         self.assertIn('.path-results', self.css)
 
+    def test_recent_usage_nav_and_controls(self):
+        self.assertIn('data-view="recent"',self.html)
+        self.assertIn('id="recentCount"',self.html)
+        self.assertIn('"/api/recent"',self.js)
+        self.assertIn('function clearRecentHistory()',self.js)
+        self.assertIn('data-action="clear-recent"',self.js)
+        self.assertIn('state.recent.map(item=>byId(item.node_id)).filter(Boolean)',self.js)
+        self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)

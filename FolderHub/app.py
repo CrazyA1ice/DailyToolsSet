@@ -173,6 +173,12 @@ class Store:
                     updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent_id,sort_order,id);
+                CREATE TABLE IF NOT EXISTS node_visits (
+                    node_id INTEGER PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+                    open_count INTEGER NOT NULL DEFAULT 0,
+                    last_opened_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_node_visits_time ON node_visits(last_opened_at DESC);
                 CREATE TABLE IF NOT EXISTS node_images (
                     node_id INTEGER PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
                     mime_type TEXT NOT NULL,
@@ -385,6 +391,43 @@ class Store:
                 yield db
         finally:
             db.close()
+
+    def recent(self, limit=30):
+        """Most recently opened linked folders. No original files are inspected."""
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise UserError("最近使用记录数量无效")
+        with self.connect() as db:
+            return [dict(row) for row in db.execute("""
+                SELECT v.node_id, v.open_count, v.last_opened_at
+                FROM node_visits AS v
+                JOIN nodes AS n ON n.id = v.node_id
+                WHERE n.folder_path IS NOT NULL AND n.folder_path != ''
+                ORDER BY v.last_opened_at DESC, v.node_id DESC
+                LIMIT ?""", (limit,))]
+
+    def record_open(self, node_id):
+        """Record only successful Explorer launches; deleted nodes cascade automatically."""
+        with self.connect() as db:
+            self.require(db, node_id)
+            db.execute("""
+                INSERT INTO node_visits(node_id,open_count,last_opened_at)
+                VALUES(?,1,?)
+                ON CONFLICT(node_id) DO UPDATE SET
+                    open_count = MIN(node_visits.open_count + 1, 2147483647),
+                    last_opened_at = excluded.last_opened_at
+            """, (node_id, datetime.now(timezone.utc).isoformat(timespec="microseconds")))
+            # Bound history size even when thousands of distinct folders are opened.
+            db.execute("""
+                DELETE FROM node_visits WHERE node_id IN (
+                    SELECT node_id FROM node_visits
+                    ORDER BY last_opened_at DESC, node_id DESC LIMIT -1 OFFSET 200
+                )""")
+
+    def clear_recent(self):
+        """Clear usage history only; never alter modules or real folders."""
+        with self.connect() as db:
+            result = db.execute("DELETE FROM node_visits")
+        return {"ok": True, "cleared": result.rowcount}
 
     def all(self):
         with self.connect() as db:
@@ -867,6 +910,13 @@ class Handler(BaseHTTPRequestHandler):
                     filename.unlink(missing_ok=True)
             if method=="GET" and path=="/api/nodes":
                 return self.reply(200,{"nodes":self.server.store.all()})
+            if path=="/api/recent":
+                if method=="GET":
+                    return self.reply(200,{"items":self.server.store.recent()})
+                if method=="DELETE":
+                    self.request_json()
+                    return self.reply(200,self.server.store.clear_recent())
+                return self.reply(405,{"error":"不支持的请求方法"})
             if method=="GET" and path=="/api/trash":
                 return self.reply(200,{"items":self.server.store.trash_list()})
             if path.startswith("/api/trash/"):
@@ -936,6 +986,12 @@ class Handler(BaseHTTPRequestHandler):
                     if not folder:
                         raise UserError("这个模块尚未绑定文件夹")
                     open_in_explorer(folder)
+                    # The folder was handed to Explorer; a history-write failure must
+                    # not incorrectly tell the user that opening itself failed.
+                    try:
+                        self.server.store.record_open(node_id)
+                    except sqlite3.Error as exc:
+                        print("[FolderHub] usage history could not be saved:",repr(exc),file=sys.stderr)
                     return self.reply(200,{"ok":True})
             if method=="GET" and path in ("/","/index.html","/app.js","/styles.css","/favicon.svg"):
                 name="index.html" if path=="/" else path[1:]

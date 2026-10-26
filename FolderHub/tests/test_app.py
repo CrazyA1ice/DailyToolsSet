@@ -528,3 +528,69 @@ class TrashHttpTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class RecentUsageTests(unittest.TestCase):
+    """Recent folders belong to portable SQLite and never manipulate disk paths."""
+
+    def setUp(self):
+        folder=tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.store=app.Store(Path(folder.name)/"data"/"folderhub.db")
+
+    def test_recent_order_counter_and_delete_cascade(self):
+        root=self.store.create({"title":"根","node_type":"root"})
+        a=self.store.create({"title":"A","node_type":"leaf","parent_id":root,"folder_path":r"D:\\A"})
+        b=self.store.create({"title":"B","node_type":"leaf","parent_id":root,"folder_path":r"D:\\B"})
+        self.assertEqual(self.store.recent(),[])
+        self.store.record_open(a)
+        self.store.record_open(b)
+        self.store.record_open(a)
+        self.assertEqual([v["node_id"] for v in self.store.recent()],[a,b])
+        self.assertEqual(self.store.recent()[0]["open_count"],2)
+        self.assertEqual(len(self.store.recent(limit=1)),1)
+        self.store.delete(a)
+        self.assertEqual([v["node_id"] for v in self.store.recent()],[b])
+
+    def test_clear_is_navigation_safe_and_rejects_invalid_limits(self):
+        root=self.store.create({"title":"根","node_type":"root"})
+        leaf=self.store.create({"title":"叶","node_type":"leaf","parent_id":root,"folder_path":r"E:\\Research"})
+        self.store.record_open(leaf)
+        self.assertEqual(self.store.clear_recent(),{"ok":True,"cleared":1})
+        self.assertEqual(self.store.recent(),[])
+        self.assertEqual(len(self.store.all()),2)
+        for val in (True,0,-1,201,"20"):
+            with self.subTest(limit=val),self.assertRaises(app.UserError):self.store.recent(val)
+
+    def test_recent_survives_portable_copy_and_full_import_resets(self):
+        root=self.store.create({"title":"根","node_type":"root"})
+        leaf=self.store.create({"title":"资料","node_type":"leaf","parent_id":root,"folder_path":r"D:\\Docs"})
+        self.store.record_open(leaf)
+        folder=Path(self.store.db_path.parent)
+        moved=folder.parent/"moved.db"
+        with self.store.connect() as src, app.sqlite3.connect(moved) as target:
+            src.backup(target)
+        restored=app.Store(moved)
+        self.assertEqual(restored.recent()[0]["node_id"],leaf)
+        data=restored.export()
+        restored.import_backup(data)
+        self.assertEqual(restored.recent(),[], "Full JSON replacement resets history for reused node IDs")
+
+
+class RecentUsageHttpTests(HttpTests):
+    def test_open_success_only_and_recent_clear_security(self):
+        root=self.srv.store.create({"title":"根","node_type":"root"})
+        leaf=self.srv.store.create({"title":"入口","node_type":"leaf","parent_id":root,
+                                    "folder_path":str(self.srv.store.db_path.parent)})
+        url=f"/api/nodes/{leaf}/open"
+        with patch.object(app,"open_in_explorer",side_effect=app.UserError("无法打开")):
+            self.assertEqual(self.request("POST",url,{})[0],400)
+            self.assertEqual(self.request("GET","/api/recent")[1]["items"],[])
+        with patch.object(app,"open_in_explorer",return_value=None):
+            self.assertEqual(self.request("POST",url,{})[0],200)
+        self.assertEqual(self.request("GET","/api/recent")[1]["items"][0]["node_id"],leaf)
+        self.assertEqual(self.request("DELETE","/api/recent",{},token=False)[0],403)
+        self.assertEqual(self.request("DELETE","/api/recent",{},origin="https://evil.example")[0],403)
+        self.assertEqual(self.request("DELETE","/api/recent",{})[1]["cleared"],1)
+        self.assertEqual(len(self.srv.store.all()),2)
