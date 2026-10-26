@@ -101,7 +101,7 @@ class StoreTests(unittest.TestCase):
         migrated.update(1,{"title":"仍可改名"})
         with self.assertRaises(app.UserError):migrated.update(1,{"folder_path":r"D:\New"})
         backup=migrated.export()
-        self.assertEqual(backup["version"],2)
+        self.assertEqual(backup["version"],3)
         migrated.import_backup(backup)
         self.assertEqual([(n["id"],n["parent_id"],n["folder_path"],n["node_type"]) for n in migrated.all()],[(n["id"],n["parent_id"],n["folder_path"],n["node_type"]) for n in backup["nodes"]])
         legacy={"format":"FolderHub","version":1,"nodes":[{k:v for k,v in n.items() if k!="node_type"} for n in backup["nodes"]]}
@@ -120,6 +120,63 @@ class StoreTests(unittest.TestCase):
         bad["nodes"][1]["parent_id"]=leaf
         with self.assertRaises(app.UserError):self.store.import_backup(bad)
         self.assertEqual(self.store.export()["nodes"],backup["nodes"])
+
+
+class ImageStoreTests(unittest.TestCase):
+    PNG_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLdlwAAAABJRU5ErkJggg=="
+
+    def setUp(self):
+        tmp=tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store=app.Store(Path(tmp.name)/"images.db")
+        self.root=self.store.create({"title":"图像封面","node_type":"root","icon":"book"})
+
+    def test_image_create_fetch_delete_and_preset_icon(self):
+        self.store.save_image(self.root,self.PNG_URL)
+        self.assertTrue(self.store.all()[0]["has_image"])
+        self.assertEqual(self.store.all()[0]["icon"],"book")
+        mime,data=self.store.get_image(self.root)
+        self.assertEqual(mime,"image/png")
+        self.assertTrue(data.startswith(b"\x89PNG"))
+        self.store.update(self.root,{"title":"更新名称","icon":"code"})
+        self.assertEqual(self.store.all()[0]["icon"],"code")
+        self.assertTrue(self.store.all()[0]["has_image"])
+        self.store.remove_image(self.root)
+        self.assertFalse(self.store.all()[0]["has_image"])
+        self.assertIsNone(self.store.get_image(self.root))
+
+    def test_backup_includes_images_and_is_atomic(self):
+        self.store.save_image(self.root,self.PNG_URL)
+        backup=self.store.export()
+        self.assertEqual(backup["version"],3)
+        self.assertIn(str(self.root),backup["images"])
+        self.store.delete(self.root)
+        self.store.import_backup(backup)
+        self.assertEqual(self.store.export()["images"],backup["images"])
+        bad=json.loads(json.dumps(backup))
+        bad["images"][str(self.root)]["base64"]="not-base64!"
+        with self.assertRaises(app.UserError):self.store.import_backup(bad)
+        self.assertEqual(self.store.export()["images"],backup["images"])
+
+    def test_image_validation_rejects_unsafe_formats(self):
+        import base64
+        cases=["data:image/svg+xml;base64,"+base64.b64encode(b"<svg/>").decode(),
+               "data:image/png;base64,"+base64.b64encode(b"<script>").decode(),
+               "data:image/jpeg;base64,"+base64.b64encode(b"<svg>").decode(),
+               "data:image/png;base64,bad*content", "data:image/png;base64,"+"A"*3000000]
+        for value in cases:
+            with self.subTest(value=value[:30]),self.assertRaises(app.UserError):
+                self.store.save_image(self.root,value)
+        with self.assertRaises(app.UserError):self.store.create({"title":"图标","icon":"<svg>"})
+        self.assertFalse(self.store.all()[0]["has_image"])
+
+    def test_v2_backup_preserves_without_images(self):
+        backup=self.store.export()
+        backup["version"]=2
+        del backup["images"]
+        self.store.import_backup(backup)
+        self.assertEqual(self.store.all()[0]["title"],"图像封面")
+        self.assertFalse(self.store.all()[0]["has_image"])
 
 
 class HttpTests(unittest.TestCase):
@@ -161,6 +218,24 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.request("GET","/api/nodes")[1]["nodes"][0]["title"],"科研资料")
         self.assertEqual(self.request("DELETE",f"/api/nodes/{nid}")[0],200)
         self.assertFalse(self.request("GET","/api/nodes")[1]["nodes"])
+
+    def test_image_api_and_security(self):
+        url=ImageStoreTests.PNG_URL
+        root=self.srv.store.create({"title":"测试","node_type":"root"})
+        path=f"/api/nodes/{root}/image"
+        self.assertEqual(self.request("POST",path,{"data_url":url},token=False)[0],403)
+        self.assertEqual(self.request("POST",path,{"data_url":url})[0],200)
+        self.assertTrue(self.request("GET","/api/nodes")[1]["nodes"][0]["has_image"])
+        conn=http.client.HTTPConnection("127.0.0.1",self.srv.server_port,timeout=3)
+        conn.request("GET",path,headers={"Host":self.host})
+        response=conn.getresponse()
+        self.assertEqual(response.status,200)
+        self.assertEqual(response.getheader("Content-Type"),"image/png")
+        self.assertEqual(response.getheader("X-Content-Type-Options"),"nosniff")
+        self.assertTrue(response.read().startswith(b"\x89PNG"));conn.close()
+        self.assertEqual(self.request("DELETE",path,{},token=False)[0],403)
+        self.assertEqual(self.request("DELETE",path,{})[0],200)
+        self.assertEqual(self.request("GET",path)[0],404)
 
     def test_security(self):
         body={"title":"secret"}
