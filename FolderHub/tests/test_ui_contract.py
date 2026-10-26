@@ -28,7 +28,8 @@ class AdminUiContractTests(unittest.TestCase):
         parser = IdCollector()
         parser.feed(self.html)
         self.assertEqual(len(parser.ids), len(set(parser.ids)))
-        for control in ("sidebarToggle", "themeOptions", "resetAppearance", "sectionHeading",
+        for control in ("sidebarToggle", "themeOptions", "showCoversToggle", "resetAppearance", "sectionHeading",
+                        "entryIcon", "entryCoverFile", "pickCover", "removeCover", "entryCoverPreview",
                         "search", "entries", "treeNav", "newBtn", "entryForm"):
             self.assertIn(control, parser.ids)
             self.assertIn(control, self.js)
@@ -44,6 +45,14 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('display=searchAll(searching)', self.js)
         self.assertNotIn('showIntroToggle', self.js)
         self.assertNotIn('showMetricsToggle', self.js)
+
+    def test_root_only_home_and_custom_covers(self):
+        self.assertNotIn('class="summary"',self.html)
+        self.assertLess(self.html.index('id="search"'), self.html.index('class="content"'))
+        self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
+        self.assertIn('display=searchAll(searching)',self.js)
+        for piece in ('card-cover', 'cover-image','cover-emoji','showCovers','data-show-covers'):
+            self.assertIn(piece,self.js+self.css)
 
     def test_customization_options_and_persistence(self):
         for pref in ("font", "density", "sidebar", "columns", "accent"):
