@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.pytest_cache/
+folderhub.db
+folderhub.db-shm
+folderhub.db-wal
+backup*.json
+.DS_Store
