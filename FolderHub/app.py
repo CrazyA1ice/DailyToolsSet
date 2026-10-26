@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 from contextlib import contextmanager
 import json
 import ntpath
@@ -20,6 +22,10 @@ import explorer_window
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 MAX_REQUEST = 2 * 1024 * 1024
+MAX_IMAGE_BYTES = 2 * 1024 * 1024
+MAX_IMAGE_REQUEST = 3 * 1024 * 1024
+MAX_IMPORT_REQUEST = 32 * 1024 * 1024
+ALLOWED_ICONS = frozenset(("folder", "book", "code", "chart", "database", "image", "briefcase", "school", "music", "video", "archive", "star"))
 NODE_TYPES = ("root", "group", "leaf")
 
 
@@ -81,6 +87,48 @@ def validate_structure(node_type, parent, path, *, existing=None):
             raise UserError("根模块和普通模块仅用于分类，请在叶子模块关联文件夹")
 
 
+def validate_icon(value):
+    if not isinstance(value, str) or value not in ALLOWED_ICONS:
+        raise UserError("请选择支持的模块图标")
+    return value
+
+
+def decode_image(data_url):
+    """Decode an uploaded data URL, refusing SVG or mismatched MIME signatures."""
+    if not isinstance(data_url, str) or len(data_url) > MAX_IMAGE_REQUEST:
+        raise UserError("图片过大，单张图片不能超过 2 MB")
+    if ";base64," not in data_url:
+        raise UserError("图片必须是 PNG、JPG 或 WebP")
+    header, encoded = data_url.split(",", 1)
+    expected = {"data:image/png;base64": ("image/png", b"\\x89PNG\\r\\n\\x1a\\n"),
+                "data:image/jpeg;base64": ("image/jpeg", b"\\xff\\xd8\\xff"),
+                "data:image/webp;base64": ("image/webp", b"RIFF")}
+    if header not in expected or not encoded or len(encoded) > ((MAX_IMAGE_BYTES+2)//3)*4 + 4:
+        raise UserError("图片格式不支持或文件过大（支持 PNG/JPG/WebP，最多 2 MB）")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        raise UserError("图片编码无效")
+    if not raw or len(raw) > MAX_IMAGE_BYTES:
+        raise UserError("图片必须小于或等于 2 MB")
+    mime, signature = expected[header]
+    if not raw.startswith(signature) or (mime == "image/webp" and (len(raw) < 12 or raw[8:12] != b"WEBP")):
+        raise UserError("图片内容与文件格式不匹配")
+    if mime == "image/png" and (len(raw) < 24 or raw[12:16] != b"IHDR"):
+        raise UserError("PNG 图片文件不完整")
+    return mime, raw
+
+
+def encode_image(mime, raw):
+    return {"mime": mime, "base64": base64.b64encode(raw).decode("ascii")}
+
+
+def decode_backup_image(value):
+    if not isinstance(value, dict) or not isinstance(value.get("mime"), str) or not isinstance(value.get("base64"), str):
+        raise UserError("备份中的图片记录无效")
+    return decode_image(f"data:{value['mime']};base64,{value['base64']}")
+
+
 def validate_parent(value):
     if value is None or value == "":
         return None
@@ -101,14 +149,23 @@ class Store:
                     title TEXT NOT NULL,
                     folder_path TEXT,
                     node_type TEXT NOT NULL DEFAULT 'group',
+                    icon TEXT NOT NULL DEFAULT 'folder',
                     favorite INTEGER NOT NULL DEFAULT 0,
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent_id,sort_order,id);
+                CREATE TABLE IF NOT EXISTS node_images (
+                    node_id INTEGER PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+                    mime_type TEXT NOT NULL,
+                    image_data BLOB NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
             """)
             cols = {row["name"] for row in db.execute("PRAGMA table_info(nodes)")}
+            if "icon" not in cols:
+                db.execute("ALTER TABLE nodes ADD COLUMN icon TEXT NOT NULL DEFAULT 'folder'")
             if "node_type" not in cols:
                 db.execute("ALTER TABLE nodes ADD COLUMN node_type TEXT NOT NULL DEFAULT 'group'")
                 # Existing records may have category paths: keep every path untouched.
@@ -132,8 +189,10 @@ class Store:
 
     def all(self):
         with self.connect() as db:
-            rows = db.execute("SELECT * FROM nodes ORDER BY sort_order,id").fetchall()
-            return [dict(r) | {"favorite": bool(r["favorite"])} for r in rows]
+            rows = db.execute("""SELECT n.*, (i.node_id IS NOT NULL) AS has_image
+                FROM nodes n LEFT JOIN node_images i ON i.node_id = n.id
+                ORDER BY n.sort_order,n.id""").fetchall()
+            return [dict(r) | {"favorite": bool(r["favorite"]), "has_image": bool(r["has_image"])} for r in rows]
 
     @staticmethod
     def require(db, node_id):
@@ -165,13 +224,14 @@ class Store:
         path = validate_path(data.get("folder_path"))
         parent = validate_parent(data.get("parent_id"))
         node_type = validate_node_type(data.get("node_type", inferred_type(parent, path)))
+        icon = validate_icon(data.get("icon", "folder"))
         validate_structure(node_type, parent, path)
         stamp = now()
         with self.connect() as db:
             self.check_parent(db, None, parent)
             result = db.execute("""INSERT INTO nodes
-                (parent_id,title,folder_path,node_type,favorite,sort_order,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?)""", (parent,title,path,node_type,
+                (parent_id,title,folder_path,node_type,icon,favorite,sort_order,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?)""", (parent,title,path,node_type,icon,
                 int(bool(data.get("favorite",False))),self.next_order(db,parent),stamp,stamp))
             return result.lastrowid
 
@@ -182,6 +242,7 @@ class Store:
             path = validate_path(data.get("folder_path", original["folder_path"]))
             parent = validate_parent(data.get("parent_id", original["parent_id"]))
             node_type = validate_node_type(data.get("node_type", original["node_type"]))
+            icon = validate_icon(data.get("icon", original["icon"]))
             validate_structure(node_type, parent, path, existing=original)
             self.check_parent(db, node_id, parent)
             if node_type == "leaf" and db.execute(
@@ -190,13 +251,33 @@ class Store:
             favorite = bool(data.get("favorite", original["favorite"]))
             order = original["sort_order"] if parent == original["parent_id"] else self.next_order(db,parent)
             db.execute("""UPDATE nodes SET parent_id=?,title=?,folder_path=?,node_type=?,
-                favorite=?,sort_order=?,updated_at=? WHERE id=?""",
-                (parent,title,path,node_type,int(favorite),order,now(),node_id))
+                icon=?,favorite=?,sort_order=?,updated_at=? WHERE id=?""",
+                (parent,title,path,node_type,icon,int(favorite),order,now(),node_id))
 
     def delete(self, node_id):
         with self.connect() as db:
             self.require(db,node_id)
             db.execute("DELETE FROM nodes WHERE id=?",(node_id,))
+
+    def save_image(self, node_id, data_url):
+        mime, raw = decode_image(data_url)
+        with self.connect() as db:
+            self.require(db, node_id)
+            db.execute("""INSERT INTO node_images(node_id,mime_type,image_data,updated_at) VALUES (?,?,?,?)
+                ON CONFLICT(node_id) DO UPDATE SET mime_type=excluded.mime_type,
+                image_data=excluded.image_data,updated_at=excluded.updated_at""",(node_id,mime,raw,now()))
+            db.execute("UPDATE nodes SET updated_at=? WHERE id=?",(now(),node_id))
+
+    def remove_image(self, node_id):
+        with self.connect() as db:
+            self.require(db, node_id)
+            db.execute("DELETE FROM node_images WHERE node_id=?",(node_id,))
+            db.execute("UPDATE nodes SET updated_at=? WHERE id=?",(now(),node_id))
+
+    def get_image(self, node_id):
+        with self.connect() as db:
+            row=db.execute("SELECT mime_type,image_data FROM node_images WHERE node_id=?",(node_id,)).fetchone()
+            return (row["mime_type"], bytes(row["image_data"])) if row else None
 
     def order(self, parent_id, node_ids):
         parent_id = validate_parent(parent_id)
@@ -210,11 +291,14 @@ class Store:
                 db.execute("UPDATE nodes SET sort_order=?,updated_at=? WHERE id=?",(position,now(),node_id))
 
     def export(self):
-        return {"format":"FolderHub","version":2,"exported_at":now(),"nodes":self.all()}
+        with self.connect() as db:
+            images={str(row["node_id"]):encode_image(row["mime_type"],row["image_data"])
+                for row in db.execute("SELECT node_id,mime_type,image_data FROM node_images")}
+        return {"format":"FolderHub","version":3,"exported_at":now(),"nodes":self.all(),"images":images}
 
     def import_backup(self, payload):
         if (not isinstance(payload,dict) or payload.get("format")!="FolderHub"
-            or payload.get("version") not in (1,2) or not isinstance(payload.get("nodes"),list)):
+            or payload.get("version") not in (1,2,3) or not isinstance(payload.get("nodes"),list)):
             raise UserError("不是兼容的 FolderHub 备份文件")
         raw = payload["nodes"]
         if len(raw)>20000:
@@ -231,7 +315,8 @@ class Store:
                 "parent": parent, "title": validate_title(n.get("title")),
                 "path": validate_path(n.get("folder_path")),
                 "favorite": int(bool(n.get("favorite",False))), "order": order,
-                "type": n.get("node_type") if payload["version"]==2 else None
+                "type": n.get("node_type") if payload["version"] in (2,3) else None,
+                "icon": validate_icon(n.get("icon", "folder"))
             }
         child_parents = {n["parent"] for n in prepared.values() if n["parent"] is not None}
         for node_id, n in prepared.items():
@@ -255,6 +340,15 @@ class Store:
                 raise UserError("备份中叶子模块包含子模块")
             if n["parent"] is not None and prepared[n["parent"]]["type"]=="leaf":
                 raise UserError("备份中叶子模块不能作为上级")
+        backup_images={}
+        if payload["version"] == 3:
+            incoming=payload.get("images",{})
+            if not isinstance(incoming,dict) or len(incoming)>len(prepared):
+                raise UserError("备份图片列表无效")
+            for key,value in incoming.items():
+                if not isinstance(key,str) or not key.isascii() or not key.isdecimal() or int(key) not in prepared:
+                    raise UserError("备份图片引用了不存在的模块")
+                backup_images[int(key)] = decode_backup_image(value)
         with self.connect() as db:
             db.execute("DELETE FROM nodes")
             pending = dict(prepared)
@@ -263,13 +357,16 @@ class Store:
                 for node_id, n in list(pending.items()):
                     if n["parent"] is None or n["parent"] not in pending:
                         db.execute("""INSERT INTO nodes
-                            (id,parent_id,title,folder_path,node_type,favorite,sort_order,created_at,updated_at)
-                            VALUES (?,?,?,?,?,?,?,?,?)""", (node_id,n["parent"],n["title"],
-                            n["path"],n["type"],n["favorite"],n["order"],now(),now()))
+                            (id,parent_id,title,folder_path,node_type,icon,favorite,sort_order,created_at,updated_at)
+                            VALUES (?,?,?,?,?,?,?,?,?,?)""", (node_id,n["parent"],n["title"],
+                            n["path"],n["type"],n["icon"],n["favorite"],n["order"],now(),now()))
                         del pending[node_id]
                         progressed = True
                 if not progressed:
                     raise UserError("备份结构无效")
+            for node_id, (mime, raw) in backup_images.items():
+                db.execute("INSERT INTO node_images(node_id,mime_type,image_data,updated_at) VALUES (?,?,?,?)",
+                           (node_id,mime,raw,now()))
 
 
 def open_in_explorer(path):
@@ -337,14 +434,14 @@ class Handler(BaseHTTPRequestHandler):
                 return False
         return secrets.compare_digest(self.headers.get("X-FolderHub-Token", ""), self.server.token)
 
-    def request_json(self):
+    def request_json(self, limit=MAX_REQUEST):
         if self.headers.get("Content-Type","").split(";")[0].lower()!="application/json":
             raise UserError("请求必须是 JSON")
         try:
             length=int(self.headers.get("Content-Length","0"))
         except ValueError:
             raise UserError("请求长度无效")
-        if length<0 or length>MAX_REQUEST:
+        if length<0 or length>limit:
             raise UserError("请求数据过大")
         try:
             payload=json.loads(self.rfile.read(length))
@@ -380,7 +477,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.store.order(data.get("parent_id"),data.get("ids"))
                 return self.reply(200,{"ok":True})
             if method=="POST" and path=="/api/import":
-                self.server.store.import_backup(self.request_json())
+                self.server.store.import_backup(self.request_json(MAX_IMPORT_REQUEST))
                 return self.reply(200,{"ok":True})
             if method=="POST" and path=="/api/pick-folder":
                 self.request_json()
@@ -390,6 +487,19 @@ class Handler(BaseHTTPRequestHandler):
                 if len(pieces) not in (3,4) or not pieces[2].isdigit():
                     return self.reply(404,{"error":"未知接口"})
                 node_id=int(pieces[2])
+                if method=="GET" and len(pieces)==4 and pieces[3]=="image":
+                    img=self.server.store.get_image(node_id)
+                    if img is None:
+                        return self.reply(404,{"error":"没有设置模块图片"})
+                    return self.reply(200,img[1],content_type=img[0])
+                if method=="POST" and len(pieces)==4 and pieces[3]=="image":
+                    data=self.request_json(MAX_IMAGE_REQUEST)
+                    self.server.store.save_image(node_id,data.get("data_url"))
+                    return self.reply(200,{"ok":True})
+                if method=="DELETE" and len(pieces)==4 and pieces[3]=="image":
+                    self.request_json()
+                    self.server.store.remove_image(node_id)
+                    return self.reply(200,{"ok":True})
                 if method=="PATCH" and len(pieces)==3:
                     self.server.store.update(node_id,self.request_json())
                     return self.reply(200,{"ok":True})
