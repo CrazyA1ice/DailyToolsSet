@@ -168,3 +168,31 @@ html[data-theme="midnight"] .primary-btn {color:#101626}
   .intro h1 {font-size:25px}.intro {min-height:156px}
 }
 @media (prefers-reduced-motion:reduce) {*,*::before,*::after {transition-duration:0.01ms!important;animation-duration:0.01ms!important;scroll-behavior:auto!important}}
+
+/* V1.2: semantic, collapsible hierarchy and distinct node roles */
+.tree-nav {gap:1px;padding-right:2px;flex:1;min-height:96px;overscroll-behavior:contain}
+.tree-branch {min-width:0}
+.tree-row {display:flex;align-items:center;min-height:35px;min-width:0;border-radius:9px;gap:0}
+.tree-row:hover {background:var(--hover)}
+.tree-row.active {background:var(--hover)}
+.tree-row.active .tree-item {color:var(--accent);font-weight:750}
+.tree-row .tree-item {flex:1;min-width:0;min-height:35px;padding:0 8px 0 2px;gap:8px;background:transparent;color:var(--nav-text)}
+.tree-row .tree-item:hover {background:transparent}
+.tree-toggle,.tree-spacer {width:25px;min-width:25px;height:30px;display:grid;place-items:center;border:0;background:none;color:var(--muted);border-radius:7px}
+.tree-toggle:hover {background:rgba(var(--accent-rgb),.11);color:var(--accent)}
+.tree-chevron {font-size:19px;line-height:1;transition:transform .18s;display:block}
+.tree-chevron.is-open {transform:rotate(90deg)}
+.tree-children {margin-left:13px;padding-left:9px;border-left:1px solid var(--line)}
+.tree-leaf-mark {font-size:11px;margin-left:auto;color:var(--muted)}
+.type-chip {display:inline-block;margin-top:9px;padding:3px 7px;border-radius:6px;background:var(--subtle);color:var(--muted);font-size:10px;font-weight:650}
+.type-chip.root {background:var(--hover);color:var(--accent)}
+.type-chip.leaf {background:var(--icon-bg);color:var(--icon-text)}
+.card-primary .path {margin-top:8px}
+.entry-lineage {margin-top:9px;color:var(--muted);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#entryParentRow>label,#entryPathRow>label {display:block;margin-top:14px;margin-bottom:8px;color:var(--text);font-size:12px;font-weight:700}
+#entryParentRow select {width:100%;min-height:40px;border:1px solid var(--line);border-radius:9px;padding:0 10px;background:var(--input-bg);color:var(--text)}
+#entryTypeHelp {display:block;margin-top:6px}
+#entryPathRow .help-text {display:block;margin-top:7px}
+#entryPathRow input {min-width:0}
+.search-wrap:focus-within {z-index:2}
+@media (max-width:700px) {.tree-children {margin-left:8px;padding-left:6px}}
