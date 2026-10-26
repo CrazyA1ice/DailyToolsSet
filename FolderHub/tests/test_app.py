@@ -119,4 +119,71 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.request("POST",f"/api/nodes/{nid2}/open",{})[0],400)
 
 
-if __name__=="__main__":unittest.main()
+
+# Tests added in v1.1. Keep outside the original __main__ block so discovery can see them.
+import startup
+
+
+class FakeWinReg:
+    HKEY_CURRENT_USER = 1
+    KEY_READ = 2
+    KEY_SET_VALUE = 4
+    REG_SZ = 1
+
+    def __init__(self):
+        self.values = {}
+    def __enter__(self):return self
+    def __exit__(self, *_):pass
+    def CreateKeyEx(self, *args):return self
+    def OpenKey(self, *args):return self
+    def QueryValueEx(self, key, name):
+        if name not in self.values:raise FileNotFoundError(name)
+        return self.values[name], self.REG_SZ
+    def SetValueEx(self, key, name, reserved, typ, value):self.values[name]=value
+    def DeleteValue(self, key, name):
+        if name not in self.values:raise FileNotFoundError(name)
+        del self.values[name]
+
+
+class StartupTests(unittest.TestCase):
+    def test_command_quoting(self):
+        cmd = startup.command_for(Path(r"C:\Program Files\Python\pythonw.exe"), Path(r"D:\Work Space\FolderHub\app.py"))
+        self.assertIn('"C:\\Program Files\\Python\\pythonw.exe"',cmd)
+        self.assertIn('"D:\\Work Space\\FolderHub\\app.py"',cmd)
+        self.assertTrue(cmd.endswith('--no-browser'))
+
+    def test_toggle_is_explicit_and_reversible(self):
+        fake=FakeWinReg()
+        with patch.object(startup,'supported',return_value=True), patch.object(startup,'_winreg',return_value=fake), patch.object(startup,'launch_command',return_value='"C:\\pythonw.exe" "D:\\FolderHub\\app.py" --no-browser'):
+            self.assertFalse(startup.status()['enabled'])
+            self.assertTrue(startup.set_enabled(True)['enabled'])
+            self.assertIn(startup.VALUE_NAME,fake.values)
+            self.assertTrue(startup.set_enabled(False)['supported'])
+            self.assertFalse(startup.status()['enabled'])
+            self.assertNotIn(startup.VALUE_NAME,fake.values)
+            with self.assertRaises(startup.StartupError):startup.set_enabled(1)
+
+    def test_nonwindows_is_safe(self):
+        with patch.object(startup,'supported',return_value=False):
+            self.assertEqual(startup.status(),{'supported':False,'enabled':False})
+            with self.assertRaises(startup.StartupError):startup.set_enabled(True)
+
+    def test_startup_api_security_and_state(self):
+        tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup)
+        srv=app.FolderServer(('127.0.0.1',0),app.Store(Path(tmp.name)/'x.db'))
+        thread=threading.Thread(target=srv.serve_forever,daemon=True);thread.start()
+        self.addCleanup(srv.server_close);self.addCleanup(srv.shutdown)
+        conn=http.client.HTTPConnection('127.0.0.1',srv.server_port,timeout=3)
+        conn.request('POST','/api/startup',body='{"enabled":true}',headers={'Host':f'127.0.0.1:{srv.server_port}','Content-Type':'application/json'})
+        r=conn.getresponse();r.read();self.assertEqual(r.status,403);conn.close()
+        with patch.object(app.startup,'status',return_value={'supported':True,'enabled':False}), patch.object(app.startup,'set_enabled',return_value={'supported':True,'enabled':True}) as setter:
+            conn=http.client.HTTPConnection('127.0.0.1',srv.server_port,timeout=3)
+            conn.request('GET','/api/startup',headers={'Host':f'127.0.0.1:{srv.server_port}'})
+            r=conn.getresponse();self.assertEqual(r.status,200);self.assertFalse(json.loads(r.read())['enabled']);conn.close()
+            conn=http.client.HTTPConnection('127.0.0.1',srv.server_port,timeout=3)
+            conn.request('POST','/api/startup',body='{"enabled":true}',headers={'Host':f'127.0.0.1:{srv.server_port}','X-FolderHub-Token':srv.token,'Content-Type':'application/json'})
+            r=conn.getresponse();self.assertEqual(r.status,200);self.assertTrue(json.loads(r.read())['enabled']);conn.close()
+            setter.assert_called_once_with(True)
+
+if __name__ == "__main__":
+    unittest.main()

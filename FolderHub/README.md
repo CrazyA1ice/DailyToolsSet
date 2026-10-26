@@ -74,3 +74,52 @@ git push -u origin main
 如果当前目录已经是 Git 仓库，**省略** `git init` 和 `git remote add origin`。如果报 `remote origin already exists`，可用 `git remote -v` 检查远端。`src refspec main does not match any` 常见于尚未创建首次 commit，或本地仍位于 `master` 分支；先 `git add .` 和 `git commit`，再 `git branch -M main` 后 push。
 
 **不要把运行时数据库、私人路径备份文件或其他隐私文件上传到公开仓库。** Git 忽略了常见的 `.db` 文件，但自定义备份命名的 JSON 仍可能被 Git 跟踪，提交前请务必检查 `git status`。
+
+## V1.1：开机启动、浏览器首页与换肤
+
+### 开启 Windows 登录自启动
+
+1. 正常运行 `start_windows.bat`，打开 FolderHub 页面。
+2. 点击页面右上角 **「设置」**（也可点「换肤」），在“开机自启动”中打开开关。
+3. 下次**登录 Windows 用户账户**后，系统将通过 `pythonw.exe` 静默启动本地服务，不会自动再打开一个浏览器窗口。
+4. 关闭开关可删除相同启动项。关闭开关不会立即结束已经在运行的本地服务。
+
+实现采用当前用户专属的注册表项 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，仅添加或移除名为 `DailyToolsSet.FolderHub` 的值；**默认不开启，不修改其他启动项，也无需管理员权限**。这是登录后启动，而不是在操作系统未登录时作为 Windows 服务运行。需要完整 Windows Python 安装中包含 `pythonw.exe`，且安装位置及本工具 `FolderHub` 文件夹路径保持不变。移动文件夹或切换 Python 环境后，需重新打开开关以更新启动路径。建议将本工具放在稳定的本地目录，不要放在会被临时清理的路径。
+
+如需使用命令行管理：
+
+```powershell
+# 在 FolderHub 目录内
+python app.py --startup status
+python app.py --startup enable
+python app.py --startup disable
+```
+
+Windows 可在 **设置 → 应用 → 启动** 中查看启用情况。在某些系统配置下，安全软件或 Windows 的应用启动开关可能阻止已登记的应用真正运行。若正在运行 FolderHub，请不要重复启动服务（默认占用端口 8765）。
+
+### 设为浏览器“启动时打开的页面”
+
+请先启动 FolderHub、开启开机自启动，再将下面的网址设置为浏览器启动页：
+
+```text
+http://127.0.0.1:8765/
+```
+
+- **Google Chrome**：设置 → **启动时** → **打开特定网页或一组网页** → 添加新网页，填入上述地址。
+- **Microsoft Edge**：设置 → **开始、主页和新建标签页** → **当 Edge 启动时** → 打开以下页面 → 添加新页面。
+- 若仅想把它设为主页按钮跳转地址，可在浏览器“外观/主页按钮”中设置相同 URL。
+
+**区别：**“启动时打开”不等于“每次新建标签页”。若要求每个新标签页都显示 FolderHub，通常需要浏览器扩展。本项目不为此添加扩展或修改浏览器策略。Windows 启动应用程序和浏览器启动进程顺序不受本工具控制，因此刚登录时可能短暂显示无法连接，此时刷新即可。
+
+### 换肤
+
+页面右上角的“换肤”可选择 **云白 / 午夜 / 雾森 / 暖沙 / 跟随系统**。主题标记保存在**当前浏览器的 localStorage**，不更改文件夹数据库，也不需要外网下载壁纸或 CSS。使用其他浏览器时需要单独设置。若清理浏览器站点数据，外观会恢复默认云白；文件导航数据仍存在 SQLite 中。
+
+界面布局参考 [Homer Minimal](https://github.com/tchgrbr/homer-minimal) 的明晰卡片分组，以及 [Flame](https://github.com/pawelmalak/flame) 的浏览器起始页与主题配置理念；本项目未复制其源码或资产。整体仍由原生 HTML、CSS 和 JavaScript 构建，保持**零第三方依赖**。
+
+### 排障提示
+
+- 页面提示「无法连接」：确认 Python 服务已经运行，检查防火墙 / 是否误关闭启动窗口。仅绑定 `127.0.0.1`，无需放行局域网端口。
+- 开机自启动不可用：确保安装的是 Windows Python 且存在 `pythonw.exe`，使用网页开关或 `python app.py --startup status` 查看状态。
+- 已启动后重复运行提示 8765 端口被占用：说明可能有另一个 FolderHub 进程正在运行，直接打开网页即可。
+- **本机安全**：自启动在后台运行的 Python 服务可触发打开系统资源管理器，因此仅供可信的个人 Windows 账户使用。不要部署到公网，也不要把真实路径的 JSON 备份上传公开仓库。

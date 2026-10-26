@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 import webbrowser
+import startup
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -289,6 +290,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if method=="GET" and path=="/api/config":
                 return self.reply(200,{"token":self.server.token,"platform":sys.platform})
+            if method=="GET" and path=="/api/startup":
+                return self.reply(200,startup.status())
+            if method=="POST" and path=="/api/startup":
+                data=self.request_json()
+                return self.reply(200,startup.set_enabled(data.get("enabled")))
             if method=="GET" and path=="/api/nodes":
                 return self.reply(200,{"nodes":self.server.store.all()})
             if method=="GET" and path=="/api/export":
@@ -331,7 +337,7 @@ class Handler(BaseHTTPRequestHandler):
                 types={"index.html":"text/html; charset=utf-8","app.js":"application/javascript; charset=utf-8","styles.css":"text/css; charset=utf-8","favicon.svg":"image/svg+xml"}
                 return self.reply(200,(STATIC / name).read_bytes(),types[name])
             return self.reply(404,{"error":"页面或接口不存在"})
-        except UserError as exc:
+        except (UserError, startup.StartupError) as exc:
             return self.reply(400,{"error":str(exc)})
         except (OSError,sqlite3.Error) as exc:
             print("[FolderHub] error:",repr(exc),file=sys.stderr)
@@ -357,9 +363,22 @@ def main():
     parser.add_argument("--port",type=int,default=8765,help="本地端口，默认 8765")
     parser.add_argument("--no-browser",action="store_true",help="不自动打开浏览器")
     parser.add_argument("--data-dir",type=Path,default=data_directory(),help="数据库目录")
+    parser.add_argument("--startup",choices=("enable","disable","status"),
+                        help="管理当前用户的 Windows 登录自启动设置，不启动网页服务")
     args=parser.parse_args()
     if not 0<=args.port<=65535:
         parser.error("端口范围必须在 0 到 65535 之间")
+    if args.startup:
+        try:
+            if args.startup == "status":
+                result = startup.status()
+            else:
+                result = startup.set_enabled(args.startup == "enable")
+            print(json.dumps(result,ensure_ascii=False))
+            return 0
+        except (startup.StartupError, OSError) as exc:
+            print("操作自启动失败：",exc,file=sys.stderr)
+            return 1
     store=Store(args.data_dir/"folderhub.db")
     try:
         server=FolderServer(("127.0.0.1",args.port),store)

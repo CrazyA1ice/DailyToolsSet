@@ -1,6 +1,16 @@
 "use strict";
 
-const state = {nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null};
+const THEMES = [
+  {id:"cloud",title:"云白",description:"清爽工作台",colors:["#f5f7ff","#ffffff","#6652d9"]},
+  {id:"midnight",title:"午夜",description:"沉浸深色",colors:["#111829","#1c2840","#8e88ff"]},
+  {id:"forest",title:"雾森",description:"柔和自然",colors:["#edf6f1","#ffffff","#23846e"]},
+  {id:"sand",title:"暖沙",description:"温暖纸感",colors:["#faf4e9","#fffcf5","#bc7650"]},
+  {id:"system",title:"跟随系统",description:"自动适配",colors:["#d6d5e8","#252b42","#7b7ad6"]}
+];
+const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
+function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
+const state = {nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null};
+document.documentElement.dataset.theme=state.theme;
 const $ = (s) => document.querySelector(s);
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let toastTimer;
@@ -189,6 +199,51 @@ async function restoreBackup(file){
     await refresh();toast("导航配置已恢复；电脑中的文件没有被修改");
   }catch(e){toast("恢复失败："+e.message,true)}
 }
+function setTheme(theme) {
+  state.theme=validTheme(theme);
+  document.documentElement.dataset.theme=state.theme;
+  try{localStorage.setItem("folderhub.theme",state.theme)}catch(_){/* private mode may block storage */}
+  renderThemeOptions();
+}
+function renderThemeOptions(){
+  $("#themeOptions").innerHTML=THEMES.map(t=>`<button type="button" class="theme-choice ${t.id===state.theme?'selected':''}" data-theme-choice="${t.id}" aria-pressed="${t.id===state.theme}">
+    <span class="theme-sample" style="--sample-bg:${t.colors[0]};--sample-card:${t.colors[1]};--sample-accent:${t.colors[2]}"><i></i><b></b><em></em></span>
+    <span class="theme-title">${t.title}${t.id===state.theme?' ✓':''}</span><span class="theme-caption">${t.description}</span></button>`).join("");
+}
+async function refreshStartup(){
+  const toggle=$("#startupToggle"), label=$("#startupStatus");
+  toggle.disabled=true;
+  try {
+    const result=await api("/api/startup");state.startup=result;
+    toggle.checked=!!result.enabled;
+    toggle.disabled=!result.supported;
+    label.textContent=!result.supported?"仅 Windows 平台支持":result.needs_update?"启动项路径已变化，重新开启可更新":"当前状态："+(result.enabled?"已开启":"未开启");
+  } catch(e) {label.textContent="无法读取启动项："+e.message}
+}
+function openSettings(){
+  renderThemeOptions();
+  $("#homepageUrl").textContent=location.origin+"/";
+  $("#settingsLayer").classList.remove("hidden");
+  $("#settingsClose").focus();
+  refreshStartup();
+}
+function closeSettings(){$("#settingsLayer").classList.add("hidden")}
+async function changeStartup(enabled){
+  const toggle=$("#startupToggle");toggle.disabled=true;
+  try {
+    const result=await mutate("POST","/api/startup",{enabled});
+    state.startup=result;
+    toast(enabled?"已开启 Windows 登录自启动":"已关闭 Windows 登录自启动");
+  } catch(e){toast(e.message,true)}
+  finally{await refreshStartup()}
+}
+function copyHomepage(){
+  const url=$("#homepageUrl").textContent;
+  if(navigator.clipboard?.writeText){navigator.clipboard.writeText(url).then(()=>toast("启动页地址已复制")).catch(()=>fallbackCopy(url));}
+  else fallbackCopy(url);
+}
+function fallbackCopy(url){const input=document.createElement("textarea");input.value=url;document.body.appendChild(input);input.select();try{document.execCommand("copy");toast("启动页地址已复制")}catch(_){toast("请手动复制地址",true)}finally{input.remove()}}
+
 function bind(){
   $("#specialNav").addEventListener("click",e=>{const item=e.target.closest("[data-view]");if(item)setView(item.dataset.view)});
   $("#treeNav").addEventListener("click",e=>{const item=e.target.closest("[data-node]");if(item)setView("node",Number(item.dataset.node))});
@@ -201,6 +256,14 @@ function bind(){
   $("#layoutBtn").addEventListener("click",()=>{state.layout=state.layout==="grid"?"list":"grid";$("#layoutBtn").textContent=state.layout==="grid"?"▦":"☷";render()});
   $("#backupBtn").addEventListener("click",exportBackup);
   $("#restoreBtn").addEventListener("click",()=>$("#importFile").click());
+  $("#themeBtn").addEventListener("click",openSettings);
+  $("#settingsBtn").addEventListener("click",openSettings);
+  $("#settingsClose").addEventListener("click",closeSettings);
+  $("#settingsDone").addEventListener("click",closeSettings);
+  $("#settingsLayer").addEventListener("click",e=>{if(e.target===$("#settingsLayer"))closeSettings()});
+  $("#themeOptions").addEventListener("click",e=>{const btn=e.target.closest("[data-theme-choice]");if(btn)setTheme(btn.dataset.themeChoice)});
+  $("#startupToggle").addEventListener("change",e=>changeStartup(e.target.checked));
+  $("#copyHomepage").addEventListener("click",copyHomepage);
   $("#importFile").addEventListener("change",async e=>{await restoreBackup(e.target.files[0]);e.target.value=""});
   $("#entryForm").addEventListener("submit",submitDialog);
   $("#dialogClose").addEventListener("click",closeDialog);
@@ -209,6 +272,7 @@ function bind(){
   $("#pickFolder").addEventListener("click",async()=>{const btn=$("#pickFolder");btn.disabled=true;try{const d=await mutate("POST","/api/pick-folder");if(d.path)$("#entryPath").value=d.path}catch(e){toast(e.message,true)}finally{btn.disabled=false}});
   document.addEventListener("keydown",e=>{
     if(e.key==="Escape"&&!$("#dialogLayer").classList.contains("hidden"))closeDialog();
+    if(e.key==="Escape"&&!$("#settingsLayer").classList.contains("hidden"))closeSettings();
     if(e.key.toLowerCase()==="k"&&(e.ctrlKey||e.metaKey)){e.preventDefault();$("#search").focus();$("#search").select()}
   });
 }
