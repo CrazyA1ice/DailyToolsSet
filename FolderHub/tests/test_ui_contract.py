@@ -28,11 +28,22 @@ class AdminUiContractTests(unittest.TestCase):
         parser = IdCollector()
         parser.feed(self.html)
         self.assertEqual(len(parser.ids), len(set(parser.ids)))
-        for control in ("sidebarToggle", "themeOptions", "showIntroToggle", "showMetricsToggle",
-                        "resetAppearance",
+        for control in ("sidebarToggle", "themeOptions", "resetAppearance", "sectionHeading",
                         "search", "entries", "treeNav", "newBtn", "entryForm"):
             self.assertIn(control, parser.ids)
             self.assertIn(control, self.js)
+
+    def test_home_is_root_only_with_search_in_header(self):
+        self.assertNotIn('id="pageTitle"', self.html)
+        self.assertNotIn('class="intro"', self.html)
+        self.assertNotIn('class="summary"', self.html)
+        self.assertNotIn('id="nodeCount"', self.html)
+        self.assertLess(self.html.index('id="search"'), self.html.index('<div class="content">'))
+        self.assertIn('display=children(null);sectionTitle="根模块";', self.js)
+        self.assertIn('$("#sectionHeading").hidden=state.view==="all"&&!searching;', self.js)
+        self.assertIn('display=searchAll(searching)', self.js)
+        self.assertNotIn('showIntroToggle', self.js)
+        self.assertNotIn('showMetricsToggle', self.js)
 
     def test_customization_options_and_persistence(self):
         for pref in ("font", "density", "sidebar", "columns", "accent"):
