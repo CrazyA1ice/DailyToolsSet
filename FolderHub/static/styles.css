@@ -331,7 +331,7 @@ html[data-density="compact"] .tools{padding:11px}
 .settings-tabs button.selected{color:var(--accent);border-bottom-color:var(--accent)}
 .settings-page .settings-section:first-child{border-top:0}
 
-/* V1.5: a minimal root-only home, with global search in the sticky header. */
+/* V1.5: root-only home and topbar search. */
 .topbar{gap:14px;padding:0 22px}
 .topbar-leading{flex:0 1 auto;max-width:33%}
 .topbar-search{flex:1 1 280px;max-width:540px;min-width:180px}
@@ -342,24 +342,9 @@ html[data-density="compact"] .tools{padding:11px}
 .topbar .icon-button.square{min-width:38px;height:38px;font-size:1.15rem}
 .content{padding-top:25px}
 .section-heading[hidden]{display:none!important}
-@media(max-width:1540px){
-  .topbar .top-actions .text-btn span{display:none}
-  .topbar .top-actions .text-btn{min-width:37px;padding:6px 8px;font-size:1.08rem}
-}
-@media(max-width:1190px){
-  .topbar{height:auto;min-height:72px;flex-wrap:wrap;gap:10px;padding:11px 18px}
-  .topbar-leading{flex:1 1 auto;max-width:none}
-  .topbar-search{order:3;flex:1 1 100%;max-width:none}
-  .topbar .top-actions{margin-left:auto}
-}
-@media(max-width:760px){
-  .topbar{padding:10px 12px}
-  .topbar .tool-buttons{margin-right:2px;padding-right:5px;gap:3px}
-  .topbar .tool-buttons .primary-btn{padding:6px 8px;font-size:.78rem}
-  .topbar .top-actions .text-btn{min-width:29px;padding:4px 5px}
-  .topbar-search{min-width:0}
-}
-
+@media(max-width:1540px){.topbar .top-actions .text-btn span{display:none}.topbar .top-actions .text-btn{min-width:37px;padding:6px 8px;font-size:1.08rem}}
+@media(max-width:1190px){.topbar{height:auto;min-height:72px;flex-wrap:wrap;gap:10px;padding:11px 18px}.topbar-leading{flex:1 1 auto;max-width:none}.topbar-search{order:3;flex:1 1 100%;max-width:none}.topbar .top-actions{margin-left:auto}}
+@media(max-width:760px){.topbar{padding:10px 12px}.topbar .tool-buttons{margin-right:2px;padding-right:5px;gap:3px}.topbar .tool-buttons .primary-btn{padding:6px 8px;font-size:.78rem}.topbar .top-actions .text-btn{min-width:29px;padding:4px 5px}.topbar-search{min-width:0}}
 
 /* V1.6 — Personalizable module covers; fallback icon illustrations. */
 .entry-card{padding-top:0;overflow:hidden;--cover-height:118px}
@@ -409,10 +394,9 @@ html[data-show-covers="false"] .entries.list .card-cover{display:none}
 .cover-buttons{display:flex;gap:7px;flex-wrap:wrap}
 .cover-buttons .outline-btn{font-size:.8rem;min-height:35px;padding:6px 10px}
 .entry-cover-controls-right .help-text{margin-top:0}
-.cover-toggle-setting{margin:12px 0 16px}
 @media(max-width:760px){.entry-cover-controls{grid-template-columns:98px minmax(0,1fr)}.cover-preview{width:98px;height:100px}}
 
-/* V1.7 - customizable cover display and accessible sibling sorting. */
+/* V1.7 - cover display controls, accessible sibling sorting. */
 html[data-cover-height="short"]{--user-cover-height:88px}
 html[data-cover-height="normal"]{--user-cover-height:118px}
 html[data-cover-height="tall"]{--user-cover-height:185px}
@@ -428,3 +412,28 @@ html[data-cover-fit="contain"] .cover-preview img{object-fit:contain}
 .entry-card.drag-before{outline:3px solid var(--accent);outline-offset:-3px;box-shadow:0 0 0 4px var(--accent-faint)}
 .entry-card.drag-after{outline:3px dashed var(--accent);outline-offset:-3px;box-shadow:0 0 0 4px var(--accent-faint)}
 @media (pointer:coarse){.sort-grip{min-width:38px;height:38px}}
+
+/* V1.8 — keyboard-accessible context menu, selection and bulk action toolbar. */
+.bulk-bar{position:sticky;top:73px;z-index:8;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+ padding:12px 15px;margin-bottom:18px;background:var(--surface);border:1px solid var(--line-strong);
+ box-shadow:var(--shadow);border-radius:12px}
+.bulk-bar strong{font-size:.96rem;margin-right:auto;color:var(--text)}
+.bulk-bar .outline-btn{min-height:36px;padding:6px 11px}
+.bulk-bar .danger-btn{color:#cf354d;border-color:color-mix(in srgb,#cf354d 45%,var(--line))}
+.bulk-bar .danger-btn:hover{background:color-mix(in srgb,#cf354d 9%,var(--surface));color:#c12843}
+.entry-card.is-selected{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 21%,transparent)}
+.entry-card.is-selected .card-cover{outline:3px solid var(--accent);outline-offset:-3px}
+.card-select{border:1px solid var(--line-strong);color:var(--accent);background:var(--surface);
+ font-size:1.2rem;width:38px;height:35px;border-radius:7px;font-weight:750;cursor:pointer}
+.card-select[aria-pressed="true"]{background:var(--accent);color:white;border-color:var(--accent)}
+.selection-mode .card-actions .small-action,.selection-mode .card-links{display:none}
+.selection-mode .card-primary{cursor:pointer}
+.card-context-menu{position:fixed;z-index:120;min-width:215px;max-width:min(360px,90vw);padding:6px;
+ background:var(--surface);border:1px solid var(--line);border-radius:12px;
+ box-shadow:0 12px 40px rgba(12,26,48,.22)}
+.card-context-menu button{display:block;width:100%;border:0;background:transparent;color:var(--text);
+ text-align:left;padding:10px 13px;min-height:38px;border-radius:7px;font-size:.94rem}
+.card-context-menu button:hover,.card-context-menu button:focus-visible{background:var(--accent-faint);color:var(--accent)}
+.card-context-menu button.menu-danger{color:#cf354d}
+@media(max-width:1190px){.bulk-bar{top:125px}}
+@media(max-width:760px){.bulk-bar{position:static}.topbar #selectModeBtn{font-size:.76rem;padding:6px 8px}}

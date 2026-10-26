@@ -62,7 +62,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {openingIds:new Set(),nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false};
+const state = {openingIds:new Set(),nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
 document.documentElement.dataset.theme=state.theme;
 applyPreferences();
 const $ = (s) => document.querySelector(s);
@@ -123,6 +123,7 @@ function ancestors(id) {
   return result;
 }
 function setView(view,id=null){
+  closeCardMenu();exitSelectMode();
   state.view=view;state.selected=id;
   state.search="";$("#search").value="";
   if(view==="node"&&id!==null)expandLineage(id);
@@ -175,14 +176,16 @@ function card(n,reorderable=false){
   const leaf=n.node_type==="leaf";
   const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
   const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
-  return `<article class="entry-card ${leaf?"is-leaf":"is-container"} ${state.openingIds.has(n.id)?"is-opening":""}" data-id="${n.id}">
+  return `<article class="entry-card ${leaf?"is-leaf":"is-container"} ${state.openingIds.has(n.id)?"is-opening":""} ${state.selectedIds.has(n.id)?"is-selected":""}" data-id="${n.id}" tabindex="0" aria-label="${h(n.title)}，右键打开快捷菜单">
     <div class="card-cover tone-${n.id%6} ${n.has_image?'with-image':'with-icon'}" aria-hidden="true">
       ${n.has_image?`<img class="cover-image" src="${coverUrl(n)}" loading="lazy" alt="">`:`<span class="cover-emoji">${h(iconFor(n))}</span><span class="cover-decoration"></span>`}
       <span class="cover-type">${TYPE_LABEL[n.node_type]||"模块"}</span>
     </div>
     <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${h(iconFor(n))}</span>
       <div class="card-actions">
-        ${reorderable?`<button type="button" class="small-action sort-grip" draggable="true" data-drag="${n.id}" title="拖动调整同级顺序，也可使用上下箭头键" aria-label="移动 ${h(n.title)}：拖动排序或按上下箭头键">⠿</button>`:""}
+        ${state.selectMode?`<button type="button" class="card-select" data-action="select" data-id="${n.id}" aria-pressed="${state.selectedIds.has(n.id)}" aria-label="${state.selectedIds.has(n.id)?'取消选择':'选择'} ${h(n.title)}">${state.selectedIds.has(n.id)?'✓':'○'}</button>`:''}
+        ${reorderable && !state.selectMode?`<button type="button" class="small-action sort-grip" draggable="true" data-drag="${n.id}" title="拖动调整同级顺序，也可使用上下箭头键" aria-label="移动 ${h(n.title)}：拖动排序或按上下箭头键">⠿</button>`:""}
+        ${!state.selectMode?`<button type="button" class="small-action card-more" title="更多操作" aria-label="更多操作：${h(n.title)}" data-action="menu" data-id="${n.id}">⋯</button>`:''}
         <button title="${n.favorite?'取消收藏':'加入收藏'}" class="small-action ${n.favorite?'on':''}" data-action="favorite" data-id="${n.id}">${n.favorite?'★':'☆'}</button>
         <button title="编辑模块" class="small-action" data-action="edit" data-id="${n.id}">✎</button>
         <button title="移除模块（不会删除真实文件夹）" class="small-action" data-action="delete" data-id="${n.id}">×</button>
@@ -221,18 +224,13 @@ function render(){
   renderNav();renderCrumb();
   let display,sectionTitle;
   const searching=state.search.trim();
-  if(searching){
-    display=searchAll(searching);sectionTitle="全局搜索结果";
-  } else if(state.view==="favorites"){
-    display=sorted(state.nodes.filter(n=>n.favorite));sectionTitle="常用入口";
-  } else if(state.view==="node"){
+  if(searching){display=searchAll(searching);sectionTitle="全局搜索结果";}
+  else if(state.view==="favorites"){display=sorted(state.nodes.filter(n=>n.favorite));sectionTitle="常用入口";}
+  else if(state.view==="node"){
     const node=byId(state.selected);
     display=node.node_type==="leaf"?[node]:children(state.selected);
     sectionTitle=node.node_type==="leaf"?"当前文件夹":"下级模块";
-  } else {
-    // Home only shows top-level root modules.
-    display=children(null);sectionTitle="根模块";
-  }
+  } else{display=children(null);sectionTitle="根模块";}
   $("#sectionHeading").hidden=state.view==="all"&&!searching;
   $("#sectionTitle").textContent=sectionTitle;
   $("#sectionMeta").textContent=`共 ${display.length} 个项目 · ${searching?'搜索覆盖整个目录树，结果显示完整所属层级':'叶子模块直接打开文件资源管理器'}`;
@@ -241,17 +239,20 @@ function render(){
   $("#searchHint").textContent=searching?`${display.length} 项结果`:"Ctrl K";
   $("#sectionOperations").innerHTML=state.view==="node"&&!searching?`<button data-action="edit-current">编辑当前模块</button>`:"";
   $("#entries").className="entries"+(state.layout==="list"?" list":"");
-  const reorderable=!searching && (state.view==="all" || (state.view==="node" && byId(state.selected)?.node_type!=="leaf"));
+  const reorderable=!state.selectMode && !searching && (state.view==="all" || (state.view==="node" && byId(state.selected)?.node_type!=="leaf"));
+  state.visibleIds=display.map(n=>n.id);
+  $("#entries").classList.toggle("selection-mode",state.selectMode);
   $("#entries").innerHTML=display.length?display.map(n=>card(n,reorderable)).join(""):emptyView();
+  updateBatchBar();
 }
 
-// Reorder siblings only. Global search and favorites remain read-only lists.
+// Reorder only siblings. Favorites and global search are intentionally read-only lists.
 function canReorder(){
-  return !state.search.trim() && (state.view==="all" ||
+  return !state.selectMode && !state.search.trim() && (state.view==="all" ||
     (state.view==="node" && byId(state.selected)?.node_type!=="leaf"));
 }
-function reorderIds(ids,moved,anchor,after=false){
-  const origin=ids.indexOf(moved),target=ids.indexOf(anchor);
+function reorderIds(ids, moved, anchor, after=false){
+  const origin=ids.indexOf(moved), target=ids.indexOf(anchor);
   if(origin<0||target<0||origin===target)return ids.slice();
   const result=ids.slice();
   result.splice(origin,1);
@@ -278,7 +279,7 @@ async function saveSortOrder(nextIds,focusId=null){
   try{
     await mutate("POST","/api/order",{parent_id:parentId,ids:nextIds});
     await refresh();
-    if(focusId!==null)document.querySelector('#entries [data-drag="'+focusId+'"]')?.focus();
+    if(focusId!==null)document.querySelector(`#entries [data-drag="${focusId}"]`)?.focus();
     toast("顺序已保存");
   }catch(e){toast("排序失败："+e.message,true);await refresh().catch(()=>{});}
   finally{state.sorting=false}
@@ -406,6 +407,7 @@ async function submitDialog(event){
     if(savedId!==null)await mutate("PATCH",`/api/nodes/${savedId}`,payload);
     else created=await mutate("POST","/api/nodes",payload);
     const actualId=savedId??created.id;
+    // Keep current node edits if image upload fails so the cover can be retried.
     if(state.pendingCover)await mutate("POST",`/api/nodes/${actualId}/image`,{data_url:state.pendingCover});
     else if(state.removeCover&&savedId!==null)await mutate("DELETE",`/api/nodes/${actualId}/image`,{});
     closeDialog();await refresh();
@@ -438,7 +440,9 @@ async function favoriteNode(id){
 }
 async function act(action,id){
   switch(action){
-    case "primary":{const n=byId(id);if(n?.node_type==="leaf")await openFolder(id);else setView("node",id);break}
+    case "primary":{if(state.selectMode){toggleSelected(id);break}const n=byId(id);if(n?.node_type==="leaf")await openFolder(id);else setView("node",id);break}
+    case "select":toggleSelected(id);break;
+    case "menu":{const card=[...document.querySelectorAll("#entries .entry-card")].find(x=>Number(x.dataset.id)===id);const bounds=card?.getBoundingClientRect();if(bounds)openCardMenu(id,bounds.right-235,bounds.top+42);break}
     case "open":await openFolder(id);break;
     case "enter":setView("node",id);break;
     case "child":if(byId(id)?.node_type!=="leaf")editDialog(null,id);else toast("叶子模块不能拥有子模块",true);break;
@@ -448,6 +452,73 @@ async function act(action,id){
     case "empty-create":editDialog();break;
     case "edit-current":editDialog(state.selected);break;
   }
+}
+// Bulk selection is limited to the current visible list, including search results.
+function closeCardMenu(){
+  const menu=$("#cardContextMenu");
+  if(!menu)return;
+  menu.classList.add("hidden");menu.replaceChildren();state.contextId=null;
+}
+function exitSelectMode(){
+  state.selectMode=false;state.selectedIds.clear();closeCardMenu();
+}
+function toggleSelected(id){
+  if(!state.selectMode||!state.visibleIds.includes(id)||state.batchBusy)return;
+  if(state.selectedIds.has(id))state.selectedIds.delete(id);
+  else if(state.selectedIds.size>=200){toast("一次最多选择 200 个模块",true);return}
+  else state.selectedIds.add(id);
+  render();
+}
+function updateBatchBar(){
+  const bar=$("#bulkBar"),count=state.selectedIds.size;
+  bar.classList.toggle("hidden",!state.selectMode);
+  $("#bulkCount").textContent=`已选择 ${count} 项`;
+  $("#selectModeBtn").setAttribute("aria-pressed",String(state.selectMode));
+  $("#selectModeBtn").textContent=state.selectMode?"✓ 退出多选":"☑ 多选";
+  for(const id of ["bulkFavorite","bulkUnfavorite","bulkDelete"]){$("#"+id).disabled=state.batchBusy||count===0}
+  $("#bulkSelectAll").disabled=state.batchBusy||state.visibleIds.length===0;
+  $("#bulkCancel").disabled=state.batchBusy;
+}
+async function batchAction(action){
+  if(state.batchBusy||!state.selectedIds.size)return;
+  const ids=[...state.selectedIds];
+  if(action==="delete"){
+    const all=new Set();ids.forEach(id=>descendants(id).forEach(x=>all.add(x)));
+    if(!confirm(`确定移除选中的 ${ids.length} 个模块吗？\n其中包含子模块在内，共 ${all.size} 条导航记录。\n\n只删除 FolderHub 的导航记录与封面，不会删除或移动电脑中的真实文件夹。\n建议先备份配置。`))return;
+  }
+  state.batchBusy=true;updateBatchBar();
+  try{
+    const result=await mutate("POST","/api/batch",{action,ids});
+    exitSelectMode();await refresh();
+    toast(action==="delete"?`已移除 ${result.changed} 个选中模块及其下级导航记录`:`已更新 ${result.changed} 个模块的收藏状态`);
+  }catch(e){toast(e.message,true)}finally{state.batchBusy=false;updateBatchBar()}
+}
+function openCardMenu(id,x,y){
+  closeCardMenu();
+  const n=byId(id),menu=$("#cardContextMenu");
+  if(!n||state.selectMode)return;
+  state.contextId=id;
+  const actions=[];
+  if(n.node_type==="leaf"||n.folder_path)actions.push(["open","在资源管理器中打开"]);
+  if(n.node_type!=="leaf")actions.push(["enter","进入模块"]);
+  actions.push(["edit","编辑模块"],["favorite",n.favorite?"取消收藏":"添加到收藏"]);
+  if(n.node_type!=="leaf")actions.push(["child","新建子模块"]);
+  if(n.folder_path)actions.push(["copy-path","复制文件夹路径"]);
+  actions.push(["delete","移除导航记录"]);
+  menu.innerHTML=actions.map(([action,label])=>`<button type="button" role="menuitem" class="${action==='delete'?'menu-danger':''}" data-menu-action="${action}">${h(label)}</button>`).join("");
+  menu.classList.remove("hidden");
+  const bounds=menu.getBoundingClientRect();
+  menu.style.left=Math.max(8,Math.min(x,window.innerWidth-bounds.width-8))+"px";
+  menu.style.top=Math.max(8,Math.min(y,window.innerHeight-bounds.height-8))+"px";
+  menu.querySelector("button")?.focus();
+}
+async function contextAction(action,id){
+  const n=byId(id);closeCardMenu();if(!n)return;
+  if(action==="copy-path"){
+    if(!n.folder_path)return;
+    try{await navigator.clipboard.writeText(n.folder_path);toast("文件夹路径已复制")}
+    catch(_){toast("复制失败，请使用模块编辑界面复制路径",true)}
+  }else await act(action,id);
 }
 async function exportBackup(){
   try {
@@ -465,7 +536,7 @@ async function restoreBackup(file){
     if(file.size>32*1024*1024)throw new Error("配置备份不能超过 32 MB，请减少封面图片大小或数量");
     const payload=JSON.parse(await file.text());
     await mutate("POST","/api/import",payload);
-    state.view="all";state.selected=null;state.search="";$("#search").value="";
+    exitSelectMode();state.view="all";state.selected=null;state.search="";$("#search").value="";
     await refresh();toast("导航配置已恢复；电脑中的文件没有被修改");
   }catch(e){toast("恢复失败："+e.message,true)}
 }
@@ -530,6 +601,16 @@ function fallbackCopy(url){const input=document.createElement("textarea");input.
 
 function bind(){
   bindSorting();
+  $("#selectModeBtn").addEventListener("click",()=>{if(state.batchBusy)return;state.selectMode=!state.selectMode;state.selectedIds.clear();closeCardMenu();render()});
+  $("#bulkCancel").addEventListener("click",()=>{exitSelectMode();render()});
+  $("#bulkSelectAll").addEventListener("click",()=>{if(state.batchBusy)return;const ids=state.visibleIds;if(ids.length>200){toast("当前结果超过 200 项，请缩小搜索范围",true);return}state.selectedIds=new Set(ids);render()});
+  $("#bulkFavorite").addEventListener("click",()=>batchAction("favorite"));
+  $("#bulkUnfavorite").addEventListener("click",()=>batchAction("unfavorite"));
+  $("#bulkDelete").addEventListener("click",()=>batchAction("delete"));
+  $("#cardContextMenu").addEventListener("click",e=>{const btn=e.target.closest("[data-menu-action]");if(btn&&state.contextId!==null)contextAction(btn.dataset.menuAction,state.contextId)});
+  $("#entries").addEventListener("contextmenu",e=>{const card=e.target.closest(".entry-card");if(!card||e.target.closest("input,textarea"))return;e.preventDefault();openCardMenu(Number(card.dataset.id),e.clientX,e.clientY)});
+  $("#entries").addEventListener("keydown",e=>{if((e.key==="F10"&&e.shiftKey)||e.key==="ContextMenu"){const card=e.target.closest(".entry-card");if(!card)return;e.preventDefault();const r=card.getBoundingClientRect();openCardMenu(Number(card.dataset.id),r.left+32,r.top+32)}});
+  document.addEventListener("pointerdown",e=>{if(!e.target.closest("#cardContextMenu"))closeCardMenu()});
   $("#specialNav").addEventListener("click",e=>{const item=e.target.closest("[data-view]");if(item)setView(item.dataset.view)});
   $("#treeNav").addEventListener("click",e=>{
     const toggle=e.target.closest("[data-toggle]");
@@ -543,7 +624,7 @@ function bind(){
   $("#sectionOperations").addEventListener("click",e=>{const btn=e.target.closest("[data-action]");if(btn)act(btn.dataset.action,state.selected)});
   $("#addRoot").addEventListener("click",()=>editDialog(null,null));
   $("#newBtn").addEventListener("click",()=>editDialog());
-  $("#search").addEventListener("input",e=>{state.search=e.target.value;render()});
+  $("#search").addEventListener("input",e=>{closeCardMenu();state.selectedIds.clear();state.search=e.target.value;render()});
   $("#layoutBtn").addEventListener("click",()=>{state.layout=state.layout==="grid"?"list":"grid";$("#layoutBtn").textContent=state.layout==="grid"?"▦":"☷";render()});
   $("#backupBtn").addEventListener("click",exportBackup);
   $("#restoreBtn").addEventListener("click",()=>$("#importFile").click());
@@ -577,6 +658,8 @@ function bind(){
   $("#dialogLayer").addEventListener("click",e=>{if(e.target===$("#dialogLayer"))closeDialog()});
   $("#pickFolder").addEventListener("click",async()=>{const btn=$("#pickFolder");btn.disabled=true;try{const d=await mutate("POST","/api/pick-folder");if(d.path)$("#entryPath").value=d.path}catch(e){toast(e.message,true)}finally{btn.disabled=false}});
   document.addEventListener("keydown",e=>{
+    if(e.key==="Escape"&&!$("#cardContextMenu").classList.contains("hidden")){closeCardMenu();return}
+    if(e.key==="Escape"&&state.selectMode){exitSelectMode();render();return}
     if(e.key==="Escape"&&!$("#dialogLayer").classList.contains("hidden"))closeDialog();
     if(e.key==="Escape"&&!$("#settingsLayer").classList.contains("hidden"))closeSettings();
     if(e.key.toLowerCase()==="k"&&(e.ctrlKey||e.metaKey)){e.preventDefault();$("#search").focus();$("#search").select()}

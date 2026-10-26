@@ -28,7 +28,7 @@
       <div class="topbar-leading"><button id="sidebarToggle" type="button" class="icon-button sidebar-trigger" title="展开或收起侧边栏" aria-label="展开或收起侧边栏" aria-expanded="true">☰</button><div class="crumb" id="breadcrumb"></div></div>
       <div class="search-wrap topbar-search" role="search"><span class="search-icon">⌕</span><input id="search" type="search" placeholder="全局搜索：模块名、完整分类路径、文件夹路径..." autocomplete="off" aria-label="搜索所有层级模块"><span id="searchHint">Ctrl K</span></div>
       <div class="top-actions">
-        <div class="tool-buttons"><button id="layoutBtn" type="button" class="icon-button square" title="切换网格和列表" aria-label="切换网格和列表">▦</button><button id="newBtn" type="button" class="primary-btn">＋ <span id="newBtnText">新建模块</span></button></div>
+        <div class="tool-buttons"><button id="selectModeBtn" type="button" class="outline-btn" aria-pressed="false" title="批量选择模块">☑ 多选</button><button id="layoutBtn" type="button" class="icon-button square" title="切换网格和列表" aria-label="切换网格和列表">▦</button><button id="newBtn" type="button" class="primary-btn">＋ <span id="newBtnText">新建模块</span></button></div>
         <button id="themeBtn" type="button" class="text-btn accent-action" title="主题换肤">◐ <span>换肤</span></button>
         <button id="settingsBtn" type="button" class="text-btn" title="设置开机启动和首页">⚙ <span>设置</span></button>
         <button id="backupBtn" type="button" class="text-btn" title="导出 JSON 配置">⇩ <span>备份</span></button>
@@ -38,6 +38,14 @@
     <div class="content">
 
       <div class="section-heading" id="sectionHeading"><div><span class="section-kicker">文件夹与分类</span><h2 id="sectionTitle">全部分类</h2><p id="sectionMeta">点击模块即可进入，绑定文件夹后可直接打开资源管理器</p></div><div id="sectionOperations"></div></div>
+      <div id="bulkBar" class="bulk-bar hidden" role="toolbar" aria-label="批量管理模块">
+        <strong id="bulkCount">已选择 0 项</strong>
+        <button type="button" id="bulkSelectAll" class="outline-btn">全选当前结果</button>
+        <button type="button" id="bulkFavorite" class="outline-btn">★ 批量收藏</button>
+        <button type="button" id="bulkUnfavorite" class="outline-btn">☆ 取消收藏</button>
+        <button type="button" id="bulkDelete" class="outline-btn danger-btn">移除所选</button>
+        <button type="button" id="bulkCancel" class="outline-btn">完成</button>
+      </div>
       <section class="entries" id="entries" aria-live="polite"></section>
     </div>
   </main>
@@ -60,7 +68,7 @@
         <div class="appearance-field"><label>图片显示方式</label><div class="choice-segment" role="group" aria-label="图片显示方式"><button type="button" data-pref="coverFit" data-value="cover">铺满裁切</button><button type="button" data-pref="coverFit" data-value="contain">完整显示</button></div></div>
       </div>
       <div class="appearance-field color-field"><label>强调色</label><div id="accentOptions" class="accent-options" role="group" aria-label="强调色"><button type="button" data-pref="accent" data-value="blue" title="管理蓝" aria-label="管理蓝"></button><button type="button" data-pref="accent" data-value="purple" title="星云紫" aria-label="星云紫"></button><button type="button" data-pref="accent" data-value="teal" title="青绿色" aria-label="青绿色"></button><button type="button" data-pref="accent" data-value="orange" title="暖橙色" aria-label="暖橙色"></button><button type="button" data-pref="accent" data-value="rose" title="玫瑰红" aria-label="玫瑰红"></button></div></div>
-      <label class="inline-switch cover-toggle-setting"><input id="showCoversToggle" type="checkbox" checked><span>在模块卡片上显示封面图片</span></label>
+      <label class="inline-switch" style="margin:12px 0 16px"><input id="showCoversToggle" type="checkbox" checked><span>在模块卡片上显示封面图片</span></label>
       <button type="button" id="resetAppearance" class="outline-btn">恢复默认布局</button>
     </section>
     </div>
@@ -119,6 +127,7 @@
   </div>
 </div>
 <input id="importFile" type="file" accept=".json,application/json" hidden>
+<div id="cardContextMenu" class="card-context-menu hidden" role="menu" aria-label="模块快捷操作"></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

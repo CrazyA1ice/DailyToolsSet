@@ -34,18 +34,6 @@ class AdminUiContractTests(unittest.TestCase):
             self.assertIn(control, parser.ids)
             self.assertIn(control, self.js)
 
-    def test_home_is_root_only_with_search_in_header(self):
-        self.assertNotIn('id="pageTitle"', self.html)
-        self.assertNotIn('class="intro"', self.html)
-        self.assertNotIn('class="summary"', self.html)
-        self.assertNotIn('id="nodeCount"', self.html)
-        self.assertLess(self.html.index('id="search"'), self.html.index('<div class="content">'))
-        self.assertIn('display=children(null);sectionTitle="根模块";', self.js)
-        self.assertIn('$("#sectionHeading").hidden=state.view==="all"&&!searching;', self.js)
-        self.assertIn('display=searchAll(searching)', self.js)
-        self.assertNotIn('showIntroToggle', self.js)
-        self.assertNotIn('showMetricsToggle', self.js)
-
     def test_root_only_home_and_custom_covers(self):
         self.assertNotIn('class="summary"',self.html)
         self.assertLess(self.html.index('id="search"'), self.html.index('class="content"'))
@@ -55,14 +43,33 @@ class AdminUiContractTests(unittest.TestCase):
             self.assertIn(piece,self.js+self.css)
 
     def test_drag_sort_is_sibling_only_and_accessible(self):
-        self.assertIn('function reorderIds(ids,moved,anchor,after=false)', self.js)
+        self.assertIn('function reorderIds(ids, moved, anchor, after=false)', self.js)
         self.assertIn('function canReorder()', self.js)
-        for event in ('dragstart', 'dragover', 'dragend', 'ArrowUp', 'ArrowDown'):
-            self.assertIn(event, self.js)
+        self.assertIn('dragstart', self.js)
+        self.assertIn('dragover', self.js)
+        self.assertIn('dragend', self.js)
+        self.assertIn('ArrowUp', self.js)
+        self.assertIn('ArrowDown', self.js)
         self.assertIn('"/api/order"', self.js)
         self.assertIn('data-drag=', self.js)
         self.assertIn('drag-before', self.css)
         self.assertIn('drag-after', self.css)
+
+    def test_bulk_and_context_menu_contracts(self):
+        for name in ("selectModeBtn","bulkBar","bulkCount","bulkSelectAll",
+                     "bulkFavorite","bulkUnfavorite","bulkDelete","bulkCancel",
+                     "cardContextMenu"):
+            self.assertIn(f'id="{name}"',self.html)
+            self.assertIn(name,self.js)
+        self.assertIn('function batchAction(action)',self.js)
+        self.assertIn('"/api/batch"',self.js)
+        self.assertIn('function openCardMenu(id,x,y)',self.js)
+        self.assertIn('contextmenu',self.js)
+        self.assertIn('data-action=\"menu\"',self.js)
+        self.assertIn('aria-pressed',self.js)
+        self.assertIn('role="menu"',self.html)
+        self.assertIn('.entry-card.is-selected',self.css)
+        self.assertIn('.card-context-menu',self.css)
 
     def test_cover_personalization_options(self):
         for key in ('coverHeight', 'coverFit'):

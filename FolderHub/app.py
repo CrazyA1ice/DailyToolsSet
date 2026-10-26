@@ -259,6 +259,29 @@ class Store:
             self.require(db,node_id)
             db.execute("DELETE FROM nodes WHERE id=?",(node_id,))
 
+    def batch(self, action, ids):
+        """Atomic changes to navigation entries only; never touches actual folders."""
+        if action not in ("favorite", "unfavorite", "delete"):
+            raise UserError("不支持的批量操作")
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 200
+                or any(type(n) is not int or n < 1 for n in ids)
+                or len(set(ids)) != len(ids)):
+            raise UserError("请选择 1 至 200 个不重复的有效模块")
+        placeholders = ",".join("?" for _ in ids)
+        with self.connect() as db:
+            found = {r[0] for r in db.execute(
+                f"SELECT id FROM nodes WHERE id IN ({placeholders})", ids)}
+            if found != set(ids):
+                raise UserError("所选模块有部分不存在，请刷新页面后重试")
+            if action == "delete":
+                # Child entries/images are cascaded by SQLite foreign keys.
+                db.execute(f"DELETE FROM nodes WHERE id IN ({placeholders})", ids)
+            else:
+                value = 1 if action == "favorite" else 0
+                db.execute(f"UPDATE nodes SET favorite=?,updated_at=? WHERE id IN ({placeholders})",
+                           [value, now(), *ids])
+        return {"ok": True, "changed": len(ids)}
+
     def save_image(self, node_id, data_url):
         mime, raw = decode_image(data_url)
         with self.connect() as db:
@@ -472,6 +495,9 @@ class Handler(BaseHTTPRequestHandler):
             if method=="POST" and path=="/api/nodes":
                 node_id=self.server.store.create(self.request_json())
                 return self.reply(201,{"id":node_id})
+            if method=="POST" and path=="/api/batch":
+                data=self.request_json()
+                return self.reply(200,self.server.store.batch(data.get("action"),data.get("ids")))
             if method=="POST" and path=="/api/order":
                 data=self.request_json()
                 self.server.store.order(data.get("parent_id"),data.get("ids"))

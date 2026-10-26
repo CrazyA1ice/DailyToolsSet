@@ -57,6 +57,38 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(app.UserError):self.store.import_backup(corrupt)
         self.assertEqual(self.store.export()["nodes"],backup["nodes"])
 
+    def test_batch_favorite_and_atomic_validation(self):
+        root=self.store.create({"title":"科研","node_type":"root"})
+        group=self.store.create({"title":"研究","node_type":"group","parent_id":root})
+        before=self.store.export()
+        for action, ids in (
+            ("favorite", []), ("favorite", [root,root]),
+            ("favorite", [root,999999]), ("favorite", [True]),
+            ("favorite", [root] * 201), ("unknown", [root]),
+            ("favorite", "1"), ("delete", [group,-1])
+        ):
+            with self.subTest(action=action,ids=ids),self.assertRaises(app.UserError):
+                self.store.batch(action,ids)
+            self.assertEqual(self.store.export()["nodes"],before["nodes"])
+        result=self.store.batch("favorite",[root,group])
+        self.assertEqual(result["changed"],2)
+        self.assertTrue(all(n["favorite"] for n in self.store.all()))
+        self.store.batch("unfavorite",[group])
+        self.assertEqual({n["title"]:n["favorite"] for n in self.store.all()},
+                         {"科研":True,"研究":False})
+
+    def test_batch_delete_cascades_navigation_and_images_only(self):
+        root=self.store.create({"title":"根","node_type":"root"})
+        leaf=self.store.create({"title":"叶","node_type":"leaf","parent_id":root,
+                                "folder_path":str(Path(self.tmp.name).resolve())})
+        self.store.save_image(leaf,ImageStoreTests.PNG_URL)
+        folder=Path(self.tmp.name)/"keep.txt"
+        folder.write_text("must survive",encoding="utf-8")
+        self.assertEqual(self.store.batch("delete",[root,leaf]),{"ok":True,"changed":2})
+        self.assertEqual(self.store.all(),[])
+        self.assertIsNone(self.store.get_image(leaf))
+        self.assertEqual(folder.read_text(encoding="utf-8"),"must survive")
+
     def test_reject_bad_inputs(self):
         for payload in ({"title":""},{"title":"a","folder_path":"./relative"},{"title":"a","parent_id":999},{"title":7}):
             with self.subTest(payload=payload),self.assertRaises(app.UserError):
@@ -236,6 +268,20 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.request("DELETE",path,{},token=False)[0],403)
         self.assertEqual(self.request("DELETE",path,{})[0],200)
         self.assertEqual(self.request("GET",path)[0],404)
+
+    def test_batch_http_requires_token_and_works_atomically(self):
+        root=self.srv.store.create({"title":"根","node_type":"root"})
+        other=self.srv.store.create({"title":"另一个","node_type":"root"})
+        payload={"action":"favorite","ids":[root,other]}
+        self.assertEqual(self.request("POST","/api/batch",payload,token=False)[0],403)
+        self.assertEqual(self.request("POST","/api/batch",payload,origin="https://evil.test")[0],403)
+        self.assertEqual(self.request("POST","/api/batch",{"action":"favorite","ids":[root,999]})[0],400)
+        self.assertTrue(all(not n["favorite"] for n in self.srv.store.all()))
+        status,response=self.request("POST","/api/batch",payload)
+        self.assertEqual((status,response["changed"]),(200,2))
+        self.assertTrue(all(n["favorite"] for n in self.srv.store.all()))
+        self.assertEqual(self.request("POST","/api/batch",{"action":"delete","ids":[other]})[0],200)
+        self.assertEqual([n["id"] for n in self.srv.store.all()],[root])
 
     def test_security(self):
         body={"title":"secret"}
