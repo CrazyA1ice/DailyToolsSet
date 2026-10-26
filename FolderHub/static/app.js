@@ -9,7 +9,7 @@ const THEMES = [
 ];
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null};
+const state = {nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false};
 document.documentElement.dataset.theme=state.theme;
 const $ = (s) => document.querySelector(s);
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -37,7 +37,25 @@ async function api(path, options={}) {
   return data;
 }
 const mutate = (method,path,data={}) => api(path,{method,body:JSON.stringify(data)});
-async function refresh(){const data=await api("/api/nodes");state.nodes=data.nodes;render()}
+function loadTreeState() {
+  try {const saved=localStorage.getItem("folderhub.expanded");return saved===null?null:JSON.parse(saved)}
+  catch(_){return null}
+}
+function saveTreeState(){try{localStorage.setItem("folderhub.expanded",JSON.stringify([...state.expanded]))}catch(_){}}
+function expandLineage(id){
+  for(const node of ancestors(id)){if(node.node_type!=="leaf")state.expanded.add(node.id)}
+  saveTreeState();
+}
+async function refresh(){
+  const data=await api("/api/nodes");state.nodes=data.nodes;
+  if(!state.treeInitialized){
+    const saved=loadTreeState();
+    state.expanded=new Set(Array.isArray(saved)?saved.filter(id=>Number.isInteger(id)):children(null).map(n=>n.id));
+    state.treeInitialized=true;
+  }
+  if(state.view==="node"&&state.selected!==null)expandLineage(state.selected);
+  render();
+}
 
 function descendants(id) {
   const found=new Set([id]);
@@ -50,20 +68,42 @@ function ancestors(id) {
   while(current && !visited.has(current.id)){result.unshift(current);visited.add(current.id);current=byId(current.parent_id)}
   return result;
 }
-function setView(view,id=null){state.view=view;state.selected=id;state.search="";$("#search").value="";render()}
+function setView(view,id=null){
+  state.view=view;state.selected=id;
+  state.search="";$("#search").value="";
+  if(view==="node"&&id!==null)expandLineage(id);
+  render();
+}
+const TYPE_LABEL = {root:"根模块",group:"普通模块",leaf:"叶子模块"};
+function toggleBranch(id){
+  if(state.expanded.has(id))state.expanded.delete(id);else state.expanded.add(id);
+  saveTreeState();renderNav();
+}
 function renderNav(){
   const roots=children(null), fav=state.nodes.filter(n=>n.favorite);
   $("#rootCount").textContent=roots.length;$("#favoriteCount").textContent=fav.length;
   document.querySelectorAll("#specialNav [data-view]").forEach(el=>el.classList.toggle("active",state.view===el.dataset.view));
-  const walk=(nodes,depth=0) => nodes.map(n=>{
-    const count=children(n.id).length;
-    return `<button type="button" data-node="${n.id}" class="tree-item ${state.view==='node'&&state.selected===n.id?'active':''}" style="padding-left:${12+depth*13}px" title="${h(n.title)}">
-      <span class="tree-arrow">${count?'›':'·'}</span><span class="tree-folder">▤</span><span class="tree-text">${h(n.title)}</span></button>${walk(children(n.id),depth+1)}`;
+  const walk=(nodes) => nodes.map(n=>{
+    const sub=children(n.id), expand=sub.length>0 && state.expanded.has(n.id), isLeaf=n.node_type==="leaf";
+    return `<div class="tree-branch" role="group">
+      <div class="tree-row ${state.view==='node'&&state.selected===n.id?'active':''}">
+        ${sub.length?`<button type="button" class="tree-toggle" data-toggle="${n.id}" aria-expanded="${expand}" aria-label="${expand?'折叠':'展开'} ${h(n.title)}"><span class="tree-chevron ${expand?'is-open':''}">›</span></button>`
+          :'<span class="tree-spacer" aria-hidden="true"></span>'}
+        <button type="button" class="tree-item" data-node="${n.id}" title="${h(n.title)} (${TYPE_LABEL[n.node_type]||'模块'})">
+          <span class="tree-folder" aria-hidden="true">${isLeaf?'▣':n.node_type==='root'?'▤':'▥'}</span>
+          <span class="tree-text">${h(n.title)}</span>${isLeaf?'<span class="tree-leaf-mark" title="关联的文件夹">↗</span>':''}
+        </button>
+      </div>${sub.length&&expand?`<div class="tree-children" role="group">${walk(sub)}</div>`:''}
+    </div>`;
   }).join("");
   $("#treeNav").innerHTML=walk(roots);
 }
 function renderCrumb(){
   const bits=[`<button type="button" data-crumb="all">首页</button>`];
+  if(state.search.trim()){
+    bits.push('<span>›</span><strong>全局搜索</strong>');
+    $("#breadcrumb").innerHTML=bits.join("");return;
+  }
   if(state.view==="favorites") bits.push(`<span>›</span><strong>我的收藏</strong>`);
   if(state.view==="node"){
     for(const n of ancestors(state.selected)){
@@ -75,20 +115,25 @@ function renderCrumb(){
 function card(n){
   const childCount=children(n.id).length;
   const linked=!!n.folder_path;
+  const leaf=n.node_type==="leaf";
+  const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
+  const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
   return `<article class="entry-card" data-id="${n.id}">
-    <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${linked?'▣':'▤'}</span>
+    <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${leaf?'▣':n.node_type==='root'?'▤':'▥'}</span>
       <div class="card-actions">
         <button title="${n.favorite?'取消收藏':'加入收藏'}" class="small-action ${n.favorite?'on':''}" data-action="favorite" data-id="${n.id}">${n.favorite?'★':'☆'}</button>
         <button title="编辑模块" class="small-action" data-action="edit" data-id="${n.id}">✎</button>
         <button title="移除模块（不会删除真实文件夹）" class="small-action" data-action="delete" data-id="${n.id}">×</button>
       </div>
     </div>
-    <button type="button" class="card-primary" data-action="primary" data-id="${n.id}" title="${linked?'在 Windows 资源管理器打开文件夹':'进入子模块'}">
-      <strong>${h(n.title)}</strong><span class="path">${linked?h(n.folder_path):'导航分类 · 尚未绑定文件夹'}</span></button>
-    <div class="card-bottom"><span class="pill ${linked?'linked':''}">${linked?'● 已关联':`${childCount} 个子模块`}</span>
-      <div class="card-links">${childCount?`<button data-action="enter" data-id="${n.id}">进入子级 ›</button>`:''}
+    <button type="button" class="card-primary" data-action="primary" data-id="${n.id}" title="${primaryTitle}">
+      <strong>${h(n.title)}</strong><span class="type-chip ${n.node_type}">${TYPE_LABEL[n.node_type]||'模块'}</span>
+      <span class="path" title="${h(n.folder_path||lineage)}">${h(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`))}</span></button>
+    ${state.search?`<div class="entry-lineage" title="${h(lineage)}">⌁ ${h(lineage)}</div>`:''}
+    <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?'● 文件夹入口':`${childCount} 个子模块`}</span>
+      <div class="card-links">${!leaf?`<button data-action="enter" data-id="${n.id}">进入 ›</button>`:''}
         ${linked?`<button data-action="open" data-id="${n.id}">打开 ↗</button>`:''}
-        <button data-action="child" data-id="${n.id}">＋ 子模块</button>
+        ${!leaf?`<button data-action="child" data-id="${n.id}">＋ 子模块</button>`:''}
       </div></div>
   </article>`;
 }
@@ -98,6 +143,17 @@ function emptyView(){
     <p>${searching?'换个名称或路径关键词试试':'点击“新建模块”，建立你的第一层文件夹导航。'}</p>
     ${searching?'':`<button class="primary-btn" data-action="empty-create">＋ 创建模块</button>`}</div>`;
 }
+function searchAll(term){
+  const words=term.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  if(!words.length)return [];
+  return state.nodes.map(n=>{
+    const own=(n.title+" "+(n.folder_path||"")).toLocaleLowerCase();
+    const full=ancestors(n.id).map(x=>x.title).join(" /").toLocaleLowerCase();
+    const body=own+" "+full;
+    if(!words.every(w=>body.includes(w)))return null;
+    return {node:n,score:words.every(w=>own.includes(w))?0:1};
+  }).filter(Boolean).sort((a,b)=>a.score-b.score||a.node.title.localeCompare(b.node.title,"zh-CN")).map(x=>x.node);
+}
 function render(){
   if(state.view==="node" && !byId(state.selected)){state.view="all";state.selected=null}
   renderNav();renderCrumb();
@@ -105,50 +161,89 @@ function render(){
   $("#linkedCount").textContent=state.nodes.filter(n=>n.folder_path).length;
   $("#favStat").textContent=state.nodes.filter(n=>n.favorite).length;
   let display,title,subtitle,sectionTitle;
-  const searching=state.search.trim().toLocaleLowerCase();
-  if(searching){display=state.nodes.filter(n=>(n.title+" "+(n.folder_path||"")).toLocaleLowerCase().includes(searching));sectionTitle="搜索结果";title="快速查找文件夹";subtitle="全局检索所有模块、子模块和已保存的文件夹路径。";}
-  else if(state.view==="favorites"){display=sorted(state.nodes.filter(n=>n.favorite));title="我的收藏";subtitle="重要的文件夹，总是在触手可及的位置。";sectionTitle="常用文件夹";}
-  else if(state.view==="node") {const node=byId(state.selected);display=children(state.selected);title=node.title;subtitle=node.folder_path||"查看子模块，或者为此模块设置文件夹路径。";sectionTitle="下级模块";}
-  else{display=children(null);title="我的文件导航";subtitle="用清晰的分类，快速抵达电脑上的每一个工作文件夹。";sectionTitle="全部分类";}
+  const searching=state.search.trim();
+  if(searching){display=searchAll(searching);sectionTitle="全局搜索结果";title="搜索整个工作空间";subtitle="按模块名称、文件夹路径及所属分类查找所有层级的入口。";}
+  else if(state.view==="favorites"){display=sorted(state.nodes.filter(n=>n.favorite));title="我的收藏";subtitle="重要的文件夹，总是在触手可及的位置。";sectionTitle="常用入口";}
+  else if(state.view==="node") {
+    const node=byId(state.selected);
+    display=node.node_type==="leaf"?[node]:children(state.selected);
+    title=node.title;subtitle=node.node_type==="leaf"?node.folder_path:(node.folder_path||"查看下级模块，或为其添加叶子文件夹入口。");
+    sectionTitle=node.node_type==="leaf"?"当前文件夹":"下级模块";
+  } else{display=children(null);title="我的文件导航";subtitle="用清晰的分类，快速抵达电脑上的每一个工作文件夹。";sectionTitle="根模块";}
   $("#pageTitle").textContent=title;
   $("#pageSubtitle").textContent=subtitle;
   $("#sectionTitle").textContent=sectionTitle;
-  $("#sectionMeta").textContent=`共 ${display.length} 个项目 · ${searching?'搜索覆盖所有层级':'点击已绑定的模块卡片可打开系统文件资源管理器'}`;
-  $("#newBtnText").textContent=state.view==="node"&&!searching?"新建子模块":"新建模块";
+  $("#sectionMeta").textContent=`共 ${display.length} 个项目 · ${searching?'搜索覆盖整个目录树，结果显示完整所属层级':'叶子模块直接打开文件资源管理器'}`;
+  const canAddChild=state.view==="node"&&!searching&&byId(state.selected)?.node_type!=="leaf";
+  $("#newBtnText").textContent=canAddChild?"新建子模块":"新建根模块";
   $("#searchHint").textContent=searching?`${display.length} 项结果`:"全局搜索";
   $("#sectionOperations").innerHTML=state.view==="node"&&!searching?`<button data-action="edit-current">编辑当前模块</button>`:"";
   $("#entries").className="entries"+(state.layout==="list"?" list":"");
   $("#entries").innerHTML=display.length?display.map(card).join(""):emptyView();
 }
+function updateEntryType(){
+  const t=$("#entryType").value;
+  const parentSelect=$("#entryParent");
+  if(t==="root")parentSelect.value="";
+  else if(!parentSelect.value){
+    const first=parentSelect.querySelector('option[value]:not([value=""])');
+    if(first)parentSelect.value=first.value;
+  }
+  parentSelect.disabled=t==="root";
+  $("#entryParentRow").classList.toggle("hidden",t==="root");
+  const node=state.editing===null?null:byId(state.editing);
+  const hasLegacyPath=!!node?.folder_path && node.node_type!=="leaf" && node.node_type===t;
+  $("#entryPathRow").classList.toggle("hidden",t!=="leaf"&&!hasLegacyPath);
+  $("#entryPathRequired").textContent=t==="leaf"?"（必填）":hasLegacyPath?"（旧版路径，仅保留使用）":"";
+  $("#entryPath").required=t==="leaf";
+  $("#entryTypeHelp").textContent=t==="root"?"顶层分类，只能建在目录最上层。":
+    t==="group"?"用于继续划分子模块，可无限嵌套。":
+    "最末级文件夹入口：必须关联一个文件夹，不能添加子模块。";
+}
 function editDialog(id=null,parentId=undefined){
   state.editing=id;
   const node=id===null?null:byId(id);
+  const defaultParent=node?node.parent_id:(parentId!==undefined?parentId:(state.view==="node"&&byId(state.selected)?.node_type!=="leaf"?state.selected:null));
+  if(!node && defaultParent!==null && byId(defaultParent)?.node_type==="leaf"){
+    toast("叶子模块不能添加子模块",true);return;
+  }
   $("#dialogTitle").textContent=node?"编辑模块":"新建模块";
   $("#entryName").value=node?.title||"";
   $("#entryPath").value=node?.folder_path||"";
   $("#entryFavorite").checked=!!node?.favorite;
+  $("#entryType").value=node?.node_type||(defaultParent===null?"root":"group");
   const disabled = node?descendants(node.id):new Set();
-  const options=[`<option value="">顶级模块（无上级）</option>`];
+  const options=[`<option value="">顶级目录（仅根模块）</option>`];
   const walk=(nodes,depth)=>nodes.forEach(n=>{
-    if(disabled.has(n.id))return;
+    if(disabled.has(n.id)||n.node_type==="leaf")return;
     options.push(`<option value="${n.id}">${h("　".repeat(depth)+n.title)}</option>`);
     walk(children(n.id),depth+1);
   });walk(children(null),0);
   $("#entryParent").innerHTML=options.join("");
-  const defaultParent=node?node.parent_id:(parentId!==undefined?parentId:(state.view==="node"?state.selected:null));
   $("#entryParent").value=defaultParent===null?"":String(defaultParent);
+  updateEntryType();
   $("#dialogLayer").classList.remove("hidden");
   $("#entryName").focus();
 }
 function closeDialog(){$("#dialogLayer").classList.add("hidden");state.editing=null}
 async function submitDialog(event){
   event.preventDefault();
-  const payload={title:$("#entryName").value,folder_path:$("#entryPath").value,parent_id:$("#entryParent").value?Number($("#entryParent").value):null,favorite:$("#entryFavorite").checked};
+  const type=$("#entryType").value;
+  const payload={title:$("#entryName").value,node_type:type,
+    folder_path:type==="leaf"||(!$("#entryPathRow").classList.contains("hidden"))?$("#entryPath").value:null,
+    parent_id:type==="root"?null:($("#entryParent").value?Number($("#entryParent").value):null),
+    favorite:$("#entryFavorite").checked};
   const button=$("#submitEntry");button.disabled=true;
   try {
-    if(state.editing!==null)await mutate("PATCH",`/api/nodes/${state.editing}`,payload);
-    else await mutate("POST","/api/nodes",payload);
-    closeDialog();await refresh();toast("模块已保存");
+    const savedId=state.editing;
+    let created;
+    if(savedId!==null)await mutate("PATCH",`/api/nodes/${savedId}`,payload);
+    else created=await mutate("POST","/api/nodes",payload);
+    closeDialog();await refresh();
+    if(savedId!==null)expandLineage(savedId);
+    else if(type==="root"&&created?.id)state.expanded.add(created.id);
+    else if(created?.id)expandLineage(created.id);
+    saveTreeState();render();toast("模块已保存");
   }catch(e){toast(e.message,true)}finally{button.disabled=false}
 }
 async function openFolder(id){
@@ -169,9 +264,10 @@ async function favoriteNode(id){
 }
 async function act(action,id){
   switch(action){
-    case "primary":case "open":{const n=byId(id);if(n?.folder_path)await openFolder(id);else setView("node",id);break}
+    case "primary":{const n=byId(id);if(n?.node_type==="leaf")await openFolder(id);else setView("node",id);break}
+    case "open":await openFolder(id);break;
     case "enter":setView("node",id);break;
-    case "child":editDialog(null,id);break;
+    case "child":if(byId(id)?.node_type!=="leaf")editDialog(null,id);else toast("叶子模块不能拥有子模块",true);break;
     case "edit":editDialog(id);break;
     case "delete":await removeNode(id);break;
     case "favorite":await favoriteNode(id);break;
@@ -246,7 +342,13 @@ function fallbackCopy(url){const input=document.createElement("textarea");input.
 
 function bind(){
   $("#specialNav").addEventListener("click",e=>{const item=e.target.closest("[data-view]");if(item)setView(item.dataset.view)});
-  $("#treeNav").addEventListener("click",e=>{const item=e.target.closest("[data-node]");if(item)setView("node",Number(item.dataset.node))});
+  $("#treeNav").addEventListener("click",e=>{
+    const toggle=e.target.closest("[data-toggle]");
+    if(toggle){toggleBranch(Number(toggle.dataset.toggle));return}
+    const item=e.target.closest("[data-node]");if(!item)return;
+    const id=Number(item.dataset.node);const n=byId(id);
+    setView("node",id);if(n?.node_type==="leaf")openFolder(id);
+  });
   $("#breadcrumb").addEventListener("click",e=>{const item=e.target.closest("[data-crumb]");if(item)item.dataset.crumb==="all"?setView("all"):setView("node",Number(item.dataset.crumb))});
   $("#entries").addEventListener("click",e=>{const btn=e.target.closest("[data-action]");if(btn)act(btn.dataset.action,Number(btn.dataset.id))});
   $("#sectionOperations").addEventListener("click",e=>{const btn=e.target.closest("[data-action]");if(btn)act(btn.dataset.action,state.selected)});
@@ -266,6 +368,12 @@ function bind(){
   $("#copyHomepage").addEventListener("click",copyHomepage);
   $("#importFile").addEventListener("change",async e=>{await restoreBackup(e.target.files[0]);e.target.value=""});
   $("#entryForm").addEventListener("submit",submitDialog);
+  $("#entryType").addEventListener("change",updateEntryType);
+  $("#entryParent").addEventListener("change",e=>{
+    if(!e.target.value)$("#entryType").value="root";
+    else if($("#entryType").value==="root")$("#entryType").value="group";
+    updateEntryType();
+  });
   $("#dialogClose").addEventListener("click",closeDialog);
   $("#cancelDialog").addEventListener("click",closeDialog);
   $("#dialogLayer").addEventListener("click",e=>{if(e.target===$("#dialogLayer"))closeDialog()});
