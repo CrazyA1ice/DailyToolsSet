@@ -162,6 +162,29 @@ class Store:
                     image_data BLOB NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS trash_batches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    deleted_at TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    selected_count INTEGER NOT NULL,
+                    item_count INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS trash_nodes (
+                    batch_id INTEGER NOT NULL REFERENCES trash_batches(id) ON DELETE CASCADE,
+                    node_id INTEGER NOT NULL,
+                    parent_id INTEGER,
+                    title TEXT NOT NULL,
+                    folder_path TEXT,
+                    node_type TEXT NOT NULL,
+                    icon TEXT NOT NULL,
+                    favorite INTEGER NOT NULL,
+                    sort_order INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    image_mime TEXT,
+                    image_data BLOB,
+                    PRIMARY KEY(batch_id,node_id)
+                );
             """)
             cols = {row["name"] for row in db.execute("PRAGMA table_info(nodes)")}
             if "icon" not in cols:
@@ -254,10 +277,112 @@ class Store:
                 icon=?,favorite=?,sort_order=?,updated_at=? WHERE id=?""",
                 (parent,title,path,node_type,icon,int(favorite),order,now(),node_id))
 
+    @staticmethod
+    def _trash_delete(db, ids):
+        """Snapshot a complete subtree before deleting its navigation records.
+
+        Metadata and image bytes move atomically into a local-only recycle bin.
+        No real directories or files are changed.
+        """
+        selected = list(ids)
+        rows = db.execute("SELECT * FROM nodes ORDER BY sort_order,id").fetchall()
+        by_id = {row["id"]: row for row in rows}
+        if not selected or any(node_id not in by_id for node_id in selected):
+            raise UserError("所选模块有部分不存在，请刷新页面后重试")
+        branches = {}
+        for row in rows:
+            branches.setdefault(row["parent_id"], []).append(row["id"])
+        to_delete = set(selected)
+        queue = list(selected)
+        for node_id in queue:
+            for child_id in branches.get(node_id, ()):
+                if child_id not in to_delete:
+                    to_delete.add(child_id)
+                    queue.append(child_id)
+        title = by_id[selected[0]]["title"]
+        if len(selected) > 1:
+            title += f" 等 {len(selected)} 项"
+        result = db.execute("""INSERT INTO trash_batches(deleted_at,title,selected_count,item_count)
+            VALUES(?,?,?,?)""", (now(),title,len(selected),len(to_delete)))
+        batch_id = result.lastrowid
+        ordered_ids = sorted(to_delete)
+        for start in range(0, len(ordered_ids), 300):
+            chunk = ordered_ids[start:start+300]
+            placeholder = ",".join("?" for _ in chunk)
+            backups = db.execute(f"""SELECT n.*, i.mime_type AS image_mime,
+                i.image_data AS image_data FROM nodes n
+                LEFT JOIN node_images i ON i.node_id=n.id
+                WHERE n.id IN ({placeholder})""", chunk).fetchall()
+            db.executemany("""INSERT INTO trash_nodes(batch_id,node_id,parent_id,title,folder_path,
+                node_type,icon,favorite,sort_order,created_at,updated_at,image_mime,image_data)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", [
+                (batch_id,r["id"],r["parent_id"],r["title"],r["folder_path"],r["node_type"],
+                 r["icon"],r["favorite"],r["sort_order"],r["created_at"],r["updated_at"],
+                 r["image_mime"],r["image_data"]) for r in backups])
+        # Only delete the selected roots: SQLite cascades to descendants/images.
+        # Existing children have already been captured in trash_nodes above.
+        for start in range(0, len(selected), 300):
+            chunk = selected[start:start+300]
+            placeholder = ",".join("?" for _ in chunk)
+            db.execute(f"DELETE FROM nodes WHERE id IN ({placeholder})", chunk)
+        return {"ok": True, "trash_id": batch_id, "deleted": len(to_delete)}
+
     def delete(self, node_id):
         with self.connect() as db:
             self.require(db,node_id)
-            db.execute("DELETE FROM nodes WHERE id=?",(node_id,))
+            return self._trash_delete(db, [node_id])
+
+    def trash_list(self):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute("""SELECT id,deleted_at,title,
+                selected_count,item_count FROM trash_batches ORDER BY id DESC LIMIT 200""")]
+
+    def restore_trash(self, trash_id):
+        if type(trash_id) is not int or trash_id < 1:
+            raise UserError("回收站记录 ID 无效")
+        with self.connect() as db:
+            batch = db.execute("SELECT id FROM trash_batches WHERE id=?",(trash_id,)).fetchone()
+            if batch is None:
+                raise UserError("回收站记录不存在或已经恢复")
+            rows = db.execute("SELECT * FROM trash_nodes WHERE batch_id=?",(trash_id,)).fetchall()
+            pending = {r["node_id"]: r for r in rows}
+            if not pending:
+                raise UserError("回收站记录为空")
+            for node_id,row in pending.items():
+                if db.execute("SELECT 1 FROM nodes WHERE id=?", (node_id,)).fetchone():
+                    raise UserError("原模块 ID 已被其他模块使用，无法直接恢复。请先备份现有数据")
+                parent = row["parent_id"]
+                if parent is not None and parent not in pending:
+                    old_parent = db.execute("SELECT node_type FROM nodes WHERE id=?",(parent,)).fetchone()
+                    if old_parent is None:
+                        raise UserError("上级模块已不在目录中，请先恢复所属上级模块")
+                    if old_parent["node_type"] == "leaf":
+                        raise UserError("上级模块现在是叶子模块，不能恢复子模块")
+            while pending:
+                ready = [n for n,r in pending.items() if r["parent_id"] not in pending]
+                if not ready:
+                    raise UserError("回收站层级数据无效")
+                for node_id in ready:
+                    row = pending.pop(node_id)
+                    db.execute("""INSERT INTO nodes(id,parent_id,title,folder_path,node_type,icon,
+                        favorite,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                        (row["node_id"],row["parent_id"],row["title"],row["folder_path"],
+                         row["node_type"],row["icon"],row["favorite"],row["sort_order"],
+                         row["created_at"],row["updated_at"]))
+                    if row["image_mime"] is not None:
+                        db.execute("""INSERT INTO node_images(node_id,mime_type,image_data,updated_at)
+                            VALUES(?,?,?,?)""",(node_id,row["image_mime"],row["image_data"],now()))
+            db.execute("DELETE FROM trash_batches WHERE id=?",(trash_id,))
+            return {"ok": True, "restored": len(rows)}
+
+    def purge_trash(self, trash_id):
+        if type(trash_id) is not int or trash_id < 1:
+            raise UserError("回收站记录 ID 无效")
+        with self.connect() as db:
+            result = db.execute("DELETE FROM trash_batches WHERE id=?",(trash_id,))
+            if not result.rowcount:
+                raise UserError("回收站记录不存在或已清除")
+            return {"ok": True}
 
     def batch(self, action, ids):
         """Atomic changes to navigation entries only; never touches actual folders."""
@@ -274,12 +399,11 @@ class Store:
             if found != set(ids):
                 raise UserError("所选模块有部分不存在，请刷新页面后重试")
             if action == "delete":
-                # Child entries/images are cascaded by SQLite foreign keys.
-                db.execute(f"DELETE FROM nodes WHERE id IN ({placeholders})", ids)
-            else:
-                value = 1 if action == "favorite" else 0
-                db.execute(f"UPDATE nodes SET favorite=?,updated_at=? WHERE id IN ({placeholders})",
-                           [value, now(), *ids])
+                result = self._trash_delete(db, ids)
+                return {**result, "changed": len(ids)}
+            value = 1 if action == "favorite" else 0
+            db.execute(f"UPDATE nodes SET favorite=?,updated_at=? WHERE id IN ({placeholders})",
+                       [value, now(), *ids])
         return {"ok": True, "changed": len(ids)}
 
     def save_image(self, node_id, data_url):
@@ -490,6 +614,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200,startup.set_enabled(data.get("enabled")))
             if method=="GET" and path=="/api/nodes":
                 return self.reply(200,{"nodes":self.server.store.all()})
+            if method=="GET" and path=="/api/trash":
+                return self.reply(200,{"items":self.server.store.trash_list()})
+            if path.startswith("/api/trash/"):
+                parts=path.strip("/").split("/")
+                if len(parts)==4 and parts[2].isdigit() and parts[3]=="restore" and method=="POST":
+                    self.request_json()
+                    return self.reply(200,self.server.store.restore_trash(int(parts[2])))
+                if len(parts)==3 and parts[2].isdigit() and method=="DELETE":
+                    self.request_json()
+                    return self.reply(200,self.server.store.purge_trash(int(parts[2])))
+                return self.reply(404,{"error":"未知接口"})
             if method=="GET" and path=="/api/export":
                 return self.reply(200,self.server.store.export(),disposition='attachment; filename="folderhub-backup.json"')
             if method=="POST" and path=="/api/nodes":
@@ -530,8 +665,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.server.store.update(node_id,self.request_json())
                     return self.reply(200,{"ok":True})
                 if method=="DELETE" and len(pieces)==3:
-                    self.server.store.delete(node_id)
-                    return self.reply(200,{"ok":True})
+                    return self.reply(200,self.server.store.delete(node_id))
                 if method=="POST" and len(pieces)==4 and pieces[3]=="open":
                     self.request_json()
                     with self.server.store.connect() as db:

@@ -62,7 +62,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {openingIds:new Set(),nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+const state = {openingIds:new Set(),nodes:[],trash:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
 document.documentElement.dataset.theme=state.theme;
 applyPreferences();
 const $ = (s) => document.querySelector(s);
@@ -72,9 +72,18 @@ const byId = id => state.nodes.find(n => n.id === id);
 const sorted = nodes => [...nodes].sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
 const children = id => sorted(state.nodes.filter(n=>n.parent_id===id));
 
-function toast(message, error=false) {
-  const el=$("#toast"); el.textContent=message; el.className="toast show"+(error?" error":"");
-  clearTimeout(toastTimer);toastTimer=setTimeout(()=>{el.className="toast"},3600);
+function toast(message, error=false, action=null) {
+  const el=$("#toast");
+  el.replaceChildren(document.createTextNode(message));
+  if(action && typeof action.handler==="function"){
+    const button=document.createElement("button");
+    button.type="button";button.className="toast-action";
+    button.textContent=action.label||"撤销";
+    button.addEventListener("click",()=>{clearTimeout(toastTimer);el.className="toast";action.handler()},{once:true});
+    el.append(button);
+  }
+  el.className="toast show"+(error?" error":"");
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>{el.className="toast"},action?9000:3600);
 }
 async function api(path, options={}) {
   const headers={...(options.headers||{})};
@@ -101,7 +110,8 @@ function expandLineage(id){
   saveTreeState();
 }
 async function refresh(){
-  const data=await api("/api/nodes");state.nodes=data.nodes;
+  const [data,bin]=await Promise.all([api("/api/nodes"),api("/api/trash")]);
+  state.nodes=data.nodes;state.trash=bin.items;
   if(!state.treeInitialized){
     const saved=loadTreeState();
     state.expanded=new Set(Array.isArray(saved)?saved.filter(id=>Number.isInteger(id)):children(null).map(n=>n.id));
@@ -140,6 +150,7 @@ function toggleBranch(id){
 function renderNav(){
   const roots=children(null), fav=state.nodes.filter(n=>n.favorite);
   $("#rootCount").textContent=roots.length;$("#favoriteCount").textContent=fav.length;
+  $("#trashCount").textContent=state.trash.length;
   document.querySelectorAll("#specialNav [data-view]").forEach(el=>el.classList.toggle("active",state.view===el.dataset.view));
   const walk=(nodes) => nodes.map(n=>{
     const sub=children(n.id), expand=sub.length>0 && state.expanded.has(n.id), isLeaf=n.node_type==="leaf";
@@ -163,6 +174,7 @@ function renderCrumb(){
     $("#breadcrumb").innerHTML=bits.join("");return;
   }
   if(state.view==="favorites") bits.push(`<span>›</span><strong>我的收藏</strong>`);
+  if(state.view==="trash") bits.push(`<span>›</span><strong>回收站</strong>`);
   if(state.view==="node"){
     for(const n of ancestors(state.selected)){
       bits.push(`<span>›</span><button type="button" data-crumb="${n.id}">${h(n.title)}</button>`);
@@ -219,9 +231,37 @@ function searchAll(term){
     return {node:n,score:words.every(w=>own.includes(w))?0:1};
   }).filter(Boolean).sort((a,b)=>a.score-b.score||a.node.title.localeCompare(b.node.title,"zh-CN")).map(x=>x.node);
 }
+function trashCard(item){
+  const date=new Date(item.deleted_at);
+  const dateText=Number.isNaN(date.getTime())?"未知时间":date.toLocaleString("zh-CN");
+  return `<article class="trash-card" data-trash-id="${item.id}">
+    <span class="trash-card-icon" aria-hidden="true">♻</span>
+    <div class="trash-card-content"><strong>${h(item.title)}</strong>
+      <span>${item.item_count} 条导航记录 · ${h(dateText)}</span></div>
+    <div class="trash-card-actions">
+      <button type="button" class="outline-btn" data-trash-action="restore" data-trash-id="${item.id}">恢复</button>
+      <button type="button" class="outline-btn trash-purge" data-trash-action="purge" data-trash-id="${item.id}">永久清除</button>
+    </div>
+  </article>`;
+}
 function render(){
   if(state.view==="node" && !byId(state.selected)){state.view="all";state.selected=null}
   renderNav();renderCrumb();
+  const trashView=state.view==="trash"&&!state.search.trim();
+  $("#newBtn").hidden=trashView;
+  $("#selectModeBtn").hidden=trashView;
+  if(trashView){
+    state.visibleIds=[];
+    $("#sectionHeading").hidden=false;
+    $("#sectionTitle").textContent="导航回收站";
+    $("#sectionMeta").textContent="可恢复误删的模块、子模块及封面；不会触碰电脑中的真实文件夹";
+    $("#sectionOperations").innerHTML="";
+    $("#entries").className="entries trash-list";
+    $("#entries").innerHTML=state.trash.length?state.trash.map(trashCard).join(""):
+      '<div class="trash-empty"><span aria-hidden="true">♻</span><strong>回收站是空的</strong><p>移除的导航模块会暂存在这里，便于恢复。</p></div>';
+    updateBatchBar();
+    return;
+  }
   let display,sectionTitle;
   const searching=state.search.trim();
   if(searching){display=searchAll(searching);sectionTitle="全局搜索结果";}
@@ -429,8 +469,10 @@ async function openFolder(id){
 async function removeNode(id){
   const n=byId(id);if(!n)return;
   const count=descendants(id).size-1;
-  if(!confirm(`确定移除「${n.title}」${count?`及其 ${count} 个下级模块`:''}吗？\n\n只删除导航记录，不会删除电脑中的任何文件和文件夹。`))return;
-  try{await mutate("DELETE",`/api/nodes/${id}`);await refresh();toast("导航记录已移除，真实文件夹未受影响")}
+  if(!confirm(`确定将「${n.title}」${count?`及其 ${count} 个下级模块`:''}移入导航回收站吗？\n\n真实文件夹不会被移动或删除，可在回收站恢复。`))return;
+  try{const result=await mutate("DELETE",`/api/nodes/${id}`);await refresh();
+    toast(`已移入回收站（共 ${result.deleted} 条导航记录）`,false,
+      {label:"撤销",handler:()=>restoreTrash(result.trash_id)})}
   catch(e){toast(e.message,true)}
 }
 async function favoriteNode(id){
@@ -490,8 +532,24 @@ async function batchAction(action){
   try{
     const result=await mutate("POST","/api/batch",{action,ids});
     exitSelectMode();await refresh();
-    toast(action==="delete"?`已移除 ${result.changed} 个选中模块及其下级导航记录`:`已更新 ${result.changed} 个模块的收藏状态`);
+    if(action==="delete")toast(`已移入回收站（共 ${result.deleted} 条导航记录）`,false,
+      {label:"撤销",handler:()=>restoreTrash(result.trash_id)});
+    else toast(`已更新 ${result.changed} 个模块的收藏状态`);
   }catch(e){toast(e.message,true)}finally{state.batchBusy=false;updateBatchBar()}
+}
+async function restoreTrash(id){
+  try{
+    const result=await mutate("POST",`/api/trash/${id}/restore`);
+    await refresh();
+    toast(`已恢复 ${result.restored} 条导航记录及对应封面`);
+  }catch(e){toast("恢复失败："+e.message,true)}
+}
+async function purgeTrash(id){
+  const item=state.trash.find(x=>x.id===id);
+  if(!item)return;
+  if(!confirm(`永久清除「${item.title}」的回收站备份吗？\n\n清除后无法从回收站恢复导航记录和封面；电脑中的真实文件不受影响。`))return;
+  try{await mutate("DELETE",`/api/trash/${id}`);await refresh();toast("回收站记录已永久清除（真实文件未受影响）")}
+  catch(e){toast("清除失败："+e.message,true)}
 }
 function openCardMenu(id,x,y){
   closeCardMenu();
@@ -620,7 +678,17 @@ function bind(){
     setView("node",id);if(n?.node_type==="leaf")openFolder(id);
   });
   $("#breadcrumb").addEventListener("click",e=>{const item=e.target.closest("[data-crumb]");if(item)item.dataset.crumb==="all"?setView("all"):setView("node",Number(item.dataset.crumb))});
-  $("#entries").addEventListener("click",e=>{const btn=e.target.closest("[data-action]");if(btn)act(btn.dataset.action,Number(btn.dataset.id))});
+  $("#entries").addEventListener("click",e=>{
+    const trashButton=e.target.closest("[data-trash-action]");
+    if(trashButton){
+      const id=Number(trashButton.dataset.trashId);
+      if(trashButton.dataset.trashAction==="restore")restoreTrash(id);
+      else if(trashButton.dataset.trashAction==="purge")purgeTrash(id);
+      return;
+    }
+    const btn=e.target.closest("[data-action]");
+    if(btn)act(btn.dataset.action,Number(btn.dataset.id));
+  });
   $("#sectionOperations").addEventListener("click",e=>{const btn=e.target.closest("[data-action]");if(btn)act(btn.dataset.action,state.selected)});
   $("#addRoot").addEventListener("click",()=>editDialog(null,null));
   $("#newBtn").addEventListener("click",()=>editDialog());

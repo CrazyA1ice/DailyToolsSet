@@ -84,7 +84,9 @@ class StoreTests(unittest.TestCase):
         self.store.save_image(leaf,ImageStoreTests.PNG_URL)
         folder=Path(self.tmp.name)/"keep.txt"
         folder.write_text("must survive",encoding="utf-8")
-        self.assertEqual(self.store.batch("delete",[root,leaf]),{"ok":True,"changed":2})
+        result=self.store.batch("delete",[root,leaf])
+        self.assertEqual((result["ok"],result["changed"],result["deleted"]),(True,2,2))
+        self.assertIsInstance(result["trash_id"],int)
         self.assertEqual(self.store.all(),[])
         self.assertIsNone(self.store.get_image(leaf))
         self.assertEqual(folder.read_text(encoding="utf-8"),"must survive")
@@ -410,6 +412,119 @@ class ExplorerForegroundTests(unittest.TestCase):
             sleep=lambda t: None)
         self.assertFalse(result)
         self.assertEqual(attempted,[r'D:\\Projects'])
+
+
+
+class TrashTests(unittest.TestCase):
+    """Navigation-only recycle bin: atomic subtree snapshots and reversible deletion."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = app.Store(Path(self.tmp.name)/"trash.db")
+
+    def test_restore_entire_subtree_and_original_properties(self):
+        root = self.store.create({"title":"论文", "node_type":"root", "icon":"book"})
+        folder = self.store.create({"title":"实验", "node_type":"group", "parent_id":root})
+        leaf = self.store.create({"title":"GEANT", "node_type":"leaf", "parent_id":folder,
+                                  "folder_path":r"D:\Research\GEANT", "favorite":True})
+        png = "data:image/png;base64," + __import__('base64').b64encode(
+            b"\x89PNG\r\n\x1a\n" + b"\x00"*4 + b"IHDR" + b"\x00"*12).decode()
+        self.store.save_image(leaf,png)
+        before=self.store.all()
+        result=self.store.delete(root)
+        self.assertEqual((result["ok"],result["deleted"]),(True,3))
+        self.assertEqual(self.store.all(),[])
+        self.assertIsNone(self.store.get_image(leaf))
+        self.assertEqual(self.store.trash_list()[0]["item_count"],3)
+        back=self.store.restore_trash(result["trash_id"])
+        self.assertEqual(back["restored"],3)
+        restored=self.store.all()
+        self.assertEqual([r["id"] for r in restored],[r["id"] for r in before])
+        self.assertEqual(next(r for r in restored if r["id"]==leaf)["folder_path"],r"D:\Research\GEANT")
+        self.assertTrue(next(r for r in restored if r["id"]==leaf)["favorite"])
+        self.assertEqual(self.store.get_image(leaf)[0],"image/png")
+        self.assertEqual(self.store.trash_list(),[])
+
+    def test_batch_snapshot_no_duplicate_children_and_atomic_failure(self):
+        root=self.store.create({"title":"Root", "node_type":"root"})
+        group=self.store.create({"title":"Child", "node_type":"group", "parent_id":root})
+        leaf=self.store.create({"title":"Folder", "node_type":"leaf", "parent_id":group,
+                                "folder_path":r"D:\stuff"})
+        with self.assertRaises(app.UserError):self.store.batch("delete",[root,999999])
+        self.assertEqual(len(self.store.all()),3)
+        self.assertFalse(self.store.trash_list())
+        response=self.store.batch("delete",[root,leaf])
+        self.assertEqual(response["deleted"],3)
+        self.assertEqual(self.store.trash_list()[0]["selected_count"],2)
+        self.store.restore_trash(response["trash_id"])
+        self.assertEqual(len(self.store.all()),3)
+
+    def test_recovery_requires_original_parent_and_preserves_trash_on_error(self):
+        root=self.store.create({"title":"Root", "node_type":"root"})
+        group=self.store.create({"title":"Child", "node_type":"group", "parent_id":root})
+        r=self.store.delete(group)
+        self.store.delete(root)
+        with self.assertRaisesRegex(app.UserError,"上级模块"):
+            self.store.restore_trash(r["trash_id"])
+        self.assertEqual(len(self.store.trash_list()),2)
+        for batch in self.store.trash_list():
+            self.store.restore_trash(batch["id"])
+        self.assertEqual(len(self.store.all()),2)
+
+    def test_purge_does_not_affect_actual_path(self):
+        folder=Path(self.tmp.name)/"keep-me"
+        folder.mkdir()
+        leaf=self.store.create({"title":"Folder", "node_type":"root"})
+        batch=self.store.delete(leaf)
+        self.store.purge_trash(batch["trash_id"])
+        self.assertTrue(folder.is_dir())
+        self.assertEqual(self.store.trash_list(),[])
+        with self.assertRaises(app.UserError):self.store.restore_trash(batch["trash_id"])
+
+    def test_restore_id_collision_rolls_back(self):
+        a=self.store.create({"title":"A", "node_type":"root"})
+        batch=self.store.delete(a)
+        # Explicit old ID reuse, as can happen after importing a prior backup.
+        with self.store.connect() as db:
+            db.execute("""INSERT INTO nodes(id,parent_id,title,node_type,icon,favorite,sort_order,created_at,updated_at)
+                VALUES(?,NULL,'replacement','root','folder',0,0,'x','x')""",(a,))
+        with self.assertRaisesRegex(app.UserError,"ID"):
+            self.store.restore_trash(batch["trash_id"])
+        self.assertEqual(len(self.store.trash_list()),1)
+        self.assertEqual(self.store.all()[0]["title"],"replacement")
+
+
+class TrashHttpTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.server=app.FolderServer(("127.0.0.1",0),app.Store(Path(self.tmp.name)/"server.db"))
+        self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
+        self.addCleanup(self.server.server_close);self.addCleanup(self.server.shutdown)
+
+    def request(self,method,path,payload=None,authenticated=True):
+        conn=http.client.HTTPConnection("127.0.0.1",self.server.server_port,timeout=5)
+        headers={"Host":f"127.0.0.1:{self.server.server_port}"}
+        if payload is not None:headers["Content-Type"]="application/json"
+        if authenticated:headers["X-FolderHub-Token"]=self.server.token
+        conn.request(method,path,body=json.dumps(payload) if payload is not None else None,headers=headers)
+        response=conn.getresponse();raw=response.read();status=response.status;conn.close()
+        return status,json.loads(raw)
+
+    def test_trash_auth_restore_and_purge(self):
+        node=self.server.store.create({"title":"Test", "node_type":"root"})
+        status,deleted=self.request("DELETE",f"/api/nodes/{node}")
+        self.assertEqual(status,200)
+        rid=deleted["trash_id"]
+        self.assertEqual(self.request("GET","/api/trash")[1]["items"][0]["id"],rid)
+        self.assertEqual(self.request("POST",f"/api/trash/{rid}/restore",{},False)[0],403)
+        self.assertEqual(self.request("DELETE",f"/api/trash/{rid}",{},False)[0],403)
+        self.assertEqual(self.request("POST",f"/api/trash/{rid}/restore",{})[0],200)
+        self.assertEqual(len(self.server.store.all()),1)
+        self.assertEqual(self.request("GET","/api/trash")[1]["items"],[])
+        new=self.request("DELETE",f"/api/nodes/{node}")[1]["trash_id"]
+        self.assertEqual(self.request("DELETE",f"/api/trash/{new}",{})[0],200)
+        self.assertEqual(self.request("POST",f"/api/trash/{new}/restore",{})[0],400)
+
 
 if __name__ == "__main__":
     unittest.main()

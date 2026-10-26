@@ -71,6 +71,20 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('.entry-card.is-selected',self.css)
         self.assertIn('.card-context-menu',self.css)
 
+    def test_recycle_bin_and_undo_interface(self):
+        for item in ("trashCount", "specialNav", "entries"):
+            self.assertIn(f'id="{item}"', self.html)
+        self.assertIn('data-view="trash"', self.html)
+        self.assertIn('function restoreTrash(id)', self.js)
+        self.assertIn('function purgeTrash(id)', self.js)
+        self.assertIn('function trashCard(item)', self.js)
+        self.assertIn('"/api/trash"', self.js)
+        self.assertIn('data-trash-action="restore"', self.js)
+        self.assertIn('data-trash-action="purge"', self.js)
+        self.assertIn('toast-action', self.js)
+        self.assertIn('.trash-card', self.css)
+        self.assertIn('.toast-action', self.css)
+
     def test_cover_personalization_options(self):
         for key in ('coverHeight', 'coverFit'):
             self.assertIn(f'data-pref="{key}"', self.html)

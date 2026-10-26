@@ -437,3 +437,25 @@ html[data-cover-fit="contain"] .cover-preview img{object-fit:contain}
 .card-context-menu button.menu-danger{color:#cf354d}
 @media(max-width:1190px){.bulk-bar{top:125px}}
 @media(max-width:760px){.bulk-bar{position:static}.topbar #selectModeBtn{font-size:.76rem;padding:6px 8px}}
+
+/* V1.9: local navigation recycle bin and undo action. */
+.entries.trash-list{display:flex;flex-direction:column;gap:11px}
+.trash-card{display:flex;align-items:center;gap:17px;min-width:0;padding:19px 22px;
+ background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.trash-card-icon{width:50px;height:50px;display:grid;place-items:center;border-radius:12px;
+ background:var(--surface-soft);color:var(--muted);font-size:1.75rem;flex:none}
+.trash-card-content{display:flex;flex-direction:column;min-width:0;gap:4px;flex:1}
+.trash-card-content strong{font-size:1.05rem;overflow-wrap:anywhere}
+.trash-card-content span{font-size:.87rem;color:var(--muted)}
+.trash-card-actions{display:flex;gap:9px;flex-wrap:wrap}
+.trash-card-actions .outline-btn{min-height:38px}
+.trash-card-actions .trash-purge{color:#c13e4f;border-color:color-mix(in srgb,#c13e4f 35%,var(--line))}
+.trash-empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;gap:8px;
+ padding:64px 20px;background:var(--surface);border:1px dashed var(--line-strong);border-radius:var(--radius);color:var(--muted)}
+.trash-empty>span{font-size:2.9rem}.trash-empty strong{font-size:1.1rem;color:var(--text)}
+.trash-empty p{margin:0;text-align:center}
+.toast{display:flex;align-items:center;gap:15px;justify-content:center}
+.toast-action{font-size:.88rem;color:white;border:1px solid #ffffff80;background:#ffffff22;
+ border-radius:7px;padding:6px 11px;white-space:nowrap;font-weight:700}
+.toast-action:hover{background:#ffffff42}
+@media(max-width:760px){.trash-card{flex-wrap:wrap;padding:15px}.trash-card-actions{width:100%;justify-content:flex-end}}
