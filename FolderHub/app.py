@@ -236,7 +236,6 @@ class Store:
         for node_id, n in prepared.items():
             if n["parent"] is not None and n["parent"] not in prepared:
                 raise UserError("备份引用了不存在的上级模块")
-                raise UserError("备份引用了不存在的上级模块")
             checked = set()
             curr = node_id
             while curr is not None:
