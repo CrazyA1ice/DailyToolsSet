@@ -96,7 +96,9 @@ class AdminUiContractTests(unittest.TestCase):
         for control in ('settingsTabStorage', 'settingsPanelStorage', 'storageMetrics',
                         'storageRefresh', 'storageBackup', 'storageWarning'):
             self.assertIn(f'id="{control}"', self.html)
+        for control in ('storageMetrics', 'storageRefresh', 'storageBackup', 'storageWarning'):
             self.assertIn(control, self.js)
+        self.assertIn('["launch","appearance","storage"]', self.js)
         self.assertIn('function refreshStorage()', self.js)
         self.assertIn('function downloadPortableBackup()', self.js)
         self.assertIn('/api/storage/status', self.js)
