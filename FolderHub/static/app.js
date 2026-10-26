@@ -9,10 +9,62 @@ const THEMES = [
   {id:"graphite",title:"石墨",description:"柔和暗色",colors:["#181b24","#272c38","#97b2e2"]},
   {id:"system",title:"跟随系统",description:"自动适配",colors:["#d6d5e8","#252b42","#7b7ad6"]}
 ];
+// Ant Design Pro-inspired density, typography and workspace customization.
+// All presentation preferences are browser-local; SQLite navigation records are never changed.
+const PREF_DEFAULTS = Object.freeze({font:"large",density:"comfortable",sidebar:"normal",columns:"auto",accent:"blue",showIntro:true,showMetrics:true,sidebarCollapsed:false});
+const PREF_ALLOWED = {font:["normal","large","xlarge"],density:["comfortable","compact"],sidebar:["normal","wide"],columns:["auto","2","3","4"],accent:["blue","purple","teal","orange","rose"]};
+function readPreferences(){
+  try {
+    const stored=JSON.parse(localStorage.getItem("folderhub.appearance")||"{}");
+    if(!stored || typeof stored!=="object" || Array.isArray(stored))return {...PREF_DEFAULTS};
+    const result={...PREF_DEFAULTS};
+    for(const [key,values] of Object.entries(PREF_ALLOWED))if(values.includes(stored[key]))result[key]=stored[key];
+    for(const key of ["showIntro","showMetrics","sidebarCollapsed"])if(typeof stored[key]==="boolean")result[key]=stored[key];
+    return result;
+  } catch(_){return {...PREF_DEFAULTS}}
+}
+let preferences=readPreferences();
+function applyPreferences(){
+  const root=document.documentElement;
+  root.dataset.font=preferences.font;
+  root.dataset.density=preferences.density;
+  root.dataset.sidebarWidth=preferences.sidebar;
+  root.dataset.columns=preferences.columns;
+  root.dataset.accent=preferences.accent;
+  root.dataset.showIntro=String(preferences.showIntro);
+  root.dataset.showMetrics=String(preferences.showMetrics);
+  root.dataset.sidebarCollapsed=String(preferences.sidebarCollapsed);
+  const trigger=document.querySelector("#sidebarToggle");
+  if(trigger)trigger.setAttribute("aria-expanded",String(!preferences.sidebarCollapsed));
+  const intro=document.querySelector(".intro");
+  if(intro)intro.hidden=!preferences.showIntro;
+  const summary=document.querySelector(".summary");
+  if(summary)summary.hidden=!preferences.showMetrics;
+}
+function updateAppearanceControls(){
+  document.querySelectorAll("[data-pref][data-value]").forEach(button=>{
+    const active=preferences[button.dataset.pref]===button.dataset.value;
+    button.classList.toggle("selected",active);
+    button.setAttribute("aria-pressed",String(active));
+  });
+  const intro=document.querySelector("#showIntroToggle");if(intro)intro.checked=preferences.showIntro;
+  const metrics=document.querySelector("#showMetricsToggle");if(metrics)metrics.checked=preferences.showMetrics;
+}
+function setPreference(key,value){
+  if(Object.hasOwn(PREF_ALLOWED,key) && PREF_ALLOWED[key].includes(value)){
+    preferences[key]=value;
+    savePreferences();
+  }
+}
+function savePreferences(){
+  try{localStorage.setItem("folderhub.appearance",JSON.stringify(preferences))}catch(_){}
+  applyPreferences();updateAppearanceControls();
+}
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
 const state = {openingIds:new Set(),nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false};
 document.documentElement.dataset.theme=state.theme;
+applyPreferences();
 const $ = (s) => document.querySelector(s);
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let toastTimer;
@@ -323,8 +375,22 @@ async function refreshStartup(){
     label.textContent=!result.supported?"仅 Windows 平台支持":result.needs_update?"启动项路径已变化，重新开启可更新":"当前状态："+(result.enabled?"已开启":"未开启");
   } catch(e) {label.textContent="无法读取启动项："+e.message}
 }
+function selectSettingsTab(tab){
+  const current=tab==="launch"?"launch":"appearance";
+  document.querySelectorAll("[data-settings-tab]").forEach(button=>{
+    const selected=button.dataset.settingsTab===current;
+    button.classList.toggle("selected",selected);
+    button.setAttribute("aria-selected",String(selected));
+  });
+  document.querySelectorAll("[data-settings-page]").forEach(panel=>{
+    panel.classList.toggle("hidden",panel.dataset.settingsPage!==current);
+  });
+  $(".settings-dialog").scrollTop=0;
+}
 function openSettings(){
   renderThemeOptions();
+  updateAppearanceControls();
+  selectSettingsTab("appearance");
   $("#homepageUrl").textContent=location.origin+"/";
   $("#settingsLayer").classList.remove("hidden");
   $("#settingsClose").focus();
@@ -371,6 +437,12 @@ function bind(){
   $("#settingsDone").addEventListener("click",closeSettings);
   $("#settingsLayer").addEventListener("click",e=>{if(e.target===$("#settingsLayer"))closeSettings()});
   $("#themeOptions").addEventListener("click",e=>{const btn=e.target.closest("[data-theme-choice]");if(btn)setTheme(btn.dataset.themeChoice)});
+  $("#settingsLayer").addEventListener("click",e=>{const pref=e.target.closest("[data-pref][data-value]");if(pref)setPreference(pref.dataset.pref,pref.dataset.value)});
+  $("#settingsLayer").addEventListener("click",e=>{const tab=e.target.closest("[data-settings-tab]");if(tab)selectSettingsTab(tab.dataset.settingsTab)});
+  $("#showIntroToggle").addEventListener("change",e=>{preferences.showIntro=e.target.checked;savePreferences()});
+  $("#showMetricsToggle").addEventListener("change",e=>{preferences.showMetrics=e.target.checked;savePreferences()});
+  $("#resetAppearance").addEventListener("click",()=>{preferences={...PREF_DEFAULTS};savePreferences();toast("布局与字号已恢复默认")});
+  $("#sidebarToggle").addEventListener("click",()=>{preferences.sidebarCollapsed=!preferences.sidebarCollapsed;savePreferences()});
   $("#startupToggle").addEventListener("change",e=>changeStartup(e.target.checked));
   $("#copyHomepage").addEventListener("click",copyHomepage);
   $("#importFile").addEventListener("change",async e=>{await restoreBackup(e.target.files[0]);e.target.value=""});
@@ -393,6 +465,7 @@ function bind(){
 }
 async function init(){
   bind();
+  applyPreferences();
   try{const c=await api("/api/config");state.token=c.token;await refresh();if(c.platform!=="win32")toast("当前非 Windows 系统，浏览和打开资源管理器功能不可用",true)}
   catch(e){toast(e.message,true);$("#entries").innerHTML=`<div class="empty-state"><h3>本地服务无法连接</h3><p>${h(e.message)}</p></div>`}
 }

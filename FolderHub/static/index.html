@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f3f5fa">
   <title>FolderHub · 本地文件导航</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
@@ -12,21 +13,21 @@
 <body>
 <div class="app-shell">
   <aside class="sidebar" aria-label="文件分类">
-    <div class="brand"><span class="brand-icon" aria-hidden="true">▦</span><div><strong>FolderHub</strong><small>DAILY TOOLS SET</small></div></div>
-    <div class="nav-label">工作空间 <span class="nav-label-dot">•</span></div>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">▦</span><div class="brand-copy"><strong>FolderHub</strong><small>本地文件管理工作台</small></div></div>
+    <div class="nav-label">快捷导航</div>
     <nav id="specialNav" class="nav-stack">
       <button type="button" class="nav-item active" data-view="all"><span>◫</span> 所有模块 <span class="nav-count" id="rootCount">0</span></button>
       <button type="button" class="nav-item" data-view="favorites"><span>★</span> 我的收藏 <span class="nav-count" id="favoriteCount">0</span></button>
     </nav>
     <div class="nav-group-header"><span class="nav-label">分层目录</span><button id="addRoot" class="icon-button" title="添加根模块" aria-label="添加根模块">＋</button></div>
     <nav id="treeNav" class="tree-nav" aria-label="模块树"></nav>
-    <div class="side-footer"><div class="side-footer-icon">◎</div><div><strong>文件仍在原来的位置</strong><small>仅保存分类与路径，不移动文件</small></div></div>
+    <div class="side-footer"><div class="side-footer-icon">✓</div><div><strong>本地安全运行</strong><small>只管理入口，不移动文件</small></div></div>
   </aside>
   <main class="main">
     <header class="topbar">
-      <div class="crumb" id="breadcrumb"></div>
+      <div class="topbar-leading"><button id="sidebarToggle" type="button" class="icon-button sidebar-trigger" title="展开或收起侧边栏" aria-label="展开或收起侧边栏" aria-expanded="true">☰</button><div class="crumb" id="breadcrumb"></div></div>
       <div class="top-actions">
-        <span class="server-status"><i></i>仅本机运行</span><span class="keyhint" title="按 Ctrl+K 可以快速搜索">Ctrl K</span>
+        <span class="server-status"><i></i>本地运行中</span><span class="keyhint" title="按 Ctrl+K 可以快速搜索">Ctrl + K</span>
         <button id="themeBtn" type="button" class="text-btn accent-action" title="主题换肤">◐ <span>换肤</span></button>
         <button id="settingsBtn" type="button" class="text-btn" title="设置开机启动和首页">⚙ <span>设置</span></button>
         <button id="backupBtn" type="button" class="text-btn" title="导出 JSON 配置">⇩ <span>备份</span></button>
@@ -34,7 +35,7 @@
       </div>
     </header>
     <div class="content">
-      <section class="intro"><div class="intro-text"><span class="eyebrow">✦ YOUR DIGITAL SHELF</span><h1 id="pageTitle">我的文件导航</h1><p id="pageSubtitle">用清晰的分类，快速抵达电脑上的每一个工作文件夹。</p><div class="hero-guide"><span>⌕ 快捷搜索 <kbd>Ctrl K</kbd></span><span>▣ 叶子模块直接打开资源管理器</span></div></div><div class="intro-decoration" aria-hidden="true"><span>◫</span><span class="hero-orbit"></span></div></section>
+      <section class="intro" aria-label="页面说明"><div class="intro-text"><span class="eyebrow">WORKSPACE / 文件导航</span><h1 id="pageTitle">我的文件导航</h1><p id="pageSubtitle">快速定位电脑上的所有工作文件夹。</p><div class="hero-guide"><span>按 Ctrl + K 全局搜索</span><span>叶子模块直接打开资源管理器</span></div></div></section>
       <section class="summary" aria-label="文件夹统计">
         <div class="metric"><div class="metric-icon violet">▤</div><div><span class="metric-value" id="nodeCount">0</span><span class="metric-label">总模块数</span></div></div>
         <div class="metric"><div class="metric-icon blue">▣</div><div><span class="metric-value" id="linkedCount">0</span><span class="metric-label">已关联文件夹</span></div></div>
@@ -44,7 +45,7 @@
         <div class="search-wrap"><span class="search-icon">⌕</span><input id="search" type="search" placeholder="全局搜索：模块名、完整分类路径、文件夹路径..." autocomplete="off" aria-label="搜索所有层级模块"><span id="searchHint">全局搜索</span></div>
         <div class="tool-buttons"><button id="layoutBtn" type="button" class="icon-button square" title="切换网格和列表" aria-label="切换网格和列表">▦</button><button id="newBtn" type="button" class="primary-btn">＋ <span id="newBtnText">新建模块</span></button></div>
       </section>
-      <div class="section-heading"><div><span class="section-kicker">EXPLORE YOUR FILES</span><h2 id="sectionTitle">全部分类</h2><p id="sectionMeta">点击模块即可进入，绑定文件夹后可直接打开资源管理器</p></div><div id="sectionOperations"></div></div>
+      <div class="section-heading"><div><span class="section-kicker">文件夹与分类</span><h2 id="sectionTitle">全部分类</h2><p id="sectionMeta">点击模块即可进入，绑定文件夹后可直接打开资源管理器</p></div><div id="sectionOperations"></div></div>
       <section class="entries" id="entries" aria-live="polite"></section>
     </div>
   </main>
@@ -52,7 +53,22 @@
 <div id="settingsLayer" class="dialog-layer hidden" role="presentation">
   <div class="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="dialog-header"><div><div class="eyebrow">PERSONALIZE YOUR SPACE</div><h2 id="settingsTitle">外观与启动设置</h2><p class="settings-subtitle">打造属于你的本地文件导航首页</p></div><button id="settingsClose" class="icon-button" title="关闭设置" aria-label="关闭设置">✕</button></div>
+    <div class="settings-tabs" role="tablist" aria-label="设置类别"><button type="button" role="tab" id="settingsTabAppearance" data-settings-tab="appearance" aria-controls="settingsPanelAppearance" aria-selected="true">外观与布局</button><button type="button" role="tab" id="settingsTabLaunch" data-settings-tab="launch" aria-controls="settingsPanelLaunch" aria-selected="false">启动与首页</button></div>
+    <div id="settingsPanelAppearance" class="settings-page" data-settings-page="appearance" role="tabpanel" aria-labelledby="settingsTabAppearance">
     <section class="settings-section"><div class="setting-heading"><h3>🎨 主题换肤</h3><p>选中的外观会自动保存在此浏览器，下次打开继续使用。</p></div><div class="theme-grid" id="themeOptions" role="group" aria-label="选择主题"></div></section>
+    <section class="settings-section"><div class="setting-heading"><h3>布局与显示</h3><p>修改后即时生效，并保存在当前浏览器。适合不同分辨率的桌面屏幕。</p></div>
+      <div class="appearance-grid">
+        <div class="appearance-field"><label>界面字号</label><div class="choice-segment" role="group" aria-label="界面字号"><button type="button" data-pref="font" data-value="normal">标准</button><button type="button" data-pref="font" data-value="large">较大</button><button type="button" data-pref="font" data-value="xlarge">特大</button></div></div>
+        <div class="appearance-field"><label>内容密度</label><div class="choice-segment" role="group" aria-label="内容密度"><button type="button" data-pref="density" data-value="comfortable">舒适</button><button type="button" data-pref="density" data-value="compact">紧凑</button></div></div>
+        <div class="appearance-field"><label>侧栏宽度</label><div class="choice-segment" role="group" aria-label="侧栏宽度"><button type="button" data-pref="sidebar" data-value="normal">标准</button><button type="button" data-pref="sidebar" data-value="wide">加宽</button></div></div>
+        <div class="appearance-field"><label>网格列数</label><div class="choice-segment" role="group" aria-label="文件夹卡片列数"><button type="button" data-pref="columns" data-value="auto">自动</button><button type="button" data-pref="columns" data-value="2">两列</button><button type="button" data-pref="columns" data-value="3">三列</button><button type="button" data-pref="columns" data-value="4">四列</button></div></div>
+      </div>
+      <div class="appearance-field color-field"><label>强调色</label><div id="accentOptions" class="accent-options" role="group" aria-label="强调色"><button type="button" data-pref="accent" data-value="blue" title="管理蓝" aria-label="管理蓝"></button><button type="button" data-pref="accent" data-value="purple" title="星云紫" aria-label="星云紫"></button><button type="button" data-pref="accent" data-value="teal" title="青绿色" aria-label="青绿色"></button><button type="button" data-pref="accent" data-value="orange" title="暖橙色" aria-label="暖橙色"></button><button type="button" data-pref="accent" data-value="rose" title="玫瑰红" aria-label="玫瑰红"></button></div></div>
+      <div class="appearance-switches"><label class="inline-switch"><input id="showIntroToggle" type="checkbox"><span>显示页面介绍</span></label><label class="inline-switch"><input id="showMetricsToggle" type="checkbox"><span>显示数据概览</span></label></div>
+      <button type="button" id="resetAppearance" class="outline-btn">恢复默认布局</button>
+    </section>
+    </div>
+    <div id="settingsPanelLaunch" class="settings-page hidden" data-settings-page="launch" role="tabpanel" aria-labelledby="settingsTabLaunch">
     <section class="settings-section"><div class="setting-heading"><h3>⏻ 开机自启动</h3><p>Windows 登录后使用 pythonw.exe 静默启动，不显示命令行窗口，也不会主动打开浏览器。</p></div>
       <label class="toggle-row" for="startupToggle"><div><strong>登录 Windows 后自动运行</strong><small id="startupStatus">正在检查启动状态...</small></div><span class="switch"><input type="checkbox" id="startupToggle" disabled><span class="slider"></span></span></label>
       <p class="settings-note">默认关闭。仅操作当前用户的启动项，无需管理员权限；关闭开关不会停止当前服务。手动静默启动可双击 start_silent.pyw；如需查看错误则使用 start_windows.bat。</p>
@@ -61,6 +77,7 @@
       <div class="homepage-row"><code id="homepageUrl">http://127.0.0.1:8765/</code><button type="button" class="outline-btn" id="copyHomepage">复制地址</button></div>
       <p class="settings-note">打开文件夹后会尝试把资源管理器窗口提升到浏览器前方，但 Windows 焦点保护机制可能限制这一操作。</p><p class="settings-note">Chrome：设置 → 启动时 → 打开特定网页；Edge：设置 → 开始、主页和新建标签页。初次登录时若显示无法连接，稍后刷新页面即可。</p>
     </section>
+    </div>
     <div class="dialog-footer"><button id="settingsDone" type="button" class="primary-btn">完成设置</button></div>
   </div>
 </div>
