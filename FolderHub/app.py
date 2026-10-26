@@ -990,7 +990,7 @@ class Handler(BaseHTTPRequestHandler):
                     # not incorrectly tell the user that opening itself failed.
                     try:
                         self.server.store.record_open(node_id)
-                    except sqlite3.Error as exc:
+                    except (sqlite3.Error, UserError) as exc:
                         print("[FolderHub] usage history could not be saved:",repr(exc),file=sys.stderr)
                     return self.reply(200,{"ok":True})
             if method=="GET" and path in ("/","/index.html","/app.js","/styles.css","/favicon.svg"):

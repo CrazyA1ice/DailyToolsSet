@@ -578,7 +578,11 @@ class RecentUsageTests(unittest.TestCase):
         self.assertEqual(restored.recent(),[], "Full JSON replacement resets history for reused node IDs")
 
 
-class RecentUsageHttpTests(HttpTests):
+class RecentUsageHttpTests(unittest.TestCase):
+    # Reuse the HTTP fixture without inheriting and re-running every HttpTests case.
+    setUp = HttpTests.setUp
+    request = HttpTests.request
+
     def test_open_success_only_and_recent_clear_security(self):
         root=self.srv.store.create({"title":"根","node_type":"root"})
         leaf=self.srv.store.create({"title":"入口","node_type":"leaf","parent_id":root,
