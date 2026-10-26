@@ -10,7 +10,7 @@ const THEMES = [
   {id:"system",title:"跟随系统",description:"自动适配",colors:["#d6d5e8","#252b42","#7b7ad6"]}
 ];
 // Ant Design Pro-inspired density, typography and workspace customization.
-// All presentation preferences are browser-local; SQLite navigation records are never changed.
+// Project-owned preferences are stored in data/preferences.json; browser values are imported only once.
 const ICONS = {
   folder:"📁",book:"📚",code:"💻",chart:"📊",database:"🗃️",image:"🖼️",
   briefcase:"💼",school:"🎓",music:"🎵",video:"🎬",archive:"🗄️",star:"⭐"
@@ -27,7 +27,7 @@ function readPreferences(){
     return result;
   } catch(_){return {...PREF_DEFAULTS}}
 }
-let preferences=readPreferences();
+let preferences={...PREF_DEFAULTS};
 function applyPreferences(){
   const root=document.documentElement;
   root.dataset.font=preferences.font;
@@ -57,12 +57,60 @@ function setPreference(key,value){
   }
 }
 function savePreferences(){
-  try{localStorage.setItem("folderhub.appearance",JSON.stringify(preferences))}catch(_){}
-  applyPreferences();updateAppearanceControls();
+  applyPreferences();updateAppearanceControls();persistProjectSettings();
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {openingIds:new Set(),nodes:[],trash:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+const state = {openingIds:new Set(),nodes:[],trash:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+// The server is authoritative. localStorage is read ONLY to migrate a legacy browser once.
+let initialExpanded=null;
+let projectSettingsReady=false;
+let pendingSettings=null;
+let settingsWriteInFlight=false;
+function collectProjectSettings(){
+  return {...preferences,theme:state.theme,layout:state.layout,
+    expanded:state.treeInitialized?[...state.expanded]:initialExpanded};
+}
+async function persistProjectSettings(){
+  if(!projectSettingsReady)return;
+  pendingSettings=collectProjectSettings();
+  if(settingsWriteInFlight)return;
+  settingsWriteInFlight=true;
+  try{
+    while(pendingSettings){
+      const snapshot=pendingSettings;pendingSettings=null;
+      try{await mutate("PUT","/api/preferences",{settings:snapshot})}
+      catch(e){toast("保存项目个性化设置失败："+e.message,true)}
+    }
+  }finally{settingsWriteInFlight=false}
+}
+function legacyBrowserSettings(){
+  const settings={...readPreferences(),theme:getSavedTheme(),layout:"grid",expanded:loadTreeState()};
+  if(!Array.isArray(settings.expanded)||settings.expanded.length>20000 ||
+     settings.expanded.some(n=>!Number.isInteger(n)||n<1)||
+     new Set(settings.expanded).size!==settings.expanded.length)settings.expanded=null;
+  return settings;
+}
+async function loadProjectSettings(){
+  let payload=await api("/api/preferences");
+  if(!payload.configured){
+    // POST is a write-once import: another browser's already saved preferences win.
+    payload=await mutate("POST","/api/preferences",{settings:legacyBrowserSettings()});
+  }
+  const saved=payload.settings||{};
+  preferences={...PREF_DEFAULTS};
+  for(const [key,values] of Object.entries(PREF_ALLOWED))
+    if(values.includes(saved[key]))preferences[key]=saved[key];
+  for(const key of ["showCovers","sidebarCollapsed"])
+    if(typeof saved[key]==="boolean")preferences[key]=saved[key];
+  state.theme=validTheme(saved.theme);
+  state.layout=saved.layout==="list"?"list":"grid";
+  initialExpanded=Array.isArray(saved.expanded)?saved.expanded:null;
+  projectSettingsReady=true;
+  document.documentElement.dataset.theme=state.theme;
+  $("#layoutBtn").textContent=state.layout==="grid"?"▦":"☷";
+  applyPreferences();updateAppearanceControls();
+}
 document.documentElement.dataset.theme=state.theme;
 applyPreferences();
 const $ = (s) => document.querySelector(s);
@@ -104,7 +152,7 @@ function loadTreeState() {
   try {const saved=localStorage.getItem("folderhub.expanded");return saved===null?null:JSON.parse(saved)}
   catch(_){return null}
 }
-function saveTreeState(){try{localStorage.setItem("folderhub.expanded",JSON.stringify([...state.expanded]))}catch(_){}}
+function saveTreeState(){persistProjectSettings()}
 function expandLineage(id){
   for(const node of ancestors(id)){if(node.node_type!=="leaf")state.expanded.add(node.id)}
   saveTreeState();
@@ -113,7 +161,7 @@ async function refresh(){
   const [data,bin]=await Promise.all([api("/api/nodes"),api("/api/trash")]);
   state.nodes=data.nodes;state.trash=bin.items;
   if(!state.treeInitialized){
-    const saved=loadTreeState();
+    const saved=initialExpanded;
     state.expanded=new Set(Array.isArray(saved)?saved.filter(id=>Number.isInteger(id)):children(null).map(n=>n.id));
     state.treeInitialized=true;
   }
@@ -601,8 +649,7 @@ async function restoreBackup(file){
 function setTheme(theme) {
   state.theme=validTheme(theme);
   document.documentElement.dataset.theme=state.theme;
-  try{localStorage.setItem("folderhub.theme",state.theme)}catch(_){/* private mode may block storage */}
-  renderThemeOptions();
+  renderThemeOptions();persistProjectSettings();
 }
 function renderThemeOptions(){
   $("#themeOptions").innerHTML=THEMES.map(t=>`<button type="button" class="theme-choice ${t.id===state.theme?'selected':''}" data-theme-choice="${t.id}" aria-pressed="${t.id===state.theme}">
@@ -789,7 +836,7 @@ function bind(){
   $("#addRoot").addEventListener("click",()=>editDialog(null,null));
   $("#newBtn").addEventListener("click",()=>editDialog());
   $("#search").addEventListener("input",e=>{closeCardMenu();state.selectedIds.clear();state.search=e.target.value;render()});
-  $("#layoutBtn").addEventListener("click",()=>{state.layout=state.layout==="grid"?"list":"grid";$("#layoutBtn").textContent=state.layout==="grid"?"▦":"☷";render()});
+  $("#layoutBtn").addEventListener("click",()=>{state.layout=state.layout==="grid"?"list":"grid";$("#layoutBtn").textContent=state.layout==="grid"?"▦":"☷";render();persistProjectSettings()});
   $("#backupBtn").addEventListener("click",exportBackup);
   $("#restoreBtn").addEventListener("click",()=>$("#importFile").click());
   $("#themeBtn").addEventListener("click",openSettings);
@@ -840,7 +887,12 @@ function bind(){
 async function init(){
   bind();
   applyPreferences();
-  try{const c=await api("/api/config");state.token=c.token;await refresh();if(c.platform!=="win32")toast("当前非 Windows 系统，浏览和打开资源管理器功能不可用",true)}
+  try{
+    const c=await api("/api/config");state.token=c.token;
+    await loadProjectSettings();
+    await refresh();
+    if(c.platform!=="win32")toast("当前非 Windows 系统，浏览和打开资源管理器功能不可用",true);
+  }
   catch(e){toast(e.message,true);$("#entries").innerHTML=`<div class="empty-state"><h3>本地服务无法连接</h3><p>${h(e.message)}</p></div>`}
 }
 init();

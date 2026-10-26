@@ -26,6 +26,7 @@ import webbrowser
 import startup
 import explorer_window
 import path_management
+from preferences_store import PreferencesStore, PreferenceError
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -152,6 +153,7 @@ def validate_parent(value):
 class Store:
     def __init__(self, db_path: Path, uploads_dir: Path | None = None):
         self.db_path = Path(db_path)
+        self.preferences = PreferencesStore(self.db_path.parent / "preferences.json")
         self.uploads_dir = Path(uploads_dir) if uploads_dir is not None else self.db_path.parent / "uploads"
         self._image_lock = RLock()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -353,12 +355,14 @@ class Store:
                 zip_temp = Path(name)
                 with zipfile.ZipFile(zip_temp, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
                     archive.write(db_temp, 'data/folderhub.db')
+                    archive.writestr('data/preferences.json', self.preferences.snapshot_bytes())
                     for relative, path in covers:
                         archive.write(path, relative)
                     archive.writestr('README-RESTORE.txt',
                         'FolderHub complete portable backup.\n'
                         'Stop FolderHub before restoring.\n'
                         'Extract the data/ and uploads/ folders into FolderHub/.\n'
+                        'data/preferences.json stores the theme, layout and sidebar preferences.\n'
                         'Make a copy of existing data/ and uploads/ BEFORE replacing them.\n'
                         'Folder paths stored in the database may not exist on another PC.\n')
                 return zip_temp
@@ -833,6 +837,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if method=="GET" and path=="/api/config":
                 return self.reply(200,{"token":self.server.token,"platform":sys.platform})
+            if path=="/api/preferences":
+                if method=="GET":
+                    return self.reply(200,self.server.store.preferences.get())
+                if method in ("PUT","POST"):
+                    data=self.request_json(128 * 1024)
+                    result=self.server.store.preferences.save(
+                        data.get("settings"),only_if_missing=method=="POST")
+                    return self.reply(200,result)
+                return self.reply(405,{"error":"不支持的请求方法"})
             if method=="GET" and path=="/api/startup":
                 return self.reply(200,startup.status())
             if method=="POST" and path=="/api/startup":
@@ -929,7 +942,7 @@ class Handler(BaseHTTPRequestHandler):
                 types={"index.html":"text/html; charset=utf-8","app.js":"application/javascript; charset=utf-8","styles.css":"text/css; charset=utf-8","favicon.svg":"image/svg+xml"}
                 return self.reply(200,(STATIC / name).read_bytes(),types[name])
             return self.reply(404,{"error":"页面或接口不存在"})
-        except (UserError, startup.StartupError, path_management.PathRuleError) as exc:
+        except (UserError, PreferenceError, startup.StartupError, path_management.PathRuleError) as exc:
             return self.reply(400,{"error":str(exc)})
         except (OSError,sqlite3.Error) as exc:
             print("[FolderHub] error:",repr(exc),file=sys.stderr)
@@ -937,6 +950,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self): self.serve("GET")
     def do_POST(self): self.serve("POST")
+    def do_PUT(self): self.serve("PUT")
     def do_PATCH(self): self.serve("PATCH")
     def do_DELETE(self): self.serve("DELETE")
 

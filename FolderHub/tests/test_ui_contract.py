@@ -117,6 +117,16 @@ class AdminUiContractTests(unittest.TestCase):
             self.assertIn(endpoint, self.js)
         self.assertIn('.path-results', self.css)
 
+    def test_presentation_settings_are_portable(self):
+        self.assertIn('async function loadProjectSettings()', self.js)
+        self.assertIn('async function persistProjectSettings()', self.js)
+        self.assertIn('"/api/preferences"', self.js)
+        self.assertIn('projectSettingsReady', self.js)
+        self.assertIn('initialExpanded', self.js)
+        self.assertIn('state.layout', self.js)
+        self.assertIn('function legacyBrowserSettings()', self.js)
+        self.assertNotIn('localStorage.setItem(', self.js)
+
     def test_customization_options_and_persistence(self):
         for pref in ("font", "density", "sidebar", "columns", "accent", "coverHeight", "coverFit"):
             self.assertIn(f'data-pref="{pref}"', self.html)

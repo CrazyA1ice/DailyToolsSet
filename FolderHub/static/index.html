@@ -88,8 +88,8 @@
         <div class="setting-heading"><h3>📦 本地数据健康状态</h3><p>只检查 FolderHub 运行数据，不扫描你绑定的真实文件夹。</p></div>
         <div class="storage-metrics" id="storageMetrics" aria-live="polite"><p>选择「数据与备份」后开始检查。</p></div>
         <div class="storage-actions"><button id="storageRefresh" type="button" class="outline-btn">重新检查</button><button id="storageBackup" type="button" class="primary-btn" disabled>下载完整 ZIP 备份</button></div>
-        <p id="storageWarning" class="settings-note" role="status">完整备份包含 data/folderhub.db 与全部正在使用及回收站引用的图片。</p>
-        <p class="settings-note">下载文件请妥善保存在项目目录之外。它包含你的本机路径、模块、封面和回收站内容，不要上传到公开 GitHub。恢复前需退出 FolderHub 并备份当前 data/、uploads/，再解压覆盖。</p>
+        <p id="storageWarning" class="settings-note" role="status">完整备份包含 data/folderhub.db、data/preferences.json 和正在使用及回收站引用的封面图片。</p>
+        <p class="settings-note">界面字号、主题、封面显示、侧栏展开和网格/列表布局现保存在项目 data/preferences.json，不再依赖浏览器缓存。下载文件请妥善保存在项目目录之外。它包含你的本机路径、模块、封面和回收站内容，不要上传到公开 GitHub。恢复前需退出 FolderHub 并备份当前 data/、uploads/，再解压覆盖。</p>
       </section>
     </div>
     <div id="settingsPanelPaths" class="settings-page hidden" data-settings-page="paths" role="tabpanel" aria-labelledby="settingsTabPaths">
