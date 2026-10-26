@@ -139,3 +139,29 @@ http://127.0.0.1:8765/
 - 第一次启动新版会在已有 SQLite 表上新增 `node_type` 字段，并推断旧记录类型：顶层为根模块、有子模块的为普通模块，其余已绑定文件夹的非顶层末级记录为叶子模块。旧版分类模块关联的历史文件夹路径不会被删除。
 - 备份格式升级至 `version: 2`，仍可导入版本 1 的备份。建议升级前先使用页面的“备份”功能导出一份文件。
 - 修改仅涉及 `FolderHub/` 目录，数据仍存储在 `%LOCALAPPDATA%\DailyToolsSet\FolderHub\folderhub.db`。
+
+
+## V1.3：静默启动、资源管理器窗口前置与新视觉细节
+
+### 真正静默的 Windows 开机启动
+
+- 在网页设置里启用的登录自启动，仍使用 `pythonw.exe` + `--no-browser`，**不弹出命令提示符，也不主动打开网页**。登录系统时仅启动服务，浏览器启动页可以访问本机地址。
+- **日常手动启动**：在 Windows 资源管理器里双击 `start_silent.pyw`。如果 Python 的 `.pyw` 文件关联正确，此操作也不显示控制台；若服务已经运行，会直接打开现有 FolderHub 首页。需要 Windows 标准 Python 安装及 pythonw.exe 文件关联。
+- **查看错误、开发调试**：双击 `start_windows.bat`（会显示 CMD 窗口，这是正常的），便于看到异常日志；不要将它放入 Windows 启动文件夹。
+- 若系统提示“选择打开方式”，可将 `.pyw` 文件的默认打开程序指定为 `pythonw.exe`（不是 `python.exe`）。
+- 本机服务地址始终是 `http://127.0.0.1:8765/`，无外网依赖；Windows 登录自启动还是通过现有 HKCU Run 注册表项管理。
+
+### 点击叶子模块时优先前置 Explorer
+
+`explorer_window.py` 现在使用 `os.startfile` 调用系统资源管理器，然后通过 Windows `EnumWindows / SetWindowPos / SetForegroundWindow` 尝试定位并前置窗口。通过窗口标题匹配目标文件夹名，并优先新弹出的 Explorer 窗口；不会将其永久设为“始终置顶”，不会通过 shell 拼接执行用户路径。点击过程中页面会显示暂时的打开状态并避免重复点击。
+
+**系统限制**：Windows 10/11 的焦点抢占保护、Explorer 复用现有标签页、重名文件夹或特殊窗口布局都可能令前置尝试失败/定位不精准；此时仍会正常打开原文件夹，但不能保证始终盖住浏览器。想验证请在 Windows 上将浏览器最大化，再点击叶子模块测试。测试环境无法运行 Windows GUI，因此需本机实测。
+
+### UI 细节和可用性
+
+在保留原生 HTML/CSS/JS（不增加 Node、npm 或云端资源）的前提下，参考 Homer 的卡片入口风格和 Dashy 的主题变量设计，进一步优化侧栏目录、卡片悬浮效果、顶部状态区、搜索框、留白和响应式布局。新增 **极光** 和 **石墨** 两种可持久保存的主题；保留此前所有主题、目录结构与 SQLite 数据。
+
+文档及视觉参考：
+- Homer: https://github.com/bastienwirtz/homer
+- Dashy: https://github.com/Lissy93/dashy
+- Dashy Theming: https://dashy.to/docs/theming/

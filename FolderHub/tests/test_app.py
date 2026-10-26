@@ -248,5 +248,47 @@ class StartupTests(unittest.TestCase):
             r=conn.getresponse();self.assertEqual(r.status,200);self.assertTrue(json.loads(r.read())['enabled']);conn.close()
             setter.assert_called_once_with(True)
 
+
+
+# Explorer foreground-window integration tests (Win32 UI APIs are mocked here).
+import explorer_window
+
+
+class ExplorerForegroundTests(unittest.TestCase):
+    def test_matches_new_or_existing_explorer_window(self):
+        before = {100: '科研'}
+        after = {100: '科研', 200: 'Projects', 300: '浏览器'}
+        self.assertEqual(explorer_window._best_match(before, after, r'D:\\Projects'), 200)
+        self.assertEqual(explorer_window._best_match(before, {100: '科研'}, r'D:\\科研'), 100)
+        self.assertIsNone(explorer_window._best_match(before, after, r'D:\\Unrelated'))
+
+    def test_opens_folder_even_when_activation_unavailable(self):
+        calls = []
+        activated = []
+        result = explorer_window.open_and_focus(r'D:\\Projects',
+            opener=lambda p: calls.append(p),
+            list_windows=lambda: {10:'Projects'},
+            focus=lambda hwnd: activated.append(hwnd),
+            sleep=lambda t: None)
+        self.assertTrue(result)
+        self.assertEqual(calls,[r'D:\\Projects'])
+        self.assertEqual(activated,[10])
+        no_focus = explorer_window.open_and_focus(r'D:\\Projects',
+            opener=lambda p: calls.append(p),
+            list_windows=lambda: {},
+            sleep=lambda t: None)
+        self.assertFalse(no_focus)
+        self.assertEqual(len(calls),2)
+
+    def test_foreground_error_does_not_cancel_open(self):
+        attempted = []
+        result = explorer_window.open_and_focus(r'D:\\Projects',
+            opener=lambda p: attempted.append(p),
+            list_windows=lambda: {11:'Projects'},
+            focus=lambda hwnd: (_ for _ in ()).throw(OSError('focus locked')),
+            sleep=lambda t: None)
+        self.assertFalse(result)
+        self.assertEqual(attempted,[r'D:\\Projects'])
+
 if __name__ == "__main__":
     unittest.main()

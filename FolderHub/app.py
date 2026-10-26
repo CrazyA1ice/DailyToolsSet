@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 import webbrowser
 import startup
+import explorer_window
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -276,7 +277,7 @@ def open_in_explorer(path):
         raise UserError("调用系统资源管理器仅支持 Windows；当前操作系统不是 Windows")
     if not os.path.isdir(path):
         raise UserError("文件夹不存在或当前无法访问，请检查路径和磁盘连接")
-    os.startfile(path)  # Windows ShellExecute, never executes a shell command.
+    explorer_window.open_and_focus(path)  # Best effort foreground; never pins Always-on-top.
 
 
 def choose_folder():

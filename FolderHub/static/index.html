@@ -12,7 +12,7 @@
 <body>
 <div class="app-shell">
   <aside class="sidebar" aria-label="文件分类">
-    <div class="brand"><span class="brand-icon">▦</span><div><strong>FolderHub</strong><small>DAILY TOOLS SET</small></div></div>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">▦</span><div><strong>FolderHub</strong><small>DAILY TOOLS SET</small></div></div>
     <div class="nav-label">工作空间 <span class="nav-label-dot">•</span></div>
     <nav id="specialNav" class="nav-stack">
       <button type="button" class="nav-item active" data-view="all"><span>◫</span> 所有模块 <span class="nav-count" id="rootCount">0</span></button>
@@ -34,7 +34,7 @@
       </div>
     </header>
     <div class="content">
-      <section class="intro"><div class="intro-text"><span class="eyebrow">✦ MY PERSONAL WORKSPACE</span><h1 id="pageTitle">我的文件导航</h1><p id="pageSubtitle">用清晰的分类，快速抵达电脑上的每一个工作文件夹。</p></div><div class="intro-decoration" aria-hidden="true"><span>◫</span><span class="hero-orbit"></span></div></section>
+      <section class="intro"><div class="intro-text"><span class="eyebrow">✦ YOUR DIGITAL SHELF</span><h1 id="pageTitle">我的文件导航</h1><p id="pageSubtitle">用清晰的分类，快速抵达电脑上的每一个工作文件夹。</p><div class="hero-guide"><span>⌕ 快捷搜索 <kbd>Ctrl K</kbd></span><span>▣ 叶子模块直接打开资源管理器</span></div></div><div class="intro-decoration" aria-hidden="true"><span>◫</span><span class="hero-orbit"></span></div></section>
       <section class="summary" aria-label="文件夹统计">
         <div class="metric"><div class="metric-icon violet">▤</div><div><span class="metric-value" id="nodeCount">0</span><span class="metric-label">总模块数</span></div></div>
         <div class="metric"><div class="metric-icon blue">▣</div><div><span class="metric-value" id="linkedCount">0</span><span class="metric-label">已关联文件夹</span></div></div>
@@ -44,7 +44,7 @@
         <div class="search-wrap"><span class="search-icon">⌕</span><input id="search" type="search" placeholder="全局搜索：模块名、完整分类路径、文件夹路径..." autocomplete="off" aria-label="搜索所有层级模块"><span id="searchHint">全局搜索</span></div>
         <div class="tool-buttons"><button id="layoutBtn" type="button" class="icon-button square" title="切换网格和列表" aria-label="切换网格和列表">▦</button><button id="newBtn" type="button" class="primary-btn">＋ <span id="newBtnText">新建模块</span></button></div>
       </section>
-      <div class="section-heading"><div><h2 id="sectionTitle">全部分类</h2><p id="sectionMeta">点击模块即可进入，绑定文件夹后可直接打开资源管理器</p></div><div id="sectionOperations"></div></div>
+      <div class="section-heading"><div><span class="section-kicker">EXPLORE YOUR FILES</span><h2 id="sectionTitle">全部分类</h2><p id="sectionMeta">点击模块即可进入，绑定文件夹后可直接打开资源管理器</p></div><div id="sectionOperations"></div></div>
       <section class="entries" id="entries" aria-live="polite"></section>
     </div>
   </main>
@@ -53,13 +53,13 @@
   <div class="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="dialog-header"><div><div class="eyebrow">PERSONALIZE YOUR SPACE</div><h2 id="settingsTitle">外观与启动设置</h2><p class="settings-subtitle">打造属于你的本地文件导航首页</p></div><button id="settingsClose" class="icon-button" title="关闭设置" aria-label="关闭设置">✕</button></div>
     <section class="settings-section"><div class="setting-heading"><h3>🎨 主题换肤</h3><p>选中的外观会自动保存在此浏览器，下次打开继续使用。</p></div><div class="theme-grid" id="themeOptions" role="group" aria-label="选择主题"></div></section>
-    <section class="settings-section"><div class="setting-heading"><h3>⏻ 开机自启动</h3><p>Windows 登录后在后台静默启动本地服务，不主动弹出浏览器。</p></div>
+    <section class="settings-section"><div class="setting-heading"><h3>⏻ 开机自启动</h3><p>Windows 登录后使用 pythonw.exe 静默启动，不显示命令行窗口，也不会主动打开浏览器。</p></div>
       <label class="toggle-row" for="startupToggle"><div><strong>登录 Windows 后自动运行</strong><small id="startupStatus">正在检查启动状态...</small></div><span class="switch"><input type="checkbox" id="startupToggle" disabled><span class="slider"></span></span></label>
-      <p class="settings-note">仅操作当前用户的启动项，无需管理员权限。关闭开关仅影响下次登录，不会停止当前服务。</p>
+      <p class="settings-note">默认关闭。仅操作当前用户的启动项，无需管理员权限；关闭开关不会停止当前服务。手动静默启动可双击 start_silent.pyw；如需查看错误则使用 start_windows.bat。</p>
     </section>
     <section class="settings-section"><div class="setting-heading"><h3>⌂ 设为浏览器启动页</h3><p>先开启开机自启动，再将以下地址设置为浏览器“启动时打开的页面”。</p></div>
       <div class="homepage-row"><code id="homepageUrl">http://127.0.0.1:8765/</code><button type="button" class="outline-btn" id="copyHomepage">复制地址</button></div>
-      <p class="settings-note">Chrome：设置 → 启动时 → 打开特定网页；Edge：设置 → 开始、主页和新建标签页。初次登录时若显示无法连接，稍后刷新页面即可。</p>
+      <p class="settings-note">打开文件夹后会尝试把资源管理器窗口提升到浏览器前方，但 Windows 焦点保护机制可能限制这一操作。</p><p class="settings-note">Chrome：设置 → 启动时 → 打开特定网页；Edge：设置 → 开始、主页和新建标签页。初次登录时若显示无法连接，稍后刷新页面即可。</p>
     </section>
     <div class="dialog-footer"><button id="settingsDone" type="button" class="primary-btn">完成设置</button></div>
   </div>

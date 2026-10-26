@@ -4,12 +4,14 @@ const THEMES = [
   {id:"cloud",title:"云白",description:"清爽工作台",colors:["#f5f7ff","#ffffff","#6652d9"]},
   {id:"midnight",title:"午夜",description:"沉浸深色",colors:["#111829","#1c2840","#8e88ff"]},
   {id:"forest",title:"雾森",description:"柔和自然",colors:["#edf6f1","#ffffff","#23846e"]},
+  {id:"aurora",title:"极光",description:"薄荷渐变",colors:["#ecf9fc","#ffffff","#277d9b"]},
   {id:"sand",title:"暖沙",description:"温暖纸感",colors:["#faf4e9","#fffcf5","#bc7650"]},
+  {id:"graphite",title:"石墨",description:"柔和暗色",colors:["#181b24","#272c38","#97b2e2"]},
   {id:"system",title:"跟随系统",description:"自动适配",colors:["#d6d5e8","#252b42","#7b7ad6"]}
 ];
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false};
+const state = {openingIds:new Set(),nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false};
 document.documentElement.dataset.theme=state.theme;
 const $ = (s) => document.querySelector(s);
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -30,7 +32,7 @@ async function api(path, options={}) {
   }
   let response;
   try { response=await fetch(path,{...options,headers}); }
-  catch(e) {throw new Error("本地服务连接失败，请确认启动窗口仍然打开");}
+  catch(e) {throw new Error("本地服务连接失败，请启动 FolderHub 后刷新页面");}
   let data;
   try {data=await response.json()} catch(e){throw new Error("服务器响应无效")}
   if(!response.ok) throw new Error(data.error||`操作失败 (${response.status})`);
@@ -118,7 +120,7 @@ function card(n){
   const leaf=n.node_type==="leaf";
   const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
   const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
-  return `<article class="entry-card" data-id="${n.id}">
+  return `<article class="entry-card ${leaf?"is-leaf":"is-container"} ${state.openingIds.has(n.id)?"is-opening":""}" data-id="${n.id}">
     <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${leaf?'▣':n.node_type==='root'?'▤':'▥'}</span>
       <div class="card-actions">
         <button title="${n.favorite?'取消收藏':'加入收藏'}" class="small-action ${n.favorite?'on':''}" data-action="favorite" data-id="${n.id}">${n.favorite?'★':'☆'}</button>
@@ -247,8 +249,13 @@ async function submitDialog(event){
   }catch(e){toast(e.message,true)}finally{button.disabled=false}
 }
 async function openFolder(id){
-  try{await mutate("POST",`/api/nodes/${id}/open`);toast("已在 Windows 资源管理器打开文件夹")}
-  catch(e){toast(e.message,true)}
+  if(state.openingIds.has(id))return;
+  state.openingIds.add(id);render();
+  try{
+    await mutate("POST",`/api/nodes/${id}/open`);
+    toast("已向 Windows 资源管理器发送打开指令，并尝试将窗口置前");
+  }catch(e){toast(e.message,true)}
+  finally{state.openingIds.delete(id);render()}
 }
 async function removeNode(id){
   const n=byId(id);if(!n)return;
