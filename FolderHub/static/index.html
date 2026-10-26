@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>FolderHub · 本地文件导航</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" aria-label="文件分类">
+    <div class="brand"><span class="brand-icon">▦</span><div><strong>FolderHub</strong><small>DAILY TOOLS SET</small></div></div>
+    <div class="nav-label">工作空间</div>
+    <nav id="specialNav" class="nav-stack">
+      <button type="button" class="nav-item active" data-view="all"><span>◫</span> 所有模块 <span class="nav-count" id="rootCount">0</span></button>
+      <button type="button" class="nav-item" data-view="favorites"><span>★</span> 我的收藏 <span class="nav-count" id="favoriteCount">0</span></button>
+    </nav>
+    <div class="nav-group-header"><span class="nav-label">分类目录</span><button id="addRoot" class="icon-button" title="添加一级模块" aria-label="添加一级模块">＋</button></div>
+    <nav id="treeNav" class="tree-nav" aria-label="模块树"></nav>
+    <div class="side-footer"><div class="side-footer-icon">⌘</div><div><strong>文件仍在原来的位置</strong><small>仅保存分类与路径，不移动文件</small></div></div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div class="crumb" id="breadcrumb"></div>
+      <div class="top-actions">
+        <span class="keyhint" title="按 Ctrl+K 可以快速搜索">Ctrl K</span>
+        <button id="backupBtn" type="button" class="text-btn" title="导出 JSON 配置">⇩ <span>备份</span></button>
+        <button id="restoreBtn" type="button" class="text-btn" title="导入 JSON 配置">⇧ <span>恢复</span></button>
+      </div>
+    </header>
+    <div class="content">
+      <section class="intro"><div class="intro-text"><span class="eyebrow">YOUR LOCAL WORKSPACE</span><h1 id="pageTitle">我的文件导航</h1><p id="pageSubtitle">用清晰的分类，快速抵达电脑上的每一个工作文件夹。</p></div><div class="intro-decoration"><span>⌂</span></div></section>
+      <section class="summary" aria-label="文件夹统计">
+        <div class="metric"><div class="metric-icon violet">▤</div><div><span class="metric-value" id="nodeCount">0</span><span class="metric-label">总模块数</span></div></div>
+        <div class="metric"><div class="metric-icon blue">▣</div><div><span class="metric-value" id="linkedCount">0</span><span class="metric-label">已关联文件夹</span></div></div>
+        <div class="metric"><div class="metric-icon amber">★</div><div><span class="metric-value" id="favStat">0</span><span class="metric-label">常用收藏</span></div></div>
+      </section>
+      <section class="tools" aria-label="筛选及操作">
+        <div class="search-wrap"><span class="search-icon">⌕</span><input id="search" type="search" placeholder="搜索模块名称或文件夹路径..." autocomplete="off" aria-label="搜索模块"><span id="searchHint">全局搜索</span></div>
+        <div class="tool-buttons"><button id="layoutBtn" type="button" class="icon-button square" title="切换网格和列表" aria-label="切换网格和列表">▦</button><button id="newBtn" type="button" class="primary-btn">＋ <span id="newBtnText">新建模块</span></button></div>
+      </section>
+      <div class="section-heading"><div><h2 id="sectionTitle">全部分类</h2><p id="sectionMeta">点击模块即可进入，绑定文件夹后可直接打开资源管理器</p></div><div id="sectionOperations"></div></div>
+      <section class="entries" id="entries" aria-live="polite"></section>
+    </div>
+  </main>
+</div>
+<div id="dialogLayer" class="dialog-layer hidden" role="presentation">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+    <div class="dialog-header"><div><div class="eyebrow">FOLDER NAVIGATION</div><h2 id="dialogTitle">新建模块</h2></div><button id="dialogClose" class="icon-button" title="关闭窗口" aria-label="关闭">✕</button></div>
+    <form id="entryForm">
+      <label for="entryName">模块名称 <span class="required">*</span></label><input id="entryName" type="text" maxlength="100" required placeholder="例如：论文研究">
+      <label for="entryParent">上级分类</label><select id="entryParent"></select>
+      <label for="entryPath">绑定文件夹 <span class="optional">（可选）</span></label>
+      <div class="path-field"><input id="entryPath" type="text" placeholder="例如：D:\Research\Paper2026_1"><button id="pickFolder" type="button" class="outline-btn" title="打开 Windows 文件夹选择窗口">浏览...</button></div>
+      <small class="help-text">不绑定路径则作为导航分类使用；绑定后单击模块卡片可直接打开 Windows 资源管理器。</small>
+      <label class="check"><input id="entryFavorite" type="checkbox"> <span>加入常用收藏</span></label>
+      <div class="dialog-footer"><button id="cancelDialog" type="button" class="outline-btn">取消</button><button type="submit" id="submitEntry" class="primary-btn">保存模块</button></div>
+    </form>
+  </div>
+</div>
+<input id="importFile" type="file" accept=".json,application/json" hidden>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
