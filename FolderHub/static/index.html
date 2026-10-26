@@ -18,7 +18,7 @@
       <button type="button" class="nav-item active" data-view="all"><span>◫</span> 所有模块 <span class="nav-count" id="rootCount">0</span></button>
       <button type="button" class="nav-item" data-view="favorites"><span>★</span> 我的收藏 <span class="nav-count" id="favoriteCount">0</span></button>
     </nav>
-    <div class="nav-group-header"><span class="nav-label">分类目录</span><button id="addRoot" class="icon-button" title="添加一级模块" aria-label="添加一级模块">＋</button></div>
+    <div class="nav-group-header"><span class="nav-label">分层目录</span><button id="addRoot" class="icon-button" title="添加根模块" aria-label="添加根模块">＋</button></div>
     <nav id="treeNav" class="tree-nav" aria-label="模块树"></nav>
     <div class="side-footer"><div class="side-footer-icon">◎</div><div><strong>文件仍在原来的位置</strong><small>仅保存分类与路径，不移动文件</small></div></div>
   </aside>
@@ -41,7 +41,7 @@
         <div class="metric"><div class="metric-icon amber">★</div><div><span class="metric-value" id="favStat">0</span><span class="metric-label">常用收藏</span></div></div>
       </section>
       <section class="tools" aria-label="筛选及操作">
-        <div class="search-wrap"><span class="search-icon">⌕</span><input id="search" type="search" placeholder="搜索模块名称或文件夹路径..." autocomplete="off" aria-label="搜索模块"><span id="searchHint">全局搜索</span></div>
+        <div class="search-wrap"><span class="search-icon">⌕</span><input id="search" type="search" placeholder="全局搜索：模块名、完整分类路径、文件夹路径..." autocomplete="off" aria-label="搜索所有层级模块"><span id="searchHint">全局搜索</span></div>
         <div class="tool-buttons"><button id="layoutBtn" type="button" class="icon-button square" title="切换网格和列表" aria-label="切换网格和列表">▦</button><button id="newBtn" type="button" class="primary-btn">＋ <span id="newBtnText">新建模块</span></button></div>
       </section>
       <div class="section-heading"><div><h2 id="sectionTitle">全部分类</h2><p id="sectionMeta">点击模块即可进入，绑定文件夹后可直接打开资源管理器</p></div><div id="sectionOperations"></div></div>
@@ -69,10 +69,18 @@
     <div class="dialog-header"><div><div class="eyebrow">FOLDER NAVIGATION</div><h2 id="dialogTitle">新建模块</h2></div><button id="dialogClose" class="icon-button" title="关闭窗口" aria-label="关闭">✕</button></div>
     <form id="entryForm">
       <label for="entryName">模块名称 <span class="required">*</span></label><input id="entryName" type="text" maxlength="100" required placeholder="例如：论文研究">
-      <label for="entryParent">上级分类</label><select id="entryParent"></select>
-      <label for="entryPath">绑定文件夹 <span class="optional">（可选）</span></label>
-      <div class="path-field"><input id="entryPath" type="text" placeholder="例如：D:\Research\Paper2026_1"><button id="pickFolder" type="button" class="outline-btn" title="打开 Windows 文件夹选择窗口">浏览...</button></div>
-      <small class="help-text">不绑定路径则作为导航分类使用；绑定后单击模块卡片可直接打开 Windows 资源管理器。</small>
+      <label for="entryType">模块类型 <span class="required">*</span></label>
+      <select id="entryType" aria-describedby="entryTypeHelp">
+        <option value="root">根模块 · 顶层分类</option>
+        <option value="group">普通模块 · 可以添加子模块</option>
+        <option value="leaf">叶子模块 · 绑定文件夹</option>
+      </select>
+      <small class="help-text" id="entryTypeHelp">根模块只能位于目录树的顶层。</small>
+      <div id="entryParentRow"><label for="entryParent">上级模块</label><select id="entryParent"></select></div>
+      <div id="entryPathRow"><label for="entryPath">绑定文件夹 <span class="optional" id="entryPathRequired">（必填）</span></label>
+        <div class="path-field"><input id="entryPath" type="text" placeholder="例如：D:\Research\Paper2026_1"><button id="pickFolder" type="button" class="outline-btn" title="打开 Windows 文件夹选择窗口">浏览...</button></div>
+        <small class="help-text">叶子模块直接映射到一个文件夹，点击即可用 Windows 文件资源管理器打开。</small>
+      </div>
       <label class="check"><input id="entryFavorite" type="checkbox"> <span>加入常用收藏</span></label>
       <div class="dialog-footer"><button id="cancelDialog" type="button" class="outline-btn">取消</button><button type="submit" id="submitEntry" class="primary-btn">保存模块</button></div>
     </form>
