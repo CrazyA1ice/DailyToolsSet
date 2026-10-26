@@ -100,8 +100,8 @@ def decode_image(data_url):
     if ";base64," not in data_url:
         raise UserError("图片必须是 PNG、JPG 或 WebP")
     header, encoded = data_url.split(",", 1)
-    expected = {"data:image/png;base64": ("image/png", b"\\x89PNG\\r\\n\\x1a\\n"),
-                "data:image/jpeg;base64": ("image/jpeg", b"\\xff\\xd8\\xff"),
+    expected = {"data:image/png;base64": ("image/png", b"\x89PNG\r\n\x1a\n"),
+                "data:image/jpeg;base64": ("image/jpeg", b"\xff\xd8\xff"),
                 "data:image/webp;base64": ("image/webp", b"RIFF")}
     if header not in expected or not encoded or len(encoded) > ((MAX_IMAGE_BYTES+2)//3)*4 + 4:
         raise UserError("图片格式不支持或文件过大（支持 PNG/JPG/WebP，最多 2 MB）")
