@@ -15,8 +15,8 @@ const ICONS = {
   folder:"📁",book:"📚",code:"💻",chart:"📊",database:"🗃️",image:"🖼️",
   briefcase:"💼",school:"🎓",music:"🎵",video:"🎬",archive:"🗄️",star:"⭐"
 };
-const PREF_DEFAULTS = Object.freeze({font:"large",density:"comfortable",sidebar:"normal",columns:"auto",accent:"blue",showCovers:true,sidebarCollapsed:false});
-const PREF_ALLOWED = {font:["normal","large","xlarge"],density:["comfortable","compact"],sidebar:["normal","wide"],columns:["auto","2","3","4"],accent:["blue","purple","teal","orange","rose"]};
+const PREF_DEFAULTS = Object.freeze({font:"large",density:"comfortable",sidebar:"normal",columns:"auto",accent:"blue",showCovers:true,coverHeight:"normal",coverFit:"cover",sidebarCollapsed:false});
+const PREF_ALLOWED = {font:["normal","large","xlarge"],density:["comfortable","compact"],sidebar:["normal","wide"],columns:["auto","2","3","4"],accent:["blue","purple","teal","orange","rose"],coverHeight:["short","normal","tall"],coverFit:["cover","contain"]};
 function readPreferences(){
   try {
     const stored=JSON.parse(localStorage.getItem("folderhub.appearance")||"{}");
@@ -37,6 +37,8 @@ function applyPreferences(){
   root.dataset.accent=preferences.accent;
   root.dataset.sidebarCollapsed=String(preferences.sidebarCollapsed);
   root.dataset.showCovers=String(preferences.showCovers);
+  root.dataset.coverHeight=preferences.coverHeight;
+  root.dataset.coverFit=preferences.coverFit;
   const trigger=document.querySelector("#sidebarToggle");
   if(trigger)trigger.setAttribute("aria-expanded",String(!preferences.sidebarCollapsed));
 }
@@ -60,7 +62,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {openingIds:new Set(),nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false};
+const state = {openingIds:new Set(),nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false};
 document.documentElement.dataset.theme=state.theme;
 applyPreferences();
 const $ = (s) => document.querySelector(s);
@@ -167,7 +169,7 @@ function renderCrumb(){
   }
   $("#breadcrumb").innerHTML=bits.join("");
 }
-function card(n){
+function card(n,reorderable=false){
   const childCount=children(n.id).length;
   const linked=!!n.folder_path;
   const leaf=n.node_type==="leaf";
@@ -180,6 +182,7 @@ function card(n){
     </div>
     <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${h(iconFor(n))}</span>
       <div class="card-actions">
+        ${reorderable?`<button type="button" class="small-action sort-grip" draggable="true" data-drag="${n.id}" title="拖动调整同级顺序，也可使用上下箭头键" aria-label="移动 ${h(n.title)}：拖动排序或按上下箭头键">⠿</button>`:""}
         <button title="${n.favorite?'取消收藏':'加入收藏'}" class="small-action ${n.favorite?'on':''}" data-action="favorite" data-id="${n.id}">${n.favorite?'★':'☆'}</button>
         <button title="编辑模块" class="small-action" data-action="edit" data-id="${n.id}">✎</button>
         <button title="移除模块（不会删除真实文件夹）" class="small-action" data-action="delete" data-id="${n.id}">×</button>
@@ -238,8 +241,91 @@ function render(){
   $("#searchHint").textContent=searching?`${display.length} 项结果`:"Ctrl K";
   $("#sectionOperations").innerHTML=state.view==="node"&&!searching?`<button data-action="edit-current">编辑当前模块</button>`:"";
   $("#entries").className="entries"+(state.layout==="list"?" list":"");
-  $("#entries").innerHTML=display.length?display.map(card).join(""):emptyView();
+  const reorderable=!searching && (state.view==="all" || (state.view==="node" && byId(state.selected)?.node_type!=="leaf"));
+  $("#entries").innerHTML=display.length?display.map(n=>card(n,reorderable)).join(""):emptyView();
 }
+
+// Reorder siblings only. Global search and favorites remain read-only lists.
+function canReorder(){
+  return !state.search.trim() && (state.view==="all" ||
+    (state.view==="node" && byId(state.selected)?.node_type!=="leaf"));
+}
+function reorderIds(ids,moved,anchor,after=false){
+  const origin=ids.indexOf(moved),target=ids.indexOf(anchor);
+  if(origin<0||target<0||origin===target)return ids.slice();
+  const result=ids.slice();
+  result.splice(origin,1);
+  result.splice(result.indexOf(anchor)+(after?1:0),0,moved);
+  return result;
+}
+function clearDragState(){
+  state.draggingId=null;
+  document.querySelectorAll("#entries .drag-origin, #entries .drag-before, #entries .drag-after")
+    .forEach(el=>el.classList.remove("drag-origin","drag-before","drag-after"));
+}
+function dropAfter(card,event){
+  const rect=card.getBoundingClientRect();
+  return state.layout==="list" ? event.clientY>=rect.top+rect.height/2 :
+    (event.clientY<rect.top+rect.height*.25 ? false :
+      event.clientY>rect.bottom-rect.height*.25 ? true : event.clientX>=rect.left+rect.width/2);
+}
+async function saveSortOrder(nextIds,focusId=null){
+  if(state.sorting||!canReorder())return;
+  const parentId=state.view==="all"?null:state.selected;
+  const existing=children(parentId).map(n=>n.id);
+  if(nextIds.length!==existing.length || nextIds.every((id,i)=>id===existing[i]))return;
+  state.sorting=true;
+  try{
+    await mutate("POST","/api/order",{parent_id:parentId,ids:nextIds});
+    await refresh();
+    if(focusId!==null)document.querySelector('#entries [data-drag="'+focusId+'"]')?.focus();
+    toast("顺序已保存");
+  }catch(e){toast("排序失败："+e.message,true);await refresh().catch(()=>{});}
+  finally{state.sorting=false}
+}
+async function moveOne(id,direction){
+  if(!canReorder())return;
+  const parent=state.view==="all"?null:state.selected;
+  const ids=children(parent).map(n=>n.id),from=ids.indexOf(id),to=from+direction;
+  if(from<0||to<0||to>=ids.length)return;
+  return saveSortOrder(reorderIds(ids,id,ids[to],direction>0),id);
+}
+function bindSorting(){
+  const entries=$("#entries");
+  entries.addEventListener("dragstart",event=>{
+    const grip=event.target.closest("[data-drag]");
+    if(!grip||!canReorder()||state.sorting){event.preventDefault();return}
+    state.draggingId=Number(grip.dataset.drag);
+    if(event.dataTransfer){event.dataTransfer.effectAllowed="move";event.dataTransfer.setData("text/plain",String(state.draggingId));}
+    grip.closest(".entry-card")?.classList.add("drag-origin");
+  });
+  entries.addEventListener("dragover",event=>{
+    if(state.draggingId===null||!canReorder())return;
+    const card=event.target.closest(".entry-card"),id=Number(card?.dataset.id);
+    if(!card||id===state.draggingId||!children(state.view==="all"?null:state.selected).some(n=>n.id===id))return;
+    event.preventDefault();
+    if(event.dataTransfer)event.dataTransfer.dropEffect="move";
+    entries.querySelectorAll(".drag-before,.drag-after").forEach(el=>el.classList.remove("drag-before","drag-after"));
+    card.classList.add(dropAfter(card,event)?"drag-after":"drag-before");
+  });
+  entries.addEventListener("drop",event=>{
+    const card=event.target.closest(".entry-card"),moved=state.draggingId;
+    if(!card||moved===null||!canReorder()){clearDragState();return}
+    event.preventDefault();
+    const anchor=Number(card.dataset.id),after=dropAfter(card,event);
+    const ids=children(state.view==="all"?null:state.selected).map(n=>n.id);
+    clearDragState();
+    if(anchor!==moved)saveSortOrder(reorderIds(ids,moved,anchor,after));
+  });
+  entries.addEventListener("dragend",clearDragState);
+  entries.addEventListener("keydown",event=>{
+    const grip=event.target.closest("[data-drag]");
+    if(!grip||!canReorder()||!["ArrowUp","ArrowDown"].includes(event.key))return;
+    event.preventDefault();
+    moveOne(Number(grip.dataset.drag),event.key==="ArrowUp"?-1:1);
+  });
+}
+
 function updateEntryType(){
   const t=$("#entryType").value;
   const parentSelect=$("#entryParent");
@@ -443,6 +529,7 @@ function copyHomepage(){
 function fallbackCopy(url){const input=document.createElement("textarea");input.value=url;document.body.appendChild(input);input.select();try{document.execCommand("copy");toast("启动页地址已复制")}catch(_){toast("请手动复制地址",true)}finally{input.remove()}}
 
 function bind(){
+  bindSorting();
   $("#specialNav").addEventListener("click",e=>{const item=e.target.closest("[data-view]");if(item)setView(item.dataset.view)});
   $("#treeNav").addEventListener("click",e=>{
     const toggle=e.target.closest("[data-toggle]");

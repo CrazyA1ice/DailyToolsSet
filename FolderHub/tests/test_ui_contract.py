@@ -54,8 +54,25 @@ class AdminUiContractTests(unittest.TestCase):
         for piece in ('card-cover', 'cover-image','cover-emoji','showCovers','data-show-covers'):
             self.assertIn(piece,self.js+self.css)
 
+    def test_drag_sort_is_sibling_only_and_accessible(self):
+        self.assertIn('function reorderIds(ids,moved,anchor,after=false)', self.js)
+        self.assertIn('function canReorder()', self.js)
+        for event in ('dragstart', 'dragover', 'dragend', 'ArrowUp', 'ArrowDown'):
+            self.assertIn(event, self.js)
+        self.assertIn('"/api/order"', self.js)
+        self.assertIn('data-drag=', self.js)
+        self.assertIn('drag-before', self.css)
+        self.assertIn('drag-after', self.css)
+
+    def test_cover_personalization_options(self):
+        for key in ('coverHeight', 'coverFit'):
+            self.assertIn(f'data-pref="{key}"', self.html)
+            self.assertIn(f'root.dataset.{key}=', self.js)
+        self.assertIn('data-cover-fit="contain"', self.css)
+        self.assertIn('data-cover-height="tall"', self.css)
+
     def test_customization_options_and_persistence(self):
-        for pref in ("font", "density", "sidebar", "columns", "accent"):
+        for pref in ("font", "density", "sidebar", "columns", "accent", "coverHeight", "coverFit"):
             self.assertIn(f'data-pref="{pref}"', self.html)
         for theme in ("cloud", "midnight", "forest", "aurora", "sand", "graphite", "system"):
             self.assertIn(f'id:"{theme}"', self.js)

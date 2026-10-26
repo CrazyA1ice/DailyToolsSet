@@ -411,3 +411,20 @@ html[data-show-covers="false"] .entries.list .card-cover{display:none}
 .entry-cover-controls-right .help-text{margin-top:0}
 .cover-toggle-setting{margin:12px 0 16px}
 @media(max-width:760px){.entry-cover-controls{grid-template-columns:98px minmax(0,1fr)}.cover-preview{width:98px;height:100px}}
+
+/* V1.7 - customizable cover display and accessible sibling sorting. */
+html[data-cover-height="short"]{--user-cover-height:88px}
+html[data-cover-height="normal"]{--user-cover-height:118px}
+html[data-cover-height="tall"]{--user-cover-height:185px}
+.entry-card{--cover-height:var(--user-cover-height,118px)}
+html[data-density="compact"] .entry-card .card-cover{--cover-height:var(--user-cover-height,118px)}
+html[data-cover-fit="contain"] .card-cover .cover-image{object-fit:contain;padding:8px}
+html[data-cover-fit="contain"] .cover-preview img{object-fit:contain}
+.cover-layout-options{margin-top:18px}
+.sort-grip{cursor:grab;touch-action:none;color:var(--muted);font-size:1.3rem}
+.sort-grip:active{cursor:grabbing}
+.sort-grip:focus-visible{outline-offset:-1px}
+.entry-card.drag-origin{opacity:.55}
+.entry-card.drag-before{outline:3px solid var(--accent);outline-offset:-3px;box-shadow:0 0 0 4px var(--accent-faint)}
+.entry-card.drag-after{outline:3px dashed var(--accent);outline-offset:-3px;box-shadow:0 0 0 4px var(--accent-faint)}
+@media (pointer:coarse){.sort-grip{min-width:38px;height:38px}}
