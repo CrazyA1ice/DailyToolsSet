@@ -11,7 +11,11 @@ const THEMES = [
 ];
 // Ant Design Pro-inspired density, typography and workspace customization.
 // All presentation preferences are browser-local; SQLite navigation records are never changed.
-const PREF_DEFAULTS = Object.freeze({font:"large",density:"comfortable",sidebar:"normal",columns:"auto",accent:"blue",sidebarCollapsed:false});
+const ICONS = {
+  folder:"📁",book:"📚",code:"💻",chart:"📊",database:"🗃️",image:"🖼️",
+  briefcase:"💼",school:"🎓",music:"🎵",video:"🎬",archive:"🗄️",star:"⭐"
+};
+const PREF_DEFAULTS = Object.freeze({font:"large",density:"comfortable",sidebar:"normal",columns:"auto",accent:"blue",showCovers:true,sidebarCollapsed:false});
 const PREF_ALLOWED = {font:["normal","large","xlarge"],density:["comfortable","compact"],sidebar:["normal","wide"],columns:["auto","2","3","4"],accent:["blue","purple","teal","orange","rose"]};
 function readPreferences(){
   try {
@@ -19,7 +23,7 @@ function readPreferences(){
     if(!stored || typeof stored!=="object" || Array.isArray(stored))return {...PREF_DEFAULTS};
     const result={...PREF_DEFAULTS};
     for(const [key,values] of Object.entries(PREF_ALLOWED))if(values.includes(stored[key]))result[key]=stored[key];
-    for(const key of ["sidebarCollapsed"])if(typeof stored[key]==="boolean")result[key]=stored[key];
+    for(const key of ["sidebarCollapsed","showCovers"])if(typeof stored[key]==="boolean")result[key]=stored[key];
     return result;
   } catch(_){return {...PREF_DEFAULTS}}
 }
@@ -32,10 +36,12 @@ function applyPreferences(){
   root.dataset.columns=preferences.columns;
   root.dataset.accent=preferences.accent;
   root.dataset.sidebarCollapsed=String(preferences.sidebarCollapsed);
+  root.dataset.showCovers=String(preferences.showCovers);
   const trigger=document.querySelector("#sidebarToggle");
   if(trigger)trigger.setAttribute("aria-expanded",String(!preferences.sidebarCollapsed));
 }
 function updateAppearanceControls(){
+  const coverToggle=document.querySelector("#showCoversToggle");if(coverToggle)coverToggle.checked=preferences.showCovers;
   document.querySelectorAll("[data-pref][data-value]").forEach(button=>{
     const active=preferences[button.dataset.pref]===button.dataset.value;
     button.classList.toggle("selected",active);
@@ -54,7 +60,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {openingIds:new Set(),nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false};
+const state = {openingIds:new Set(),nodes:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:getSavedTheme(), startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false};
 document.documentElement.dataset.theme=state.theme;
 applyPreferences();
 const $ = (s) => document.querySelector(s);
@@ -121,6 +127,9 @@ function setView(view,id=null){
   render();
 }
 const TYPE_LABEL = {root:"根模块",group:"普通模块",leaf:"叶子模块"};
+const iconFor = n => ICONS[n.icon] || ICONS.folder;
+const coverUrl = n => `/api/nodes/${n.id}/image?v=${encodeURIComponent(n.updated_at||"")}`;
+
 function toggleBranch(id){
   if(state.expanded.has(id))state.expanded.delete(id);else state.expanded.add(id);
   saveTreeState();renderNav();
@@ -136,7 +145,7 @@ function renderNav(){
         ${sub.length?`<button type="button" class="tree-toggle" data-toggle="${n.id}" aria-expanded="${expand}" aria-label="${expand?'折叠':'展开'} ${h(n.title)}"><span class="tree-chevron ${expand?'is-open':''}">›</span></button>`
           :'<span class="tree-spacer" aria-hidden="true"></span>'}
         <button type="button" class="tree-item" data-node="${n.id}" title="${h(n.title)} (${TYPE_LABEL[n.node_type]||'模块'})">
-          <span class="tree-folder" aria-hidden="true">${isLeaf?'▣':n.node_type==='root'?'▤':'▥'}</span>
+          <span class="tree-folder" aria-hidden="true">${h(iconFor(n))}</span>
           <span class="tree-text">${h(n.title)}</span>${isLeaf?'<span class="tree-leaf-mark" title="关联的文件夹">↗</span>':''}
         </button>
       </div>${sub.length&&expand?`<div class="tree-children" role="group">${walk(sub)}</div>`:''}
@@ -165,7 +174,11 @@ function card(n){
   const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
   const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
   return `<article class="entry-card ${leaf?"is-leaf":"is-container"} ${state.openingIds.has(n.id)?"is-opening":""}" data-id="${n.id}">
-    <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${leaf?'▣':n.node_type==='root'?'▤':'▥'}</span>
+    <div class="card-cover tone-${n.id%6} ${n.has_image?'with-image':'with-icon'}" aria-hidden="true">
+      ${n.has_image?`<img class="cover-image" src="${coverUrl(n)}" loading="lazy" alt="">`:`<span class="cover-emoji">${h(iconFor(n))}</span><span class="cover-decoration"></span>`}
+      <span class="cover-type">${TYPE_LABEL[n.node_type]||"模块"}</span>
+    </div>
+    <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${h(iconFor(n))}</span>
       <div class="card-actions">
         <button title="${n.favorite?'取消收藏':'加入收藏'}" class="small-action ${n.favorite?'on':''}" data-action="favorite" data-id="${n.id}">${n.favorite?'★':'☆'}</button>
         <button title="编辑模块" class="small-action" data-action="edit" data-id="${n.id}">✎</button>
@@ -257,6 +270,10 @@ function editDialog(id=null,parentId=undefined){
   $("#entryName").value=node?.title||"";
   $("#entryPath").value=node?.folder_path||"";
   $("#entryFavorite").checked=!!node?.favorite;
+  $("#entryIcon").value=node?.icon||"folder";
+  state.pendingCover=null;state.removeCover=false;
+  $("#entryCoverFile").value="";
+  syncCoverPreview();
   $("#entryType").value=node?.node_type||(defaultParent===null?"root":"group");
   const disabled = node?descendants(node.id):new Set();
   const options=[`<option value="">顶级目录（仅根模块）</option>`];
@@ -271,11 +288,28 @@ function editDialog(id=null,parentId=undefined){
   $("#dialogLayer").classList.remove("hidden");
   $("#entryName").focus();
 }
-function closeDialog(){$("#dialogLayer").classList.add("hidden");state.editing=null}
+function closeDialog(){ $("#dialogLayer").classList.add("hidden");state.editing=null;state.pendingCover=null;state.removeCover=false; }
+function syncCoverPreview(){
+  const preview=$("#entryCoverPreview"), node=state.editing===null?null:byId(state.editing);
+  const url=state.pendingCover||(node?.has_image&&!state.removeCover?coverUrl(node):null);
+  if(url){preview.replaceChildren();const img=document.createElement("img");img.src=url;img.alt="模块封面预览";preview.appendChild(img);}
+  else {preview.replaceChildren();const glyph=document.createElement("span");glyph.textContent=ICONS[$("#entryIcon").value]||ICONS.folder;glyph.className="cover-preview-emoji";preview.appendChild(glyph);}
+  $("#removeCover").disabled=!url;
+}
+async function handleCoverFile(file){
+  if(!file)return;
+  if(!["image/jpeg","image/png","image/webp"].includes(file.type)){toast("只支持 PNG、JPG、WebP 图片",true);return}
+  if(file.size>2*1024*1024){toast("单张图片不能超过 2 MB",true);return}
+  try{
+    const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file)});
+    state.pendingCover=dataUrl;state.removeCover=false;syncCoverPreview();
+  }catch(_){toast("读取图片失败，请重新选择",true)}
+}
+
 async function submitDialog(event){
   event.preventDefault();
   const type=$("#entryType").value;
-  const payload={title:$("#entryName").value,node_type:type,
+  const payload={title:$("#entryName").value,node_type:type,icon:$("#entryIcon").value,
     folder_path:type==="leaf"||(!$("#entryPathRow").classList.contains("hidden"))?$("#entryPath").value:null,
     parent_id:type==="root"?null:($("#entryParent").value?Number($("#entryParent").value):null),
     favorite:$("#entryFavorite").checked};
@@ -285,6 +319,9 @@ async function submitDialog(event){
     let created;
     if(savedId!==null)await mutate("PATCH",`/api/nodes/${savedId}`,payload);
     else created=await mutate("POST","/api/nodes",payload);
+    const actualId=savedId??created.id;
+    if(state.pendingCover)await mutate("POST",`/api/nodes/${actualId}/image`,{data_url:state.pendingCover});
+    else if(state.removeCover&&savedId!==null)await mutate("DELETE",`/api/nodes/${actualId}/image`,{});
     closeDialog();await refresh();
     if(savedId!==null)expandLineage(savedId);
     else if(type==="root"&&created?.id)state.expanded.add(created.id);
@@ -339,7 +376,7 @@ async function restoreBackup(file){
   if(!file)return;
   if(!confirm("恢复备份将替换现有所有导航模块。\n建议先点击“备份”保存当前配置。\n\n确定继续吗？"))return;
   try {
-    if(file.size>2*1024*1024)throw new Error("配置文件不能超过 2 MB");
+    if(file.size>32*1024*1024)throw new Error("配置备份不能超过 32 MB，请减少封面图片大小或数量");
     const payload=JSON.parse(await file.text());
     await mutate("POST","/api/import",payload);
     state.view="all";state.selected=null;state.search="";$("#search").value="";
@@ -431,6 +468,11 @@ function bind(){
   $("#themeOptions").addEventListener("click",e=>{const btn=e.target.closest("[data-theme-choice]");if(btn)setTheme(btn.dataset.themeChoice)});
   $("#settingsLayer").addEventListener("click",e=>{const pref=e.target.closest("[data-pref][data-value]");if(pref)setPreference(pref.dataset.pref,pref.dataset.value)});
   $("#settingsLayer").addEventListener("click",e=>{const tab=e.target.closest("[data-settings-tab]");if(tab)selectSettingsTab(tab.dataset.settingsTab)});
+  $("#showCoversToggle").addEventListener("change",e=>{preferences.showCovers=e.target.checked;savePreferences()});
+  $("#entryIcon").addEventListener("change",syncCoverPreview);
+  $("#entryCoverFile").addEventListener("change",e=>{handleCoverFile(e.target.files[0]);});
+  $("#pickCover").addEventListener("click",()=>$("#entryCoverFile").click());
+  $("#removeCover").addEventListener("click",()=>{state.pendingCover=null;state.removeCover=true;$("#entryCoverFile").value="";syncCoverPreview()});
   $("#resetAppearance").addEventListener("click",()=>{preferences={...PREF_DEFAULTS};savePreferences();toast("布局与字号已恢复默认")});
   $("#sidebarToggle").addEventListener("click",()=>{preferences.sidebarCollapsed=!preferences.sidebarCollapsed;savePreferences()});
   $("#startupToggle").addEventListener("change",e=>changeStartup(e.target.checked));
