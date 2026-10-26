@@ -56,6 +56,7 @@
         <div class="appearance-field"><label>网格列数</label><div class="choice-segment" role="group" aria-label="文件夹卡片列数"><button type="button" data-pref="columns" data-value="auto">自动</button><button type="button" data-pref="columns" data-value="2">两列</button><button type="button" data-pref="columns" data-value="3">三列</button><button type="button" data-pref="columns" data-value="4">四列</button></div></div>
       </div>
       <div class="appearance-field color-field"><label>强调色</label><div id="accentOptions" class="accent-options" role="group" aria-label="强调色"><button type="button" data-pref="accent" data-value="blue" title="管理蓝" aria-label="管理蓝"></button><button type="button" data-pref="accent" data-value="purple" title="星云紫" aria-label="星云紫"></button><button type="button" data-pref="accent" data-value="teal" title="青绿色" aria-label="青绿色"></button><button type="button" data-pref="accent" data-value="orange" title="暖橙色" aria-label="暖橙色"></button><button type="button" data-pref="accent" data-value="rose" title="玫瑰红" aria-label="玫瑰红"></button></div></div>
+      <label class="inline-switch cover-toggle-setting"><input id="showCoversToggle" type="checkbox" checked><span>在模块卡片上显示封面图片</span></label>
       <button type="button" id="resetAppearance" class="outline-btn">恢复默认布局</button>
     </section>
     </div>
@@ -84,6 +85,25 @@
         <option value="leaf">叶子模块 · 绑定文件夹</option>
       </select>
       <small class="help-text" id="entryTypeHelp">根模块只能位于目录树的顶层。</small>
+      <div class="entry-cover-field">
+        <label for="entryIcon">模块图标 / 封面图片</label>
+        <div class="entry-cover-controls">
+          <div class="cover-preview" id="entryCoverPreview" aria-label="封面预览"><span class="cover-preview-emoji">📁</span></div>
+          <div class="entry-cover-controls-right">
+            <select id="entryIcon" aria-label="预设图标">
+              <option value="folder">📁 文件夹</option><option value="book">📚 论文 / 阅读</option>
+              <option value="code">💻 开发 / 代码</option><option value="chart">📊 数据 / 统计</option>
+              <option value="database">🗃️ 数据库</option><option value="image">🖼️ 图像 / 设计</option>
+              <option value="briefcase">💼 工作</option><option value="school">🎓 教学 / 学习</option>
+              <option value="music">🎵 音乐</option><option value="video">🎬 视频</option>
+              <option value="archive">🗄️ 归档</option><option value="star">⭐ 收藏</option>
+            </select>
+            <div class="cover-buttons"><button type="button" id="pickCover" class="outline-btn">上传封面</button><button type="button" id="removeCover" class="outline-btn" disabled>移除图片</button></div>
+            <small class="help-text">支持本机 PNG / JPG / WebP，单张不超过 2 MB。根模块、普通模块、叶子模块均可设置。</small>
+          </div>
+        </div>
+        <input id="entryCoverFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+      </div>
       <div id="entryParentRow"><label for="entryParent">上级模块</label><select id="entryParent"></select></div>
       <div id="entryPathRow"><label for="entryPath">绑定文件夹 <span class="optional" id="entryPathRequired">（必填）</span></label>
         <div class="path-field"><input id="entryPath" type="text" placeholder="例如：D:\Research\Paper2026_1"><button id="pickFolder" type="button" class="outline-btn" title="打开 Windows 文件夹选择窗口">浏览...</button></div>
