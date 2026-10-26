@@ -19,12 +19,14 @@ class StoreTests(unittest.TestCase):
         self.store=app.Store(Path(self.tmp.name)/"folderhub.db")
 
     def test_crud_nested_and_favorites(self):
-        root=self.store.create({"title":"论文", "folder_path":r"D:\Research"})
-        child=self.store.create({"title":"预测", "parent_id":root,"favorite":True})
+        root=self.store.create({"title":"论文", "node_type":"root"})
+        child=self.store.create({"title":"预测", "parent_id":root,"node_type":"group","favorite":True})
         grand=self.store.create({"title":"数据", "parent_id":child})
         self.assertEqual(len(self.store.all()),3)
         self.assertEqual(next(x for x in self.store.all() if x["id"]==child)["parent_id"],root)
-        self.store.update(child,{"title":"改名", "folder_path":r"D:\Data"})
+        self.store.update(child,{"title":"改名"})
+        leaf=self.store.create({"title":"文件夹", "node_type":"leaf", "parent_id":grand,"folder_path":r"D:\Data"})
+        self.assertEqual(next(x for x in self.store.all() if x["id"]==leaf)["folder_path"],r"D:\Data")
         self.assertEqual(next(x for x in self.store.all() if x["id"]==child)["title"],"改名")
         self.assertTrue(next(x for x in self.store.all() if x["id"]==child)["favorite"])
         with self.assertRaises(app.UserError):self.store.update(root,{"parent_id":grand})
@@ -44,8 +46,8 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(app.UserError):self.store.order(None,[a])
 
     def test_backup_round_trip_and_rollback(self):
-        p=self.store.create({"title":"资料","folder_path":r"C:\文档"})
-        self.store.create({"title":"课程", "parent_id":p})
+        p=self.store.create({"title":"资料","node_type":"root"})
+        self.store.create({"title":"课程", "parent_id":p,"node_type":"leaf","folder_path":r"C:\文档"})
         backup=self.store.export()
         self.store.delete(p)
         self.store.import_backup(backup)
@@ -59,6 +61,65 @@ class StoreTests(unittest.TestCase):
         for payload in ({"title":""},{"title":"a","folder_path":"./relative"},{"title":"a","parent_id":999},{"title":7}):
             with self.subTest(payload=payload),self.assertRaises(app.UserError):
                 self.store.create(payload)
+
+
+    def test_node_types_and_structure_guards(self):
+        root=self.store.create({"title":"科研","node_type":"root"})
+        group=self.store.create({"title":"项目","parent_id":root,"node_type":"group"})
+        leaf=self.store.create({"title":"代码","parent_id":group,"node_type":"leaf","folder_path":r"D:\Code"})
+        self.assertEqual([n["node_type"] for n in self.store.all()],["root","group","leaf"])
+        for payload in (
+            {"title":"wrong","node_type":"root","parent_id":root},
+            {"title":"wrong","node_type":"group"},
+            {"title":"wrong","node_type":"leaf","parent_id":root},
+            {"title":"wrong","node_type":"leaf","parent_id":leaf,"folder_path":r"D:\Foo"},
+            {"title":"wrong","node_type":"group","parent_id":root,"folder_path":r"D:\Foo"},
+            {"title":"wrong","node_type":"other","parent_id":root},
+        ):
+            with self.subTest(payload=payload), self.assertRaises(app.UserError):self.store.create(payload)
+        with self.assertRaises(app.UserError):self.store.update(group,{"node_type":"leaf","folder_path":r"D:\Somewhere"})
+        with self.assertRaises(app.UserError):self.store.update(leaf,{"parent_id":None})
+        with self.assertRaises(app.UserError):self.store.update(group,{"parent_id":leaf})
+        with self.assertRaises(app.UserError):self.store.update(root,{"parent_id":group})
+        self.store.update(leaf,{"title":"代码更新"})
+        self.assertEqual(next(n for n in self.store.all() if n["id"]==leaf)["title"],"代码更新")
+
+    def test_legacy_migration_keeps_paths_and_old_backups(self):
+        db_path=Path(self.tmp.name)/"old.db"
+        import sqlite3
+        with sqlite3.connect(db_path) as conn:
+            conn.executescript(r"""CREATE TABLE nodes (id INTEGER PRIMARY KEY,
+                parent_id INTEGER, title TEXT NOT NULL, folder_path TEXT, favorite INTEGER NOT NULL DEFAULT 0,
+                sort_order INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+                INSERT INTO nodes VALUES (1,NULL,'旧根','D:\Root',0,0,'a','a');
+                INSERT INTO nodes VALUES (2,1,'中间分类','D:\Group',0,0,'a','a');
+                INSERT INTO nodes VALUES (3,2,'叶子','D:\Data',0,0,'a','a');""")
+        migrated=app.Store(db_path)
+        rows=migrated.all()
+        self.assertEqual([n["node_type"] for n in rows],["root","group","leaf"])
+        self.assertEqual([n["folder_path"] for n in rows],[r"D:\Root",r"D:\Group",r"D:\Data"])
+        migrated.update(1,{"title":"仍可改名"})
+        with self.assertRaises(app.UserError):migrated.update(1,{"folder_path":r"D:\New"})
+        backup=migrated.export()
+        self.assertEqual(backup["version"],2)
+        migrated.import_backup(backup)
+        self.assertEqual([(n["id"],n["parent_id"],n["folder_path"],n["node_type"]) for n in migrated.all()],[(n["id"],n["parent_id"],n["folder_path"],n["node_type"]) for n in backup["nodes"]])
+        legacy={"format":"FolderHub","version":1,"nodes":[{k:v for k,v in n.items() if k!="node_type"} for n in backup["nodes"]]}
+        migrated.import_backup(legacy)
+        self.assertEqual([n["node_type"] for n in migrated.all()],["root","group","leaf"])
+
+    def test_corrupt_v2_backup_is_atomic(self):
+        root=self.store.create({"title":"根","node_type":"root"})
+        leaf=self.store.create({"title":"文件","node_type":"leaf","parent_id":root,"folder_path":r"D:\Files"})
+        backup=self.store.export()
+        bad=json.loads(json.dumps(backup))
+        bad["nodes"][0]["node_type"]="leaf"
+        with self.assertRaises(app.UserError):self.store.import_backup(bad)
+        self.assertEqual(self.store.export()["nodes"],backup["nodes"])
+        bad=json.loads(json.dumps(backup))
+        bad["nodes"][1]["parent_id"]=leaf
+        with self.assertRaises(app.UserError):self.store.import_backup(bad)
+        self.assertEqual(self.store.export()["nodes"],backup["nodes"])
 
 
 class HttpTests(unittest.TestCase):
@@ -90,7 +151,7 @@ class HttpTests(unittest.TestCase):
         status,page=self.request("GET","/")
         self.assertEqual(status,200)
         self.assertIn(b"FolderHub",page)
-        status,r=self.request("POST","/api/nodes",{"title":"科研","folder_path":r"D:\Research"})
+        status,r=self.request("POST","/api/nodes",{"title":"科研","node_type":"root"})
         self.assertEqual(status,201)
         nid=r["id"]
         status,r=self.request("GET","/api/nodes")
@@ -110,13 +171,15 @@ class HttpTests(unittest.TestCase):
 
     def test_open_folder_and_missing_folder(self):
         directory=Path(self.srv.store.db_path.parent)
-        nid=self.srv.store.create({"title":"Local","folder_path":str(directory)})
+        root=self.srv.store.create({"title":"Root","node_type":"root"})
+        nid=self.srv.store.create({"title":"Local","parent_id":root,"node_type":"leaf","folder_path":str(directory)})
         with patch.object(app,"open_in_explorer",return_value=None) as opener:
             status,r=self.request("POST",f"/api/nodes/{nid}/open",{})
             self.assertEqual(status,200)
             opener.assert_called_once_with(str(directory))
         nid2=self.srv.store.create({"title":"No folder"})
         self.assertEqual(self.request("POST",f"/api/nodes/{nid2}/open",{})[0],400)
+        self.assertEqual(self.request("POST","/api/nodes",{"title":"bad","node_type":"leaf","parent_id":nid,"folder_path":str(directory)})[0],400)
 
 
 
