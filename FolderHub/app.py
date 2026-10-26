@@ -19,6 +19,7 @@ import startup
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 MAX_REQUEST = 2 * 1024 * 1024
+NODE_TYPES = ("root", "group", "leaf")
 
 
 class UserError(Exception):
@@ -53,6 +54,32 @@ def validate_path(value):
     return value
 
 
+def validate_node_type(value):
+    if value not in NODE_TYPES or not isinstance(value, str):
+        raise UserError("模块类型必须是根模块、普通模块或叶子模块")
+    return value
+
+
+def inferred_type(parent, path, has_children=False):
+    """Compatibility for v1 data and backups: keep linked category nodes intact."""
+    if parent is None:
+        return "root"
+    return "group" if has_children or not path else "leaf"
+
+
+def validate_structure(node_type, parent, path, *, existing=None):
+    """New/edited nodes obey strict types. Unchanged legacy category paths survive updates."""
+    if (node_type == "root") != (parent is None):
+        raise UserError("根模块只能位于顶层；普通模块和叶子模块必须设置上级模块")
+    if node_type == "leaf" and not path:
+        raise UserError("叶子模块必须关联一个实际文件夹")
+    if node_type != "leaf" and path:
+        legacy_unchanged = (existing is not None and existing["node_type"] == node_type
+                            and existing["folder_path"] == path)
+        if not legacy_unchanged:
+            raise UserError("根模块和普通模块仅用于分类，请在叶子模块关联文件夹")
+
+
 def validate_parent(value):
     if value is None or value == "":
         return None
@@ -72,6 +99,7 @@ class Store:
                     parent_id INTEGER REFERENCES nodes(id) ON DELETE CASCADE,
                     title TEXT NOT NULL,
                     folder_path TEXT,
+                    node_type TEXT NOT NULL DEFAULT 'group',
                     favorite INTEGER NOT NULL DEFAULT 0,
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
@@ -79,6 +107,15 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent_id,sort_order,id);
             """)
+            cols = {row["name"] for row in db.execute("PRAGMA table_info(nodes)")}
+            if "node_type" not in cols:
+                db.execute("ALTER TABLE nodes ADD COLUMN node_type TEXT NOT NULL DEFAULT 'group'")
+                # Existing records may have category paths: keep every path untouched.
+                db.execute("""UPDATE nodes SET node_type = CASE
+                    WHEN parent_id IS NULL THEN 'root'
+                    WHEN EXISTS(SELECT 1 FROM nodes AS child WHERE child.parent_id = nodes.id) THEN 'group'
+                    WHEN folder_path IS NOT NULL AND folder_path != '' THEN 'leaf'
+                    ELSE 'group' END""")
 
     @contextmanager
     def connect(self):
@@ -108,7 +145,9 @@ class Store:
     def check_parent(db, node_id, parent_id):
         if parent_id is None:
             return
-        Store.require(db, parent_id)
+        target = Store.require(db, parent_id)
+        if target["node_type"] == "leaf":
+            raise UserError("叶子模块不能拥有子模块，请选择根模块或普通模块作为上级")
         current = parent_id
         while current is not None:
             if current == node_id:
@@ -124,10 +163,15 @@ class Store:
         title = validate_title(data.get("title"))
         path = validate_path(data.get("folder_path"))
         parent = validate_parent(data.get("parent_id"))
+        node_type = validate_node_type(data.get("node_type", inferred_type(parent, path)))
+        validate_structure(node_type, parent, path)
         stamp = now()
         with self.connect() as db:
             self.check_parent(db, None, parent)
-            result = db.execute("INSERT INTO nodes (parent_id,title,folder_path,favorite,sort_order,created_at,updated_at) VALUES (?,?,?,?,?,?,?)", (parent,title,path,int(bool(data.get("favorite",False))),self.next_order(db,parent),stamp,stamp))
+            result = db.execute("""INSERT INTO nodes
+                (parent_id,title,folder_path,node_type,favorite,sort_order,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?)""", (parent,title,path,node_type,
+                int(bool(data.get("favorite",False))),self.next_order(db,parent),stamp,stamp))
             return result.lastrowid
 
     def update(self, node_id, data):
@@ -136,10 +180,17 @@ class Store:
             title = validate_title(data.get("title", original["title"]))
             path = validate_path(data.get("folder_path", original["folder_path"]))
             parent = validate_parent(data.get("parent_id", original["parent_id"]))
+            node_type = validate_node_type(data.get("node_type", original["node_type"]))
+            validate_structure(node_type, parent, path, existing=original)
             self.check_parent(db, node_id, parent)
+            if node_type == "leaf" and db.execute(
+                "SELECT 1 FROM nodes WHERE parent_id=? LIMIT 1", (node_id,)).fetchone():
+                raise UserError("该模块已有子模块，不能直接改为叶子模块，请先移动或移除下级模块")
             favorite = bool(data.get("favorite", original["favorite"]))
             order = original["sort_order"] if parent == original["parent_id"] else self.next_order(db,parent)
-            db.execute("UPDATE nodes SET parent_id=?,title=?,folder_path=?,favorite=?,sort_order=?,updated_at=? WHERE id=?",(parent,title,path,int(favorite),order,now(),node_id))
+            db.execute("""UPDATE nodes SET parent_id=?,title=?,folder_path=?,node_type=?,
+                favorite=?,sort_order=?,updated_at=? WHERE id=?""",
+                (parent,title,path,node_type,int(favorite),order,now(),node_id))
 
     def delete(self, node_id):
         with self.connect() as db:
@@ -158,10 +209,11 @@ class Store:
                 db.execute("UPDATE nodes SET sort_order=?,updated_at=? WHERE id=?",(position,now(),node_id))
 
     def export(self):
-        return {"format":"FolderHub","version":1,"exported_at":now(),"nodes":self.all()}
+        return {"format":"FolderHub","version":2,"exported_at":now(),"nodes":self.all()}
 
     def import_backup(self, payload):
-        if not isinstance(payload,dict) or payload.get("format")!="FolderHub" or payload.get("version")!=1 or not isinstance(payload.get("nodes"),list):
+        if (not isinstance(payload,dict) or payload.get("format")!="FolderHub"
+            or payload.get("version") not in (1,2) or not isinstance(payload.get("nodes"),list)):
             raise UserError("不是兼容的 FolderHub 备份文件")
         raw = payload["nodes"]
         if len(raw)>20000:
@@ -174,9 +226,16 @@ class Store:
             order = n.get("sort_order",0)
             if type(order)!=int or order<0:
                 raise UserError("备份排序字段无效")
-            prepared[n["id"]] = (parent, validate_title(n.get("title")), validate_path(n.get("folder_path")),int(bool(n.get("favorite",False))),order)
-        for node_id, (parent,*_) in prepared.items():
-            if parent is not None and parent not in prepared:
+            prepared[n["id"]] = {
+                "parent": parent, "title": validate_title(n.get("title")),
+                "path": validate_path(n.get("folder_path")),
+                "favorite": int(bool(n.get("favorite",False))), "order": order,
+                "type": n.get("node_type") if payload["version"]==2 else None
+            }
+        child_parents = {n["parent"] for n in prepared.values() if n["parent"] is not None}
+        for node_id, n in prepared.items():
+            if n["parent"] is not None and n["parent"] not in prepared:
+                raise UserError("备份引用了不存在的上级模块")
                 raise UserError("备份引用了不存在的上级模块")
             checked = set()
             curr = node_id
@@ -184,15 +243,29 @@ class Store:
                 if curr in checked:
                     raise UserError("备份存在循环嵌套")
                 checked.add(curr)
-                curr = prepared[curr][0]
+                curr = prepared[curr]["parent"]
+        for node_id, n in prepared.items():
+            if n["type"] is None and payload["version"]==1:
+                n["type"] = inferred_type(n["parent"],n["path"],node_id in child_parents)
+            n["type"] = validate_node_type(n["type"])
+            # Imported legacy categories may retain linked paths, without changing real files.
+            validate_structure(n["type"],n["parent"],n["path"],existing={
+                "node_type":n["type"], "folder_path":n["path"]})
+            if n["type"]=="leaf" and node_id in child_parents:
+                raise UserError("备份中叶子模块包含子模块")
+            if n["parent"] is not None and prepared[n["parent"]]["type"]=="leaf":
+                raise UserError("备份中叶子模块不能作为上级")
         with self.connect() as db:
             db.execute("DELETE FROM nodes")
             pending = dict(prepared)
             while pending:
                 progressed = False
-                for node_id, (parent,title,path,favorite,order) in list(pending.items()):
-                    if parent is None or parent not in pending:
-                        db.execute("INSERT INTO nodes (id,parent_id,title,folder_path,favorite,sort_order,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)", (node_id,parent,title,path,favorite,order,now(),now()))
+                for node_id, n in list(pending.items()):
+                    if n["parent"] is None or n["parent"] not in pending:
+                        db.execute("""INSERT INTO nodes
+                            (id,parent_id,title,folder_path,node_type,favorite,sort_order,created_at,updated_at)
+                            VALUES (?,?,?,?,?,?,?,?,?)""", (node_id,n["parent"],n["title"],
+                            n["path"],n["type"],n["favorite"],n["order"],now(),now()))
                         del pending[node_id]
                         progressed = True
                 if not progressed:
