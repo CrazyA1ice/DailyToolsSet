@@ -6,6 +6,11 @@ import base64
 import binascii
 from contextlib import contextmanager
 import json
+import hashlib
+import re
+import shutil
+import tempfile
+from threading import RLock
 import ntpath
 import os
 from pathlib import Path
@@ -21,6 +26,10 @@ import explorer_window
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
+PORTABLE_DATA = ROOT / "data"
+PORTABLE_UPLOADS = ROOT / "uploads"
+IMAGE_FILE_RE = re.compile(r"^uploads/[a-f0-9]{64}\.(png|jpg|webp)$")
+IMAGE_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
 MAX_REQUEST = 2 * 1024 * 1024
 MAX_IMAGE_BYTES = 2 * 1024 * 1024
 MAX_IMAGE_REQUEST = 3 * 1024 * 1024
@@ -138,9 +147,12 @@ def validate_parent(value):
 
 
 class Store:
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, uploads_dir: Path | None = None):
         self.db_path = Path(db_path)
+        self.uploads_dir = Path(uploads_dir) if uploads_dir is not None else self.db_path.parent / "uploads"
+        self._image_lock = RLock()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.uploads_dir.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS nodes (
@@ -159,7 +171,7 @@ class Store:
                 CREATE TABLE IF NOT EXISTS node_images (
                     node_id INTEGER PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
                     mime_type TEXT NOT NULL,
-                    image_data BLOB NOT NULL,
+                    image_path TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS trash_batches (
@@ -182,10 +194,12 @@ class Store:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     image_mime TEXT,
-                    image_data BLOB,
+                    image_path TEXT,
                     PRIMARY KEY(batch_id,node_id)
                 );
             """)
+            # Schema changes are transactional, including old node-type migration.
+            db.execute("BEGIN IMMEDIATE")
             cols = {row["name"] for row in db.execute("PRAGMA table_info(nodes)")}
             if "icon" not in cols:
                 db.execute("ALTER TABLE nodes ADD COLUMN icon TEXT NOT NULL DEFAULT 'folder'")
@@ -197,6 +211,88 @@ class Store:
                     WHEN EXISTS(SELECT 1 FROM nodes AS child WHERE child.parent_id = nodes.id) THEN 'group'
                     WHEN folder_path IS NOT NULL AND folder_path != '' THEN 'leaf'
                     ELSE 'group' END""")
+            self._migrate_legacy_images(db)
+
+    def _image_file(self, relative_path):
+        """Only allow content-addressed filenames under the configured uploads directory."""
+        if not isinstance(relative_path, str) or not IMAGE_FILE_RE.fullmatch(relative_path):
+            raise UserError("数据库中的图片相对路径无效")
+        return self.uploads_dir / relative_path.split("/", 1)[1]
+
+    def _write_image(self, mime, raw):
+        """Write the cover before storing its relative name in SQLite; never trust user filenames."""
+        if mime not in IMAGE_EXT or len(raw) > MAX_IMAGE_BYTES:
+            raise UserError("不支持的图片格式或图片过大")
+        relative = f"uploads/{hashlib.sha256(raw).hexdigest()}.{IMAGE_EXT[mime]}"
+        target = self._image_file(relative)
+        if not target.is_file():
+            temp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(dir=self.uploads_dir, prefix=".incoming-", delete=False) as output:
+                    temp_path = Path(output.name)
+                    output.write(raw)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.replace(temp_path, target)
+            finally:
+                if temp_path is not None:
+                    temp_path.unlink(missing_ok=True)
+        return relative
+
+    def _read_image(self, relative_path):
+        try:
+            return self._image_file(relative_path).read_bytes()
+        except FileNotFoundError:
+            raise UserError("封面图片文件丢失，请检查 uploads 文件夹或恢复完整备份")
+
+    def _migrate_legacy_images(self, db):
+        """Convert BOTH active and recycle-bin image BLOBs to relative file paths.
+
+        The entire database schema change is transactional. Previously written file
+        objects remain harmless if the database transaction is rolled back.
+        """
+        image_columns = {r["name"] for r in db.execute("PRAGMA table_info(node_images)")}
+        if "image_data" in image_columns:
+            db.execute("""CREATE TABLE node_images_portable (
+                node_id INTEGER PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+                mime_type TEXT NOT NULL, image_path TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+            for row in db.execute("SELECT node_id,mime_type,image_data,updated_at FROM node_images"):
+                filename = self._write_image(row["mime_type"], bytes(row["image_data"]))
+                db.execute("INSERT INTO node_images_portable VALUES(?,?,?,?)",
+                           (row["node_id"], row["mime_type"], filename, row["updated_at"]))
+            db.execute("DROP TABLE node_images")
+            db.execute("ALTER TABLE node_images_portable RENAME TO node_images")
+        trash_columns = {r["name"] for r in db.execute("PRAGMA table_info(trash_nodes)")}
+        if "image_data" in trash_columns:
+            db.execute("""CREATE TABLE trash_nodes_portable (
+                batch_id INTEGER NOT NULL REFERENCES trash_batches(id) ON DELETE CASCADE,
+                node_id INTEGER NOT NULL, parent_id INTEGER, title TEXT NOT NULL,
+                folder_path TEXT, node_type TEXT NOT NULL, icon TEXT NOT NULL,
+                favorite INTEGER NOT NULL, sort_order INTEGER NOT NULL,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                image_mime TEXT, image_path TEXT, PRIMARY KEY(batch_id,node_id))""")
+            for row in db.execute("SELECT * FROM trash_nodes"):
+                image_path = (self._write_image(row["image_mime"],bytes(row["image_data"]))
+                              if row["image_data"] is not None else None)
+                db.execute("""INSERT INTO trash_nodes_portable VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                           (row["batch_id"],row["node_id"],row["parent_id"],row["title"],
+                            row["folder_path"],row["node_type"],row["icon"],row["favorite"],
+                            row["sort_order"],row["created_at"],row["updated_at"],
+                            row["image_mime"],image_path))
+            db.execute("DROP TABLE trash_nodes")
+            db.execute("ALTER TABLE trash_nodes_portable RENAME TO trash_nodes")
+
+    def _prune_unreferenced_images(self):
+        """Remove unreferenced generated covers, preserving all trash references."""
+        with self._image_lock:
+            with self.connect() as db:
+                referenced = {r[0] for r in db.execute("SELECT image_path FROM node_images")}
+                referenced.update(r[0] for r in db.execute(
+                    "SELECT image_path FROM trash_nodes WHERE image_path IS NOT NULL"))
+            for path in self.uploads_dir.iterdir():
+                if path.is_file() and IMAGE_FILE_RE.fullmatch("uploads/" + path.name):
+                    if "uploads/" + path.name not in referenced:
+                        path.unlink(missing_ok=True)
 
     @contextmanager
     def connect(self):
@@ -281,7 +377,7 @@ class Store:
     def _trash_delete(db, ids):
         """Snapshot a complete subtree before deleting its navigation records.
 
-        Metadata and image bytes move atomically into a local-only recycle bin.
+        Metadata and relative image paths move atomically into a local recycle bin.
         No real directories or files are changed.
         """
         selected = list(ids)
@@ -310,15 +406,15 @@ class Store:
             chunk = ordered_ids[start:start+300]
             placeholder = ",".join("?" for _ in chunk)
             backups = db.execute(f"""SELECT n.*, i.mime_type AS image_mime,
-                i.image_data AS image_data FROM nodes n
+                i.image_path AS image_path FROM nodes n
                 LEFT JOIN node_images i ON i.node_id=n.id
                 WHERE n.id IN ({placeholder})""", chunk).fetchall()
             db.executemany("""INSERT INTO trash_nodes(batch_id,node_id,parent_id,title,folder_path,
-                node_type,icon,favorite,sort_order,created_at,updated_at,image_mime,image_data)
+                node_type,icon,favorite,sort_order,created_at,updated_at,image_mime,image_path)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", [
                 (batch_id,r["id"],r["parent_id"],r["title"],r["folder_path"],r["node_type"],
                  r["icon"],r["favorite"],r["sort_order"],r["created_at"],r["updated_at"],
-                 r["image_mime"],r["image_data"]) for r in backups])
+                 r["image_mime"],r["image_path"]) for r in backups])
         # Only delete the selected roots: SQLite cascades to descendants/images.
         # Existing children have already been captured in trash_nodes above.
         for start in range(0, len(selected), 300):
@@ -370,19 +466,22 @@ class Store:
                          row["node_type"],row["icon"],row["favorite"],row["sort_order"],
                          row["created_at"],row["updated_at"]))
                     if row["image_mime"] is not None:
-                        db.execute("""INSERT INTO node_images(node_id,mime_type,image_data,updated_at)
-                            VALUES(?,?,?,?)""",(node_id,row["image_mime"],row["image_data"],now()))
+                        self._read_image(row["image_path"])  # Refuse to restore a broken cover.
+                        db.execute("""INSERT INTO node_images(node_id,mime_type,image_path,updated_at)
+                            VALUES(?,?,?,?)""",(node_id,row["image_mime"],row["image_path"],now()))
             db.execute("DELETE FROM trash_batches WHERE id=?",(trash_id,))
             return {"ok": True, "restored": len(rows)}
 
     def purge_trash(self, trash_id):
         if type(trash_id) is not int or trash_id < 1:
             raise UserError("回收站记录 ID 无效")
-        with self.connect() as db:
-            result = db.execute("DELETE FROM trash_batches WHERE id=?",(trash_id,))
-            if not result.rowcount:
-                raise UserError("回收站记录不存在或已清除")
-            return {"ok": True}
+        with self._image_lock:
+            with self.connect() as db:
+                result = db.execute("DELETE FROM trash_batches WHERE id=?",(trash_id,))
+                if not result.rowcount:
+                    raise UserError("回收站记录不存在或已清除")
+            self._prune_unreferenced_images()
+        return {"ok": True}
 
     def batch(self, action, ids):
         """Atomic changes to navigation entries only; never touches actual folders."""
@@ -408,23 +507,30 @@ class Store:
 
     def save_image(self, node_id, data_url):
         mime, raw = decode_image(data_url)
-        with self.connect() as db:
-            self.require(db, node_id)
-            db.execute("""INSERT INTO node_images(node_id,mime_type,image_data,updated_at) VALUES (?,?,?,?)
-                ON CONFLICT(node_id) DO UPDATE SET mime_type=excluded.mime_type,
-                image_data=excluded.image_data,updated_at=excluded.updated_at""",(node_id,mime,raw,now()))
-            db.execute("UPDATE nodes SET updated_at=? WHERE id=?",(now(),node_id))
+        with self._image_lock:
+            with self.connect() as db:
+                self.require(db, node_id)
+                relative_path = self._write_image(mime, raw)
+                db.execute("""INSERT INTO node_images(node_id,mime_type,image_path,updated_at) VALUES (?,?,?,?)
+                    ON CONFLICT(node_id) DO UPDATE SET mime_type=excluded.mime_type,
+                    image_path=excluded.image_path,updated_at=excluded.updated_at""",
+                    (node_id,mime,relative_path,now()))
+                db.execute("UPDATE nodes SET updated_at=? WHERE id=?",(now(),node_id))
+            self._prune_unreferenced_images()
 
     def remove_image(self, node_id):
-        with self.connect() as db:
-            self.require(db, node_id)
-            db.execute("DELETE FROM node_images WHERE node_id=?",(node_id,))
-            db.execute("UPDATE nodes SET updated_at=? WHERE id=?",(now(),node_id))
+        with self._image_lock:
+            with self.connect() as db:
+                self.require(db, node_id)
+                db.execute("DELETE FROM node_images WHERE node_id=?",(node_id,))
+                db.execute("UPDATE nodes SET updated_at=? WHERE id=?",(now(),node_id))
+            self._prune_unreferenced_images()
 
     def get_image(self, node_id):
-        with self.connect() as db:
-            row=db.execute("SELECT mime_type,image_data FROM node_images WHERE node_id=?",(node_id,)).fetchone()
-            return (row["mime_type"], bytes(row["image_data"])) if row else None
+        with self._image_lock:
+            with self.connect() as db:
+                row=db.execute("SELECT mime_type,image_path FROM node_images WHERE node_id=?",(node_id,)).fetchone()
+            return (row["mime_type"], self._read_image(row["image_path"])) if row else None
 
     def order(self, parent_id, node_ids):
         parent_id = validate_parent(parent_id)
@@ -438,10 +544,11 @@ class Store:
                 db.execute("UPDATE nodes SET sort_order=?,updated_at=? WHERE id=?",(position,now(),node_id))
 
     def export(self):
-        with self.connect() as db:
-            images={str(row["node_id"]):encode_image(row["mime_type"],row["image_data"])
-                for row in db.execute("SELECT node_id,mime_type,image_data FROM node_images")}
-        return {"format":"FolderHub","version":3,"exported_at":now(),"nodes":self.all(),"images":images}
+        with self._image_lock:
+            with self.connect() as db:
+                images={str(row["node_id"]):encode_image(row["mime_type"],self._read_image(row["image_path"]))
+                    for row in db.execute("SELECT node_id,mime_type,image_path FROM node_images")}
+            return {"format":"FolderHub","version":3,"exported_at":now(),"nodes":self.all(),"images":images}
 
     def import_backup(self, payload):
         if (not isinstance(payload,dict) or payload.get("format")!="FolderHub"
@@ -496,6 +603,14 @@ class Store:
                 if not isinstance(key,str) or not key.isascii() or not key.isdecimal() or int(key) not in prepared:
                     raise UserError("备份图片引用了不存在的模块")
                 backup_images[int(key)] = decode_backup_image(value)
+        # Validate and write all cover files before touching existing navigation data.
+        with self._image_lock:
+            prepared_images = {node_id:(mime,self._write_image(mime, raw))
+                               for node_id,(mime,raw) in backup_images.items()}
+            self._apply_import(prepared, prepared_images)
+            self._prune_unreferenced_images()
+
+    def _apply_import(self, prepared, prepared_images):
         with self.connect() as db:
             db.execute("DELETE FROM nodes")
             pending = dict(prepared)
@@ -511,9 +626,9 @@ class Store:
                         progressed = True
                 if not progressed:
                     raise UserError("备份结构无效")
-            for node_id, (mime, raw) in backup_images.items():
-                db.execute("INSERT INTO node_images(node_id,mime_type,image_data,updated_at) VALUES (?,?,?,?)",
-                           (node_id,mime,raw,now()))
+            for node_id, (mime, image_path) in prepared_images.items():
+                db.execute("INSERT INTO node_images(node_id,mime_type,image_path,updated_at) VALUES (?,?,?,?)",
+                           (node_id,mime,image_path,now()))
 
 
 def open_in_explorer(path):
@@ -693,12 +808,47 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def data_directory():
-    override=os.environ.get("FOLDERHUB_DATA_DIR")
-    if override:
-        return Path(override).expanduser()
-    if os.name=="nt":
-        return Path(os.environ.get("LOCALAPPDATA",str(Path.home()))) / "DailyToolsSet" / "FolderHub"
-    return Path.home()/".local"/"share"/"DailyToolsSet"/"FolderHub"
+    """New default: portable local data, next to source code."""
+    override = os.environ.get("FOLDERHUB_DATA_DIR")
+    return Path(override).expanduser() if override else PORTABLE_DATA
+
+
+def legacy_data_directory():
+    if os.name == "nt":
+        return Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "DailyToolsSet" / "FolderHub"
+    return Path.home() / ".local" / "share" / "DailyToolsSet" / "FolderHub"
+
+
+def migrate_legacy_database(destination_dir: Path, source_dir: Path | None = None):
+    """One-time, non-destructive copy from old AppData to portable data/.
+
+    SQLite's backup API includes committed WAL changes. Never overwrite an existing
+    destination and never remove the original database.
+    """
+    source = Path(source_dir) if source_dir is not None else legacy_data_directory()
+    old = source / "folderhub.db"
+    new = Path(destination_dir) / "folderhub.db"
+    if new.exists() or not old.is_file() or old.resolve() == new.resolve():
+        return False
+    new.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=new.parent,prefix=".migrate-",suffix=".db",delete=False) as tmp:
+            temporary = Path(tmp.name)
+        # Open in read-only mode: the source is retained intact for rollback.
+        uri = old.resolve().as_uri() + "?mode=ro"
+        with sqlite3.connect(uri, uri=True) as source_db, sqlite3.connect(temporary) as dest_db:
+            source_db.backup(dest_db)
+            if dest_db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise UserError("旧数据库完整性检查失败，迁移已中止")
+        if new.exists():
+            return False
+        os.replace(temporary,new)
+        temporary = None
+        return True
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def main():
@@ -722,7 +872,12 @@ def main():
         except (startup.StartupError, OSError) as exc:
             print("操作自启动失败：",exc,file=sys.stderr)
             return 1
-    store=Store(args.data_dir/"folderhub.db")
+    # Explicit custom data locations are never silently populated from AppData.
+    default_location = not os.environ.get("FOLDERHUB_DATA_DIR") and args.data_dir.resolve()==PORTABLE_DATA.resolve()
+    if default_location and migrate_legacy_database(args.data_dir):
+        print("旧版 AppData 数据库已安全复制到项目 data/；原数据库保留不动", flush=True)
+    uploads = PORTABLE_UPLOADS if default_location else args.data_dir / "uploads"
+    store=Store(args.data_dir/"folderhub.db", uploads_dir=uploads)
     try:
         server=FolderServer(("127.0.0.1",args.port),store)
     except OSError as exc:
@@ -731,6 +886,7 @@ def main():
     url=f"http://127.0.0.1:{server.server_port}/"
     print("FolderHub 已启动：",url,flush=True)
     print("数据库位置：",store.db_path,flush=True)
+    print("图片文件夹：",store.uploads_dir,flush=True)
     print("按 Ctrl+C 退出服务。",flush=True)
     if not args.no_browser:
         from threading import Timer

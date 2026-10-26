@@ -22,7 +22,7 @@ Windows 本地网页版文件夹快捷导航工具：用“模块 / 子模块”
 - **文件夹选择**：通过 Python 标准库 tkinter 弹出 Windows 原生文件夹选择对话框。
 - **收藏和全局搜索**：按模块名称、关联文件夹路径、完整所属分类路径搜索全部层级；显示结果归属层级；支持 `Ctrl+K` 聚焦搜索、收藏及网格/列表切换。
 - **备份恢复**：通过 JSON 文件导出与恢复全部导航结构；恢复操作将**替换当前配置**，不会更改磁盘文件。
-- **持久化**：SQLite 自动保存。数据路径为 `%LOCALAPPDATA%\DailyToolsSet\FolderHub\folderhub.db`，卸载/更新源代码不会丢失记录。
+- **便携式持久化**：SQLite 默认保存在 `FolderHub/data/folderhub.db`，封面图片保存在 `FolderHub/uploads/`。两个目录已加入 `.gitignore`，绝不会因普通 `git add .` 被提交。首次启动会安全迁移旧 AppData 数据（详见下方）。
 
 > 注意：浏览器安全机制不允许普通静态 HTML 直接打开 Windows 文件资源管理器，因此需要同时运行本地 Python 服务。不能将纯静态页面托管到 GitHub Pages 后实现本地文件夹打开功能。
 
@@ -33,7 +33,7 @@ Windows 本地网页版文件夹快捷导航工具：用“模块 / 子模块”
 python app.py                     # 默认 8765 端口，自动打开浏览器
 python app.py --port 8770         # 指定其他端口
 python app.py --no-browser        # 不自动打开浏览器
-python app.py --data-dir "D:\FolderHubData"   # 自定义数据库目录
+python app.py --data-dir "D:\FolderHubData"   # 自定义数据库及图片位置（图片在此目录下的 uploads/）
 python -m unittest discover -s tests -v      # 运行全部测试
 ```
 
@@ -50,6 +50,9 @@ FolderHub/
 │   ├── styles.css         # 样式
 │   ├── app.js             # 无依赖交互逻辑
 │   └── favicon.svg
+├── data/                   # 运行后自动生成，数据库（不上传 Git）
+│   └── folderhub.db
+├── uploads/                # 运行后自动生成，自定义封面（不上传 Git）
 ├── tests/
 │   └── test_app.py        # 数据库和 HTTP 安全/CRUD 测试
 ├── .gitignore
@@ -73,7 +76,7 @@ git push -u origin main
 
 如果当前目录已经是 Git 仓库，**省略** `git init` 和 `git remote add origin`。如果报 `remote origin already exists`，可用 `git remote -v` 检查远端。`src refspec main does not match any` 常见于尚未创建首次 commit，或本地仍位于 `master` 分支；先 `git add .` 和 `git commit`，再 `git branch -M main` 后 push。
 
-**不要把运行时数据库、私人路径备份文件或其他隐私文件上传到公开仓库。** Git 忽略了常见的 `.db` 文件，但自定义备份命名的 JSON 仍可能被 Git 跟踪，提交前请务必检查 `git status`。
+**不要把运行时数据库、私人路径备份文件或其他隐私文件上传到公开仓库。** Git 会忽略 `data/` 和 `uploads/`，但个人备份 JSON 若放在其他位置仍可能被 Git 跟踪，提交前请检查 `git status`。
 
 ## V1.1：开机启动、浏览器首页与换肤
 
@@ -236,3 +239,27 @@ http://127.0.0.1:8765/
 - **真实文件与文件夹永远不会被移动或删除**。这里的回收站与 Windows 系统回收站不是一回事。
 - 回收站保存在 SQLite 中，不依赖浏览器 localStorage；本版本不会自动清空。当前 JSON 备份仍只包含活跃导航模块与其封面，**不包含回收站记录**。如需完整迁移回收站，请备份本地 SQLite 数据库文件。
 - 新数据库表在打开旧数据库时自动创建，不改变现有模块记录、路径及图片。若要回退旧版本，建议先备份本地数据库。
+
+
+## V2.0：便携数据库与独立封面文件（从 V1.9 平滑升级）
+
+**当前默认目录：**
+
+```text
+FolderHub/
+├── app.py
+├── data/
+│   └── folderhub.db             # 模块树、收藏、回收站、图片相对路径
+└── uploads/
+    └── <sha256>.png/.jpg/.webp  # 自定义上传封面的真实图片文件
+```
+
+- 上传后图片会**复制**到 `uploads/`，不依赖你最初选择的源文件，也不存放在 GitHub 中。数据库只保留如 `uploads/<sha256>.png` 的相对路径；同内容封面只保留一份文件。
+- 活动模块及**回收站里的封面**都会转换为相对路径，仍可在回收站完整恢复；不再在 SQLite 中保留图片的 BLOB 数据。替换或移除封面、永久删除回收站记录时，会清理已没有任何引用的图片文件。
+- JSON 备份继续**内嵌图片**，与 V1.9 相同（`version: 3`），所以单独导出的 JSON 仍可以还原模块及封面；回收站历史本来就不包含在普通备份中。
+- **首次升级迁移（务必先退出旧进程）：** 如果项目的 `data/folderhub.db` 尚不存在，程序启动时会使用 SQLite 的在线备份 API 将 `%LOCALAPPDATA%\DailyToolsSet\FolderHub\folderhub.db` 复制到 `data/`，随后将旧数据库中活动模块、回收站的封面数据分别写入 `uploads/`，并迁移表结构。**旧 AppData 数据库不会被删除或覆盖**，可用于回退。
+- 已存在 `data/folderhub.db` 时，**不会再用旧 AppData 数据覆盖**；可避免升级后每次启动重复迁移。
+- 自定义 `--data-dir` 或 `FOLDERHUB_DATA_DIR` 时，数据文件写入指定目录，图片在其 `uploads/` 子目录，且**不执行 AppData 自动迁移**。可先备份再自行迁移。
+- 为保证便携性：以后备份 / 移动 FolderHub 时，请**同时复制 `data/` 和 `uploads/` 两个目录**。重新执行 `git clone` 只获得源码，不会恢复私人导航数据；迁移到新电脑时实际关联的 Windows 文件夹路径也可能需要调整。
+- SQLite 不能在数据库写入和文件写入之间提供单一跨文件事务；程序先原子保存图片再更新记录。极端故障下可能留下未引用的图片，可通过下次正常的替换、移除或清理操作回收；不会自动删除你真实关联的文件夹。
+- 提醒：项目目录和 `uploads/` 必须对当前用户可写；若 `FolderHub` 被放在系统受保护的位置（如 `Program Files`），请先移至自己的可写目录再运行。不要将含私人路径和图片的 `data/`、`uploads/` 推送至公开仓库。

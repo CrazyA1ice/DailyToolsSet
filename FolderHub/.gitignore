@@ -9,3 +9,7 @@ folderhub.db-shm
 folderhub.db-wal
 backup*.json
 .DS_Store
+
+# Portable runtime state; never publish local paths, SQLite data or covers.
+/data/
+/uploads/
