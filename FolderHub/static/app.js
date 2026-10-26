@@ -620,7 +620,7 @@ async function refreshStartup(){
   } catch(e) {label.textContent="无法读取启动项："+e.message}
 }
 function selectSettingsTab(tab){
-  const current=["launch","appearance","storage"].includes(tab)?tab:"appearance";
+  const current=["launch","appearance","storage","paths"].includes(tab)?tab:"appearance";
   if(current==="storage")refreshStorage();
   document.querySelectorAll("[data-settings-tab]").forEach(button=>{
     const selected=button.dataset.settingsTab===current;
@@ -662,6 +662,70 @@ async function downloadPortableBackup(){
     window.location.assign(`/api/storage/backup?ticket=${encodeURIComponent(auth.ticket)}`);
   }catch(e){toast("备份下载失败："+e.message,true)}
   finally{setTimeout(()=>{button.disabled=false},1800)}
+}
+// Path migration must be explicit: a preview is invalidated when either input changes.
+let currentPathPlan = null;
+let pathPreviewGeneration = 0;
+function clearPathPlan(){
+  pathPreviewGeneration++;
+  currentPathPlan=null;
+  $("#pathApply").disabled=true;
+  $("#pathPlanSummary").textContent="预览后才能应用，不会直接修改真实文件夹。";
+  $("#pathPlanList").replaceChildren();
+}
+function pathRows(items,kind){
+  const shown=kind==="health"?items.filter(x=>!x.exists):items;
+  const limit=60;
+  let result=shown.slice(0,limit).map(item=>{
+    if(kind==="health")return `<div class="path-row"><strong>${h(item.title)}</strong><span class="path-warning">无法访问</span><code title="${h(item.path)}">${h(item.path)}</code></div>`;
+    return `<div class="path-row"><strong>${h(item.title)}</strong><code title="${h(item.old_path)}">${h(item.old_path)}</code><span class="path-arrow">↓</span><code title="${h(item.new_path)}">${h(item.new_path)}</code></div>`;
+  }).join("");
+  if(shown.length>limit)result+=`<p class="settings-note">仅显示前 ${limit} 条，共 ${shown.length} 条记录。</p>`;
+  return result;
+}
+async function checkPaths(){
+  const button=$("#pathCheck");button.disabled=true;
+  $("#pathHealthSummary").textContent="正在检查关联的文件夹... 网络盘可能需要一些时间。";
+  try {
+    const result=await mutate("POST","/api/paths/check");
+    $("#pathHealthSummary").textContent=`已检查 ${result.total} 条：可访问 ${result.accessible}，不可访问 ${result.missing}。`;
+    $("#pathHealthList").innerHTML=result.missing?pathRows(result.items,"health"):'<p class="path-success">✓ 所有已关联文件夹均可访问。</p>';
+  }catch(e){$("#pathHealthSummary").textContent="检查失败："+e.message;$("#pathHealthList").replaceChildren();toast(e.message,true)}
+  finally{button.disabled=false}
+}
+async function previewPaths(){
+  clearPathPlan();
+  const generation=pathPreviewGeneration;
+  const source=$("#pathPrefixFrom").value;
+  const target=$("#pathPrefixTo").value;
+  const button=$("#pathPreview");button.disabled=true;
+  $("#pathPlanSummary").textContent="正在计算匹配的路径...";
+  try {
+    const result=await mutate("POST","/api/paths/preview",{source,target});
+    if(generation!==pathPreviewGeneration)return; // Form changed during the request.
+    currentPathPlan=result.count?result:null;
+    $("#pathApply").disabled=!currentPathPlan;
+    $("#pathPlanSummary").textContent=result.count?`预览：将修改 ${result.count} 条模块路径，请核对后再确认。`:'没有匹配的关联路径，不需要修改。';
+    $("#pathPlanList").innerHTML=pathRows(result.changes,"plan");
+  }catch(e){if(generation===pathPreviewGeneration){$("#pathPlanSummary").textContent="预览失败："+e.message;toast(e.message,true)}}
+  finally{button.disabled=false}
+}
+async function applyPaths(){
+  const plan=currentPathPlan;
+  if(!plan||!plan.count)return;
+  const message=`确认批量修改 ${plan.count} 条模块的关联路径吗？\n\n${plan.source} → ${plan.target}\n\n此操作只更改数据库里的导航路径，不会移动硬盘文件夹。建议先下载完整备份。`;
+  if(!confirm(message))return;
+  const button=$("#pathApply");button.disabled=true;
+  try {
+    const result=await mutate("POST","/api/paths/apply",{source:plan.source,target:plan.target,fingerprint:plan.fingerprint});
+    clearPathPlan();
+    $("#pathPlanSummary").textContent=`已修改 ${result.changed} 条关联路径。可点击上方按钮重新检查。`;
+    $("#pathHealthSummary").textContent="关联路径已更新，请重新执行检查。";
+    $("#pathHealthList").replaceChildren();
+    await refresh();
+    toast(`已更新 ${result.changed} 条导航路径，真实文件夹未受影响`);
+  }catch(e){currentPathPlan=null;$("#pathPlanSummary").textContent="提交失败："+e.message+"；请重新生成预览。";toast(e.message,true)}
+  finally{button.disabled=true}
 }
 function openSettings(){
   renderThemeOptions();
@@ -747,6 +811,12 @@ function bind(){
   $("#copyHomepage").addEventListener("click",copyHomepage);
   $("#storageRefresh").addEventListener("click",refreshStorage);
   $("#storageBackup").addEventListener("click",downloadPortableBackup);
+  $("#pathCheck").addEventListener("click",checkPaths);
+  $("#pathPreview").addEventListener("click",previewPaths);
+  $("#pathApply").addEventListener("click",applyPaths);
+  for(const selector of ["#pathPrefixFrom","#pathPrefixTo"]){
+    $(selector).addEventListener("input",clearPathPlan);
+  }
   $("#importFile").addEventListener("change",async e=>{await restoreBackup(e.target.files[0]);e.target.value=""});
   $("#entryForm").addEventListener("submit",submitDialog);
   $("#entryType").addEventListener("change",updateEntryType);

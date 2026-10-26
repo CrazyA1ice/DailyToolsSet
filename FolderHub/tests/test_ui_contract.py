@@ -98,12 +98,24 @@ class AdminUiContractTests(unittest.TestCase):
             self.assertIn(f'id="{control}"', self.html)
         for control in ('storageMetrics', 'storageRefresh', 'storageBackup', 'storageWarning'):
             self.assertIn(control, self.js)
-        self.assertIn('["launch","appearance","storage"]', self.js)
+        self.assertIn('["launch","appearance","storage","paths"]', self.js)
         self.assertIn('function refreshStorage()', self.js)
         self.assertIn('function downloadPortableBackup()', self.js)
         self.assertIn('/api/storage/status', self.js)
         self.assertIn('/api/storage/backup', self.js)
         self.assertIn('.storage-metrics', self.css)
+
+    def test_path_migration_settings(self):
+        for control in ('settingsTabPaths', 'settingsPanelPaths', 'pathPrefixFrom',
+                        'pathPrefixTo', 'pathPreview', 'pathApply', 'pathCheck',
+                        'pathHealthSummary', 'pathPlanSummary'):
+            self.assertIn(f'id="{control}"', self.html)
+        for control in ('pathPrefixFrom', 'pathPrefixTo', 'pathPreview', 'pathApply',
+                        'pathCheck', 'pathHealthSummary', 'pathPlanSummary'):
+            self.assertIn(control, self.js)
+        for endpoint in ('/api/paths/check', '/api/paths/preview', '/api/paths/apply'):
+            self.assertIn(endpoint, self.js)
+        self.assertIn('.path-results', self.css)
 
     def test_customization_options_and_persistence(self):
         for pref in ("font", "density", "sidebar", "columns", "accent", "coverHeight", "coverFit"):

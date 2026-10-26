@@ -54,7 +54,7 @@
 <div id="settingsLayer" class="dialog-layer hidden" role="presentation">
   <div class="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="dialog-header"><div><div class="eyebrow">PERSONALIZE YOUR SPACE</div><h2 id="settingsTitle">外观与启动设置</h2><p class="settings-subtitle">打造属于你的本地文件导航首页</p></div><button id="settingsClose" class="icon-button" title="关闭设置" aria-label="关闭设置">✕</button></div>
-    <div class="settings-tabs" role="tablist" aria-label="设置类别"><button type="button" role="tab" id="settingsTabAppearance" data-settings-tab="appearance" aria-controls="settingsPanelAppearance" aria-selected="true">外观与布局</button><button type="button" role="tab" id="settingsTabLaunch" data-settings-tab="launch" aria-controls="settingsPanelLaunch" aria-selected="false">启动与首页</button><button type="button" role="tab" id="settingsTabStorage" data-settings-tab="storage" aria-controls="settingsPanelStorage" aria-selected="false">数据与备份</button></div>
+    <div class="settings-tabs" role="tablist" aria-label="设置类别"><button type="button" role="tab" id="settingsTabAppearance" data-settings-tab="appearance" aria-controls="settingsPanelAppearance" aria-selected="true">外观与布局</button><button type="button" role="tab" id="settingsTabLaunch" data-settings-tab="launch" aria-controls="settingsPanelLaunch" aria-selected="false">启动与首页</button><button type="button" role="tab" id="settingsTabStorage" data-settings-tab="storage" aria-controls="settingsPanelStorage" aria-selected="false">数据与备份</button><button type="button" role="tab" id="settingsTabPaths" data-settings-tab="paths" aria-controls="settingsPanelPaths" aria-selected="false">路径管理</button></div>
     <div id="settingsPanelAppearance" class="settings-page" data-settings-page="appearance" role="tabpanel" aria-labelledby="settingsTabAppearance">
     <section class="settings-section"><div class="setting-heading"><h3>🎨 主题换肤</h3><p>选中的外观会自动保存在此浏览器，下次打开继续使用。</p></div><div class="theme-grid" id="themeOptions" role="group" aria-label="选择主题"></div></section>
     <section class="settings-section"><div class="setting-heading"><h3>布局与显示</h3><p>修改后即时生效，并保存在当前浏览器。适合不同分辨率的桌面屏幕。</p></div>
@@ -90,6 +90,28 @@
         <div class="storage-actions"><button id="storageRefresh" type="button" class="outline-btn">重新检查</button><button id="storageBackup" type="button" class="primary-btn" disabled>下载完整 ZIP 备份</button></div>
         <p id="storageWarning" class="settings-note" role="status">完整备份包含 data/folderhub.db 与全部正在使用及回收站引用的图片。</p>
         <p class="settings-note">下载文件请妥善保存在项目目录之外。它包含你的本机路径、模块、封面和回收站内容，不要上传到公开 GitHub。恢复前需退出 FolderHub 并备份当前 data/、uploads/，再解压覆盖。</p>
+      </section>
+    </div>
+    <div id="settingsPanelPaths" class="settings-page hidden" data-settings-page="paths" role="tabpanel" aria-labelledby="settingsTabPaths">
+      <section class="settings-section">
+        <div class="setting-heading"><h3>📂 关联文件夹检测</h3><p>手动检查已关联的文件夹路径能否访问，不递归扫描文件，不修改实际目录。网络共享盘检查可能较慢。</p></div>
+        <div class="storage-actions"><button id="pathCheck" type="button" class="outline-btn">检查所有关联路径</button></div>
+        <p id="pathHealthSummary" class="settings-note" role="status">尚未执行检查。</p>
+        <div id="pathHealthList" class="path-results" aria-live="polite"></div>
+      </section>
+      <section class="settings-section">
+        <div class="setting-heading"><h3>🔁 批量修改盘符 / 目录前缀</h3><p>例如将 D:\Research 替换为 E:\Research，保留后面的各级子文件夹；也支持共享目录迁移。仅修改 FolderHub 数据库记录。</p></div>
+        <div class="path-prefix-grid">
+          <label for="pathPrefixFrom">旧路径前缀<input id="pathPrefixFrom" type="text" spellcheck="false" autocomplete="off" placeholder="D:\Research"></label>
+          <label for="pathPrefixTo">新路径前缀<input id="pathPrefixTo" type="text" spellcheck="false" autocomplete="off" placeholder="E:\Research"></label>
+        </div>
+        <div class="storage-actions">
+          <button id="pathPreview" type="button" class="outline-btn">1. 生成变更预览</button>
+          <button id="pathApply" type="button" class="primary-btn" disabled>2. 确认并应用</button>
+        </div>
+        <p id="pathPlanSummary" class="settings-note" role="status">预览后才能应用，不会直接修改真实文件夹。</p>
+        <div id="pathPlanList" class="path-results" aria-live="polite"></div>
+        <p class="settings-note">建议操作前使用「数据与备份」下载完整 ZIP。替换会修改所有匹配前缀的模块，包括旧版绑定路径的普通模块；不会移动、删除或创建硬盘目录。路径原本不存在时，也允许先修正为新地址。</p>
       </section>
     </div>
     <div class="dialog-footer"><button id="settingsDone" type="button" class="primary-btn">完成设置</button></div>

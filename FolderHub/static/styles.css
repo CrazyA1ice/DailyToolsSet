@@ -467,3 +467,17 @@ html[data-cover-fit="contain"] .cover-preview img{object-fit:contain}
 .storage-metric span{font-size:.83rem;color:var(--muted)}
 .storage-actions{display:flex;align-items:center;flex-wrap:wrap;gap:9px}
 @media(max-width:640px){.storage-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.settings-tabs button{min-width:0;flex:1;padding:8px 5px;font-size:.82rem}}
+
+/* V2.2: a dedicated manual path health / migration panel. */
+.settings-tabs{flex-wrap:wrap}
+.path-prefix-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:12px 0 15px}
+.path-prefix-grid label{font-weight:650;color:var(--text);font-size:.92rem;display:flex;flex-direction:column;gap:7px}
+.path-prefix-grid input{background:var(--surface);border:1px solid var(--line-strong);border-radius:8px;color:var(--text);padding:9px 12px;min-width:0;width:100%;min-height:43px;font-family:Consolas,monospace;font-weight:400}
+.path-results{max-height:290px;overflow-y:auto;margin-top:12px;display:grid;gap:7px}
+.path-row{border:1px solid var(--line);border-radius:9px;padding:11px 13px;display:grid;gap:5px;background:var(--surface-soft);min-width:0}
+.path-row strong{font-size:.91rem}
+.path-row code{overflow-wrap:anywhere;white-space:pre-wrap;font-family:Consolas,monospace;font-size:.84rem;color:var(--muted)}
+.path-arrow{font-size:.85rem;color:var(--accent);font-weight:750}
+.path-warning{font-size:.8rem;color:#cb4e37;font-weight:700}
+.path-success{color:var(--good);font-size:.92rem}
+@media(max-width:700px){.path-prefix-grid{grid-template-columns:1fr}.settings-tabs button{flex:1 1 42%}}

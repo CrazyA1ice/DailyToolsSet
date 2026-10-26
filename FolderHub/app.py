@@ -25,6 +25,7 @@ from urllib.parse import urlparse, parse_qs
 import webbrowser
 import startup
 import explorer_window
+import path_management
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -879,6 +880,15 @@ class Handler(BaseHTTPRequestHandler):
             if method=="POST" and path=="/api/import":
                 self.server.store.import_backup(self.request_json(MAX_IMPORT_REQUEST))
                 return self.reply(200,{"ok":True})
+            if method=="POST" and path=="/api/paths/check":
+                self.request_json()
+                return self.reply(200,path_management.check_health(self.server.store))
+            if method=="POST" and path=="/api/paths/preview":
+                data=self.request_json()
+                return self.reply(200,path_management.preview(self.server.store,data.get("source"),data.get("target")))
+            if method=="POST" and path=="/api/paths/apply":
+                data=self.request_json()
+                return self.reply(200,path_management.apply(self.server.store,data.get("source"),data.get("target"),data.get("fingerprint")))
             if method=="POST" and path=="/api/pick-folder":
                 self.request_json()
                 return self.reply(200,{"path":choose_folder()})
@@ -919,7 +929,7 @@ class Handler(BaseHTTPRequestHandler):
                 types={"index.html":"text/html; charset=utf-8","app.js":"application/javascript; charset=utf-8","styles.css":"text/css; charset=utf-8","favicon.svg":"image/svg+xml"}
                 return self.reply(200,(STATIC / name).read_bytes(),types[name])
             return self.reply(404,{"error":"页面或接口不存在"})
-        except (UserError, startup.StartupError) as exc:
+        except (UserError, startup.StartupError, path_management.PathRuleError) as exc:
             return self.reply(400,{"error":str(exc)})
         except (OSError,sqlite3.Error) as exc:
             print("[FolderHub] error:",repr(exc),file=sys.stderr)
