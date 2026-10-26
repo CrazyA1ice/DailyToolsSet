@@ -330,3 +330,32 @@ html[data-density="compact"] .tools{padding:11px}
 .settings-tabs button:hover{color:var(--accent)}
 .settings-tabs button.selected{color:var(--accent);border-bottom-color:var(--accent)}
 .settings-page .settings-section:first-child{border-top:0}
+
+/* V1.5: a minimal root-only home, with global search in the sticky header. */
+.topbar{gap:14px;padding:0 22px}
+.topbar-leading{flex:0 1 auto;max-width:33%}
+.topbar-search{flex:1 1 280px;max-width:540px;min-width:180px}
+.topbar-search input{height:42px;font-size:.96rem;background:var(--surface-soft);padding-right:99px}
+.topbar-search #searchHint{font-size:.73rem;background:var(--surface);border:1px solid var(--line)}
+.topbar .tool-buttons{display:flex;gap:7px;align-items:center;border-right:1px solid var(--line);padding-right:10px;margin-right:6px}
+.topbar .tool-buttons .primary-btn{min-height:38px;padding:7px 12px;font-size:.88rem;white-space:nowrap}
+.topbar .icon-button.square{min-width:38px;height:38px;font-size:1.15rem}
+.content{padding-top:25px}
+.section-heading[hidden]{display:none!important}
+@media(max-width:1540px){
+  .topbar .top-actions .text-btn span{display:none}
+  .topbar .top-actions .text-btn{min-width:37px;padding:6px 8px;font-size:1.08rem}
+}
+@media(max-width:1190px){
+  .topbar{height:auto;min-height:72px;flex-wrap:wrap;gap:10px;padding:11px 18px}
+  .topbar-leading{flex:1 1 auto;max-width:none}
+  .topbar-search{order:3;flex:1 1 100%;max-width:none}
+  .topbar .top-actions{margin-left:auto}
+}
+@media(max-width:760px){
+  .topbar{padding:10px 12px}
+  .topbar .tool-buttons{margin-right:2px;padding-right:5px;gap:3px}
+  .topbar .tool-buttons .primary-btn{padding:6px 8px;font-size:.78rem}
+  .topbar .top-actions .text-btn{min-width:29px;padding:4px 5px}
+  .topbar-search{min-width:0}
+}

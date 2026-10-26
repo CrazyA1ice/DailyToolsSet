@@ -11,7 +11,7 @@ const THEMES = [
 ];
 // Ant Design Pro-inspired density, typography and workspace customization.
 // All presentation preferences are browser-local; SQLite navigation records are never changed.
-const PREF_DEFAULTS = Object.freeze({font:"large",density:"comfortable",sidebar:"normal",columns:"auto",accent:"blue",showIntro:true,showMetrics:true,sidebarCollapsed:false});
+const PREF_DEFAULTS = Object.freeze({font:"large",density:"comfortable",sidebar:"normal",columns:"auto",accent:"blue",sidebarCollapsed:false});
 const PREF_ALLOWED = {font:["normal","large","xlarge"],density:["comfortable","compact"],sidebar:["normal","wide"],columns:["auto","2","3","4"],accent:["blue","purple","teal","orange","rose"]};
 function readPreferences(){
   try {
@@ -19,7 +19,7 @@ function readPreferences(){
     if(!stored || typeof stored!=="object" || Array.isArray(stored))return {...PREF_DEFAULTS};
     const result={...PREF_DEFAULTS};
     for(const [key,values] of Object.entries(PREF_ALLOWED))if(values.includes(stored[key]))result[key]=stored[key];
-    for(const key of ["showIntro","showMetrics","sidebarCollapsed"])if(typeof stored[key]==="boolean")result[key]=stored[key];
+    for(const key of ["sidebarCollapsed"])if(typeof stored[key]==="boolean")result[key]=stored[key];
     return result;
   } catch(_){return {...PREF_DEFAULTS}}
 }
@@ -31,15 +31,9 @@ function applyPreferences(){
   root.dataset.sidebarWidth=preferences.sidebar;
   root.dataset.columns=preferences.columns;
   root.dataset.accent=preferences.accent;
-  root.dataset.showIntro=String(preferences.showIntro);
-  root.dataset.showMetrics=String(preferences.showMetrics);
   root.dataset.sidebarCollapsed=String(preferences.sidebarCollapsed);
   const trigger=document.querySelector("#sidebarToggle");
   if(trigger)trigger.setAttribute("aria-expanded",String(!preferences.sidebarCollapsed));
-  const intro=document.querySelector(".intro");
-  if(intro)intro.hidden=!preferences.showIntro;
-  const summary=document.querySelector(".summary");
-  if(summary)summary.hidden=!preferences.showMetrics;
 }
 function updateAppearanceControls(){
   document.querySelectorAll("[data-pref][data-value]").forEach(button=>{
@@ -47,8 +41,6 @@ function updateAppearanceControls(){
     button.classList.toggle("selected",active);
     button.setAttribute("aria-pressed",String(active));
   });
-  const intro=document.querySelector("#showIntroToggle");if(intro)intro.checked=preferences.showIntro;
-  const metrics=document.querySelector("#showMetricsToggle");if(metrics)metrics.checked=preferences.showMetrics;
 }
 function setPreference(key,value){
   if(Object.hasOwn(PREF_ALLOWED,key) && PREF_ALLOWED[key].includes(value)){
@@ -211,26 +203,26 @@ function searchAll(term){
 function render(){
   if(state.view==="node" && !byId(state.selected)){state.view="all";state.selected=null}
   renderNav();renderCrumb();
-  $("#nodeCount").textContent=state.nodes.length;
-  $("#linkedCount").textContent=state.nodes.filter(n=>n.folder_path).length;
-  $("#favStat").textContent=state.nodes.filter(n=>n.favorite).length;
-  let display,title,subtitle,sectionTitle;
+  let display,sectionTitle;
   const searching=state.search.trim();
-  if(searching){display=searchAll(searching);sectionTitle="全局搜索结果";title="搜索整个工作空间";subtitle="按模块名称、文件夹路径及所属分类查找所有层级的入口。";}
-  else if(state.view==="favorites"){display=sorted(state.nodes.filter(n=>n.favorite));title="我的收藏";subtitle="重要的文件夹，总是在触手可及的位置。";sectionTitle="常用入口";}
-  else if(state.view==="node") {
+  if(searching){
+    display=searchAll(searching);sectionTitle="全局搜索结果";
+  } else if(state.view==="favorites"){
+    display=sorted(state.nodes.filter(n=>n.favorite));sectionTitle="常用入口";
+  } else if(state.view==="node"){
     const node=byId(state.selected);
     display=node.node_type==="leaf"?[node]:children(state.selected);
-    title=node.title;subtitle=node.node_type==="leaf"?node.folder_path:(node.folder_path||"查看下级模块，或为其添加叶子文件夹入口。");
     sectionTitle=node.node_type==="leaf"?"当前文件夹":"下级模块";
-  } else{display=children(null);title="我的文件导航";subtitle="用清晰的分类，快速抵达电脑上的每一个工作文件夹。";sectionTitle="根模块";}
-  $("#pageTitle").textContent=title;
-  $("#pageSubtitle").textContent=subtitle;
+  } else {
+    // Home only shows top-level root modules.
+    display=children(null);sectionTitle="根模块";
+  }
+  $("#sectionHeading").hidden=state.view==="all"&&!searching;
   $("#sectionTitle").textContent=sectionTitle;
   $("#sectionMeta").textContent=`共 ${display.length} 个项目 · ${searching?'搜索覆盖整个目录树，结果显示完整所属层级':'叶子模块直接打开文件资源管理器'}`;
   const canAddChild=state.view==="node"&&!searching&&byId(state.selected)?.node_type!=="leaf";
   $("#newBtnText").textContent=canAddChild?"新建子模块":"新建根模块";
-  $("#searchHint").textContent=searching?`${display.length} 项结果`:"全局搜索";
+  $("#searchHint").textContent=searching?`${display.length} 项结果`:"Ctrl K";
   $("#sectionOperations").innerHTML=state.view==="node"&&!searching?`<button data-action="edit-current">编辑当前模块</button>`:"";
   $("#entries").className="entries"+(state.layout==="list"?" list":"");
   $("#entries").innerHTML=display.length?display.map(card).join(""):emptyView();
@@ -439,8 +431,6 @@ function bind(){
   $("#themeOptions").addEventListener("click",e=>{const btn=e.target.closest("[data-theme-choice]");if(btn)setTheme(btn.dataset.themeChoice)});
   $("#settingsLayer").addEventListener("click",e=>{const pref=e.target.closest("[data-pref][data-value]");if(pref)setPreference(pref.dataset.pref,pref.dataset.value)});
   $("#settingsLayer").addEventListener("click",e=>{const tab=e.target.closest("[data-settings-tab]");if(tab)selectSettingsTab(tab.dataset.settingsTab)});
-  $("#showIntroToggle").addEventListener("change",e=>{preferences.showIntro=e.target.checked;savePreferences()});
-  $("#showMetricsToggle").addEventListener("change",e=>{preferences.showMetrics=e.target.checked;savePreferences()});
   $("#resetAppearance").addEventListener("click",()=>{preferences={...PREF_DEFAULTS};savePreferences();toast("布局与字号已恢复默认")});
   $("#sidebarToggle").addEventListener("click",()=>{preferences.sidebarCollapsed=!preferences.sidebarCollapsed;savePreferences()});
   $("#startupToggle").addEventListener("change",e=>changeStartup(e.target.checked));
