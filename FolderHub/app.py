@@ -5,7 +5,7 @@ import argparse
 import zipfile
 import base64
 import binascii
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import json
 import hashlib
 import re
@@ -1179,10 +1179,15 @@ def migrate_legacy_database(destination_dir: Path, source_dir: Path | None = Non
             temporary = Path(tmp.name)
         # Open in read-only mode: the source is retained intact for rollback.
         uri = old.resolve().as_uri() + "?mode=ro"
-        with sqlite3.connect(uri, uri=True) as source_db, sqlite3.connect(temporary) as dest_db:
+        # sqlite3.Connection.__exit__ commits/rolls back but DOES NOT CLOSE.
+        # On Windows the backup target remains locked until both connections
+        # are explicitly closed, making os.replace/unlink fail with WinError 32.
+        with closing(sqlite3.connect(uri, uri=True)) as source_db, \
+             closing(sqlite3.connect(temporary)) as dest_db:
             source_db.backup(dest_db)
             if dest_db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise UserError("旧数据库完整性检查失败，迁移已中止")
+            dest_db.commit()
         if new.exists():
             return False
         os.replace(temporary,new)
@@ -1190,7 +1195,14 @@ def migrate_legacy_database(destination_dir: Path, source_dir: Path | None = Non
         return True
     finally:
         if temporary is not None:
-            temporary.unlink(missing_ok=True)
+            try:
+                temporary.unlink(missing_ok=True)
+            except PermissionError:
+                # If antivirus or another process still holds the temp file,
+                # preserve the original migration error instead of masking it
+                # with a second Windows file-lock exception. Do not touch the
+                # original AppData database or any pre-existing portable DB.
+                pass
 
 
 def main():

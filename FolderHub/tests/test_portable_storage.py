@@ -2,6 +2,7 @@
 import base64
 import hashlib
 from pathlib import Path
+from unittest.mock import patch
 import shutil
 import sqlite3
 import sys
@@ -119,6 +120,56 @@ class PortableTests(unittest.TestCase):
         self.assertEqual(new.get_image(2),('image/png',PNG))
         self.assertEqual(len(list(new.uploads_dir.glob('*.png'))),1)
         self.assertEqual([x['title'] for x in new.all()], ['工作','已删'])
+
+    def test_migration_closes_sqlite_connections_before_rename(self):
+        """Regression: sqlite3 context managers do not close handles on Windows."""
+        legacy=self.tmp/'legacy-locked';legacy.mkdir()
+        old=legacy/'folderhub.db'
+        with sqlite3.connect(old) as conn:
+            conn.execute('CREATE TABLE keep (value TEXT)')
+            conn.execute('INSERT INTO keep VALUES (?)',('must survive',))
+        copied=self.tmp/'copied'/'data'
+        real_connect=sqlite3.connect
+        real_replace=app.os.replace
+        observed=[]
+        def watch_connect(*args,**kwargs):
+            connection=real_connect(*args,**kwargs)
+            observed.append(connection)
+            return connection
+        def verify_closed_then_replace(source,dest):
+            self.assertEqual(len(observed),2)
+            for connection in observed:
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    connection.execute('SELECT 1')
+            return real_replace(source,dest)
+        with (patch.object(app.sqlite3,'connect',side_effect=watch_connect),
+              patch.object(app.os,'replace',side_effect=verify_closed_then_replace)):
+            self.assertTrue(app.migrate_legacy_database(copied,legacy))
+        self.assertEqual(len(observed),2)
+        self.assertEqual(list(copied.glob('.migrate-*.db')),[])
+        with sqlite3.connect(copied/'folderhub.db') as conn:
+            self.assertEqual(conn.execute('SELECT value FROM keep').fetchone()[0],
+                             'must survive')
+        with sqlite3.connect(old) as conn:
+            self.assertEqual(conn.execute('SELECT value FROM keep').fetchone()[0],
+                             'must survive')
+
+    def test_migration_cleanup_failure_does_not_mask_replace_error(self):
+        legacy=self.tmp/'legacy-cleanup';legacy.mkdir()
+        with sqlite3.connect(legacy/'folderhub.db') as conn:
+            conn.execute('CREATE TABLE keep (value INTEGER)')
+        copied=self.tmp/'copied-failure'/'data'
+        original_unlink=Path.unlink
+        def locked_delete(path,*args,**kwargs):
+            if path.name.startswith('.migrate-'):
+                raise PermissionError(32,'模拟 Windows 文件锁定',str(path))
+            return original_unlink(path,*args,**kwargs)
+        with (patch.object(app.os,'replace',
+                           side_effect=PermissionError(32,'原始替换失败')),
+              patch.object(Path,'unlink',autospec=True,side_effect=locked_delete)):
+            with self.assertRaisesRegex(PermissionError,'原始替换失败'):
+                app.migrate_legacy_database(copied,legacy)
+        self.assertFalse((copied/'folderhub.db').exists())
 
     def test_existing_portable_db_never_overwritten_by_legacy(self):
         legacy=self.tmp/'old';legacy.mkdir()

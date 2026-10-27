@@ -431,3 +431,12 @@ FolderHub/
 - Windows 标准版 Python 需包含 `pythonw.exe`，并使 `.pyw` 关联正确；托盘使用 ctypes + Win32 API 的系统图标，不依赖 pystray、Pillow、第三方安装包或管理员权限。
 - 无托盘或启动失败时请查看用户主目录中的 `FolderHub-startup-error.log`；手动调试可双击 `start_windows.bat`。
 - 仅在 Windows 上提供托盘；数据库、模块、封面、备份、路径处理不变，不会扫描或修改实际文件夹。
+
+
+## V3.6.1：修复 Windows 首次迁移时的 WinError 32
+
+- 修复 `migrate_legacy_database()` 在 SQLite `with` 代码块结束后仍保持数据库连接打开的问题。现在通过 `contextlib.closing()` 显式关闭来源与临时目标连接，再将经过完整性校验的临时数据库原子替换为项目内 `data/folderhub.db`。
+- 失败后的临时文件清理改为尽力执行；如文件被杀毒软件或其他进程暂时锁定，保留最初异常以便排查，不再让第二次 WinError 32 掩盖根因。
+- 更新 `start_windows.bat` 错误信息：只有真正找不到 Python 时才提示安装；Python 运行时异常则提示查看具体 traceback。
+- 增加数据库连接必须在替换前关闭、迁移失败保留原始错误的回归测试。旧 AppData 数据保留，不覆盖已有的便携数据库。
+- 如果先前失败留下 `data/.migrate-*.db`，先停止所有 FolderHub 实例，备份 `data/` 后再检查清理；**不要删除 `data/folderhub.db` 或 `%LOCALAPPDATA%/DailyToolsSet/FolderHub/folderhub.db`**。
