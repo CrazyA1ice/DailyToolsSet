@@ -711,3 +711,11 @@ powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1
 - **继承已有修复**：仍从 `PATH` 选出唯一的 Python 可执行路径；仍让 `unittest -v` 的 stderr 直接进入 `FolderHub/tmp/` 临时文件，不经过 Windows PowerShell 的错误管道；仍将 stdout/stderr 合并到 `FolderHub/test-results/`，并准确返回 Python 的退出码；运行后恢复环境变量并清理临时捕获文件。
 - **回归保护**：`test_runner_contract.py` 增加源文件字节级 ASCII 检查、禁用反引号换行，以及在 Windows 机器上调用 `powershell.exe` 的 AST 解析器进行**真实脚本语法检查（只解析，不递归执行测试）**。
 - **本机运行**：在仓库根目录先执行 `git pull origin main`，再运行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`，最后执行 `echo $LASTEXITCODE`。预期日志提示改为英文 `Test log:`，避免代码页问题；测试日志内容可保留中文。若后续出现 `FAILED`，再根据该日志处理真正的 Python 测试失败。
+
+## V5.6.4：修复回归测试前提并输出完整错误信息
+
+- **V5.4 工作区启动测试**：旧测试只调换 `launch_ids` 顺序，违反现有的“启动清单顺序必须与工作区成员顺序一致”校验，因而在测试准备阶段抛异常。现在会同时调换 `members` 与 `launch_ids`，构造**有效且确实发生变化**的另一标签页配置，再验证旧确认快照被拒绝；不会放松实际工作区校验规则。
+- **V5.3 前端契约测试**：`workspaceLaunchTitle` 是 HTML 中的静态标题，本就无需由 JavaScript 查询。测试仍检查其在页面中存在，但不再错误要求它出现在 `app.js`；其余实际交互控件依旧检查 HTML 与 JS 双侧引用。
+- **V5.1 旧数据库夹具**：调整测试使用的 `sqlite3.Connection` 上下文管理，保证提交后立即关闭连接，减少 Windows 下临时数据库被残留句柄占用的风险。该项之前只有 `ERROR` 摘要，**尚不能确认其真实异常是否由句柄问题引起**。
+- **失败时可见 traceback**：`run_tests.ps1` 在 Python 返回非零退出码时自动打印 UTF-8 测试日志最后 180 行，保留完整文件在 `FolderHub/test-results/`。这样可以直接看到 `Traceback`、`File ... line ...` 和异常类型，不会把真实错误隐藏在单行 `ERROR` 摘要后。
+- **验收**：在仓库根目录运行 `git pull origin main` 和 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`。若仍报旧数据库升级错误，请提供终端显示的 traceback 或上传该次 `FolderHub/test-results/folderhub-tests-*.txt`，才能准确修复实际迁移问题。
