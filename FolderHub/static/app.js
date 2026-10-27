@@ -598,6 +598,7 @@ function chooseTag(tag){
   }
   state.activeTag=state.tagSelection.length===1?state.tagSelection[0]:null;
   state.renderLimit=100;state.searchKeyboardIndex=-1;
+  renderSavedViews(); // Invalidate selected saved-view state, not entire sidebar.
   render(true);rememberNavigation();
 }
 function updateTagFilterMode(mode,value){
@@ -606,6 +607,7 @@ function updateTagFilterMode(mode,value){
   if(mode==="match" && ["any","all"].includes(value))state.tagMatchMode=value;
   if(mode==="pick" && ["include","exclude"].includes(value))state.tagPickMode=value;
   state.renderLimit=100;state.searchKeyboardIndex=-1;
+  renderSavedViews();
   render(true);rememberNavigation();
 }
 
