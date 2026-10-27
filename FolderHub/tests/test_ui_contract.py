@@ -166,6 +166,11 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('$("#workspaceStatus").value=item.status||"planning"',self.js)
         self.assertIn('renderWorkspaceLinkEditor();',self.js)
         self.assertIn('.workspace-resources',self.css)
+        self.assertIn('status:item.status||"planning"',self.js)
+        self.assertIn('links:Array.isArray(item.links)',self.js)
+        self.assertIn('workspaceDraftLinks=(item.links||[]).map(link=>({...link}));',self.js)
+        self.assertIn('copyWorkspaceRecord(w));',self.js)
+        self.assertIn('renderWorkspaceResources();',self.js)
 
     def test_workspace_web_resources_are_explicit_and_safe(self):
         begin=self.js.index('function renderWorkspaceResources()')
