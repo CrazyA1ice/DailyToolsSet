@@ -11,7 +11,7 @@ DEFAULTS = {
     'font': 'large', 'density': 'comfortable', 'listDensity': 'normal', 'sidebar': 'normal',
     'columns': 'auto', 'accent': 'blue', 'showCovers': True,
     'coverHeight': 'normal', 'coverFit': 'cover', 'sidebarCollapsed': False,
-    'theme': 'cloud', 'layout': 'grid', 'expanded': None, 'savedViews': [], 'folderGroups': [],
+    'theme': 'cloud', 'layout': 'grid', 'expanded': None, 'savedViews': [], 'folderGroups': [], 'workspaces': [],
 }
 CHOICES = {
     'font': ('normal', 'large', 'xlarge'),
@@ -31,6 +31,9 @@ MAX_SAVED_VIEWS = 24
 MAX_SMART_TAGS = 30
 MAX_FOLDER_GROUPS = 20
 MAX_GROUP_MEMBERS = 8
+MAX_WORKSPACES = 20
+MAX_WORKSPACE_MEMBERS = 30
+MAX_WORKSPACE_DESCRIPTION = 240
 MAX_BYTES = 128 * 1024
 
 
@@ -100,11 +103,40 @@ def validate_folder_groups(value):
     return result
 
 
+def validate_workspaces(value):
+    """Saved workspaces contain module IDs only, never filesystem paths."""
+    if not isinstance(value, list) or len(value) > MAX_WORKSPACES:
+        raise PreferenceError('项目工作区最多保存 20 个')
+    result, used_names = [], set()
+    for workspace in value:
+        if not isinstance(workspace, dict) or set(workspace) != {'name', 'description', 'members'}:
+            raise PreferenceError('项目工作区字段无效')
+        name, description, members = (
+            workspace['name'], workspace['description'], workspace['members'])
+        if (not isinstance(name, str) or name != name.strip()
+                or not 1 <= len(name) <= 40
+                or any(ord(ch) < 32 or ord(ch) == 127 for ch in name)):
+            raise PreferenceError('项目工作区名称需为 1—40 字且不能包含控制字符')
+        if name.casefold() in used_names:
+            raise PreferenceError('项目工作区名称不可重复')
+        used_names.add(name.casefold())
+        if (not isinstance(description, str) or len(description) > MAX_WORKSPACE_DESCRIPTION
+                or any((ord(ch) < 32 and ch != '\n') or ord(ch) == 127
+                       for ch in description)):
+            raise PreferenceError('工作区说明不得超过 240 字或包含控制字符')
+        if (not isinstance(members, list) or not 1 <= len(members) <= MAX_WORKSPACE_MEMBERS
+                or any(type(node_id) is not int or node_id < 1 for node_id in members)
+                or len(set(members)) != len(members)):
+            raise PreferenceError('工作区需关联 1—30 个不重复的模块 ID')
+        result.append({'name': name, 'description': description, 'members': members[:]})
+    return result
+
+
 def validate(value):
     """Validate a complete/partial settings object without coercing or trusting unknown keys."""
     if not isinstance(value, dict) or set(value) - set(DEFAULTS):
         raise PreferenceError('个性化设置格式或字段无效')
-    result = {**DEFAULTS, 'savedViews': [], 'folderGroups': []}
+    result = {**DEFAULTS, 'savedViews': [], 'folderGroups': [], 'workspaces': []}
     for key, item in value.items():
         if key in CHOICES:
             if type(item) is not str or item not in CHOICES[key]:
@@ -121,6 +153,8 @@ def validate(value):
             item = validate_saved_views(item)
         elif key == 'folderGroups':
             item = validate_folder_groups(item)
+        elif key == 'workspaces':
+            item = validate_workspaces(item)
         result[key] = item
     return result
 
@@ -152,7 +186,7 @@ class PreferencesStore:
         with self._lock:
             settings = self._read()
             return {'configured': settings is not None,
-                    'settings': settings if settings is not None else {**DEFAULTS, 'savedViews': [], 'folderGroups': []}}
+                    'settings': settings if settings is not None else {**DEFAULTS, 'savedViews': [], 'folderGroups': [], 'workspaces': []}}
 
     def _write(self, settings):
         data = json.dumps({'format': 'FolderHubPreferences', 'version': 1, 'settings': settings},
@@ -188,6 +222,6 @@ class PreferencesStore:
         with self._lock:
             settings = self._read()
             if settings is None:
-                settings = {**DEFAULTS, 'savedViews': [], 'folderGroups': []}
+                settings = {**DEFAULTS, 'savedViews': [], 'folderGroups': [], 'workspaces': []}
             return (json.dumps({'format': 'FolderHubPreferences', 'version': 1, 'settings': settings},
                                ensure_ascii=False, indent=2) + '\n').encode('utf-8')
