@@ -1055,3 +1055,4 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
   background:var(--surface);color:var(--text);font:inherit}
 @media(max-width:650px){.everything-search-form{flex-wrap:wrap}
   .everything-result{align-items:flex-start;flex-direction:column}}
+.everything-result button:disabled{opacity:.62;cursor:not-allowed;filter:grayscale(.4)}
