@@ -21,6 +21,84 @@ class PortablePreferencesTests(unittest.TestCase):
         self.store=app.Store(self.root/'data'/'folderhub.db',self.root/'uploads')
         self.prefs=self.store.preferences
 
+    def test_quick_capture_creates_favorite_leaf_in_single_root(self):
+        folder=self.root/'Research'
+        folder.mkdir()
+        first=self.store.capture_folder(str(folder))
+        self.assertTrue(first['created'])
+        second=self.store.capture_folder(str(folder))
+        self.assertFalse(second['created'])
+        self.assertEqual(first['id'],second['id'])
+        records=self.store.all()
+        roots=[node for node in records if node['title']=='快速收藏'
+               and node['node_type']=='root']
+        self.assertEqual(len(roots),1)
+        leaves=[node for node in records if node['id']==first['id']]
+        self.assertEqual(len(leaves),1)
+        self.assertEqual(leaves[0]['parent_id'],roots[0]['id'])
+        self.assertEqual(leaves[0]['node_type'],'leaf')
+        self.assertTrue(leaves[0]['favorite'])
+        self.assertEqual(leaves[0]['folder_path'],str(folder))
+        self.assertEqual(len(records),2)
+
+    def test_quick_capture_reuses_existing_folder_and_sets_favorite(self):
+        folder=self.root/'Existing'
+        folder.mkdir()
+        root_id=self.store.create({'title':'Projects','node_type':'root'})
+        existing=self.store.create({'title':'Existing folder',
+                                    'node_type':'leaf','parent_id':root_id,
+                                    'folder_path':str(folder),'favorite':False})
+        captured=self.store.capture_folder(str(folder))
+        self.assertEqual(captured,{'id':existing,'created':False,'favorite':True})
+        self.assertEqual(len(self.store.all()),2)
+        self.assertTrue(next(node for node in self.store.all()
+                             if node['id']==existing)['favorite'])
+
+    def test_quick_capture_rejects_nonexistent_paths_atomically(self):
+        original=self.store.all()
+        for invalid in (None, '', 12, str(self.root/'Missing'), str(self.root/'files.txt')):
+            with self.subTest(path=repr(invalid)),self.assertRaises(app.UserError):
+                self.store.capture_folder(invalid)
+            self.assertEqual(self.store.all(),original)
+        document=self.root/'files.txt'
+        document.write_text('not a directory',encoding='utf-8')
+        with self.assertRaises(app.UserError):
+            self.store.capture_folder(str(document))
+        self.assertEqual(self.store.all(),original)
+
+    def test_quick_capture_http_requires_auth_and_never_modifies_directory(self):
+        folder=self.root/'ViaHttp'
+        folder.mkdir()
+        server=app.FolderServer(('127.0.0.1',0),self.store)
+        thread=threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        def send(token=None):
+            connection=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=5)
+            headers={'Content-Type':'application/json'}
+            if token is not None:
+                headers['X-FolderHub-Token']=token
+            connection.request('POST','/api/quick-capture',
+                               body=json.dumps({'folder_path':str(folder)}),
+                               headers=headers)
+            response=connection.getresponse()
+            status=response.status
+            payload=json.loads(response.read())
+            connection.close()
+            return status,payload
+        self.assertEqual(send()[0],403)
+        status,first=send(server.token)
+        self.assertEqual(status,200)
+        self.assertTrue(first['created'])
+        status,second=send(server.token)
+        self.assertEqual(status,200)
+        self.assertFalse(second['created'])
+        self.assertEqual(first['id'],second['id'])
+        self.assertTrue(folder.is_dir())
+        self.assertEqual(len(self.store.all()),2)
+
     def test_first_browser_import_and_other_browser_cannot_overwrite(self):
         self.assertFalse(self.prefs.get()['configured'])
         result=self.prefs.save({'theme':'forest','font':'xlarge','expanded':[2,9],

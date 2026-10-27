@@ -573,6 +573,51 @@ class Store:
     def next_order(db, parent_id):
         return db.execute("SELECT COALESCE(MAX(sort_order),-1)+1 FROM nodes WHERE parent_id IS ?", (parent_id,)).fetchone()[0]
 
+    def capture_folder(self, folder_path):
+        """Add an explicitly confirmed existing directory as a favorite.
+
+        Duplicate paths reuse an existing node; otherwise keep new leaves inside
+        a dedicated root. One SQLite transaction prevents partial root creation.
+        The operation never modifies the directory itself.
+        """
+        path = validate_path(folder_path)
+        if not path or not os.path.isdir(path):
+            raise UserError("仅能收藏当前存在的真实文件夹，请检查资源管理器路径")
+        normalized = ntpath.normcase(ntpath.normpath(path))
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                "SELECT id,folder_path,favorite FROM nodes WHERE folder_path IS NOT NULL"
+            ).fetchall()
+            for row in rows:
+                if ntpath.normcase(ntpath.normpath(row["folder_path"])) == normalized:
+                    if not row["favorite"]:
+                        db.execute("UPDATE nodes SET favorite=1,updated_at=? WHERE id=?",
+                                   (now(),row["id"]))
+                    return {"id": row["id"], "created": False, "favorite": True}
+            root = db.execute(
+                "SELECT id FROM nodes WHERE parent_id IS NULL AND node_type='root' "
+                "AND title=? ORDER BY id LIMIT 1", ("快速收藏",)
+            ).fetchone()
+            stamp = now()
+            if root:
+                root_id = root["id"]
+            else:
+                root_id = db.execute("""INSERT INTO nodes
+                    (parent_id,title,folder_path,node_type,icon,favorite,tags,
+                     sort_order,created_at,updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (None,"快速收藏",None,"root","folder",0,"[]",
+                     self.next_order(db,None),stamp,stamp)).lastrowid
+            title = validate_title(ntpath.basename(ntpath.normpath(path)) or path)
+            node_id = db.execute("""INSERT INTO nodes
+                (parent_id,title,folder_path,node_type,icon,favorite,tags,
+                 sort_order,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (root_id,title,path,"leaf","folder",1,"[]",
+                 self.next_order(db,root_id),stamp,stamp)).lastrowid
+            return {"id": node_id, "created": True, "favorite": True}
+
     def create(self, data):
         title = validate_title(data.get("title"))
         path = validate_path(data.get("folder_path"))
@@ -1165,6 +1210,11 @@ class Handler(BaseHTTPRequestHandler):
             if method=="POST" and path=="/api/nodes":
                 node_id=self.server.store.create(self.request_json())
                 return self.reply(201,{"id":node_id})
+            if path=="/api/quick-capture":
+                if method=="POST":
+                    data=self.request_json()
+                    return self.reply(200,self.server.store.capture_folder(data.get("folder_path")))
+                return self.reply(405,{"error":"不支持的请求方法"})
             if method=="POST" and path=="/api/batch":
                 data=self.request_json()
                 return self.reply(200,self.server.store.batch(data.get("action"),data.get("ids")))
