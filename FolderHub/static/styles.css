@@ -1056,3 +1056,11 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
 @media(max-width:650px){.everything-search-form{flex-wrap:wrap}
   .everything-result{align-items:flex-start;flex-direction:column}}
 .everything-result button:disabled{opacity:.62;cursor:not-allowed;filter:grayscale(.4)}
+
+/* V5.3: opt-in one-click project work environment */
+.workspace-launch-settings{display:grid;gap:8px;padding:12px 0 4px;border-top:1px solid var(--line)}
+.workspace-launch-list{display:grid;gap:6px;max-height:220px;overflow:auto}
+.workspace-launch-choice{min-height:40px}
+#workspaceLaunchRows{max-height:min(50vh,420px);overflow:auto}
+#workspaceLaunchRows .group-report-row{overflow-wrap:anywhere}
+#workspaceLaunchRows .group-report-row small{display:block;color:var(--muted);margin-top:4px}
