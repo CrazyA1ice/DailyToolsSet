@@ -27,7 +27,6 @@ class TrayServiceTests(TestCase):
                 self.assertEqual(svc.status, "运行中")
                 with urlopen(svc.url, timeout=3) as response:
                     self.assertEqual(response.status, 200)
-                first_port = svc.port
                 svc.restart()
                 self.assertEqual(svc.status, "运行中")
                 self.assertIsNotNone(svc.server)
@@ -51,9 +50,10 @@ class TrayServiceTests(TestCase):
         self.assertTrue(svc.external)
 
     def test_startup_command_uses_pythonw_and_tray_wrapper(self):
-        with patch.object(startup, "supported", return_value=True), \\
-             patch.object(startup.sys, "executable", "C:/Python/python.exe"), \\
-             patch.object(startup.Path, "is_file", return_value=True):
+        with (patch.object(startup, "supported", return_value=True),
+              patch.object(startup.sys, "executable", "C:/Python/python.exe"),
+              patch.object(startup.Path, "is_file", return_value=True)):
+
             command = startup.launch_command()
         self.assertIn("pythonw.exe", command)
         self.assertIn("start_silent.pyw", command)
