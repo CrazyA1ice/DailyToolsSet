@@ -122,10 +122,10 @@ def build_quick_entries(nodes,recent,workspaces):
         if bucket is None or len(bucket)>=8:
             continue
         if kind=="folder":
-            if not item.get("folder_path"):
+            if not (item.get("folder_path") or item.get("has_target")):
                 continue
             label=safe_menu_title(item.get("title"))
-        elif item.get("node_type")=="leaf" and item.get("resource_target"):
+        elif item.get("node_type")=="leaf" and (item.get("resource_target") or item.get("has_target")):
             label=("📄 " if kind=="file" else "🌐 ")+safe_menu_title(item.get("title"),42)
         else:
             continue
@@ -220,20 +220,17 @@ class ServiceController:
         if self.server is not None:
             store = self.server.store
             return build_quick_entries(
-                store.all(), [],
+                store.quick_menu_nodes(), [],
                 store.preferences.get()["settings"]["workspaces"])
         # The tray must not take ownership of or restart an external service.
         if not self.external:
             raise RuntimeError("FolderHub 本地服务尚未启动")
         if not server_is_folderhub(self.port):
             raise RuntimeError("独立 FolderHub 服务未响应，请检查服务状态")
-        def get(path):
-            with urlopen(f"{self.url.rstrip('/')}{path}", timeout=1.5) as reply:
-                return json.load(reply)
+        with urlopen(f"{self.url.rstrip('/')}/api/quick-menu", timeout=1.5) as reply:
+            snapshot = json.load(reply)
         return build_quick_entries(
-            get("/api/nodes")["nodes"],
-            [],
-            get("/api/preferences")["settings"]["workspaces"])
+            snapshot["nodes"], [], snapshot["workspaces"])
 
     def open_quick_folder(self, node_id):
         """Use the existing authenticated node ID endpoint, never shell a path."""
