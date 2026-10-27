@@ -151,6 +151,41 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('.workspace-member-list',self.css)
         self.assertIn('.workspace-nav',self.css)
 
+    def test_workspace_member_ordering_controls(self):
+        for control in ('data-workspace-move=', 'data-workspace-step="1"',
+                        'data-workspace-step="-1"'):
+            self.assertIn(control, self.js)
+        self.assertIn('function movedWorkspaceMemberIds(ids,id,direction)',self.js)
+        self.assertIn('function moveWorkspaceDraftMember(id,direction)',self.js)
+        self.assertIn('workspaceDraftMembers=new Set(after)',self.js)
+        self.assertIn('const ids=[...workspaceDraftMembers];',self.js)
+        self.assertIn('workspace.members.map(id=>byId(id)).filter(Boolean)',self.js)
+        self.assertIn('.workspace-member-order',self.css)
+
+    def test_workspace_copy_is_draft_until_saved(self):
+        self.assertIn('case "copy-workspace":duplicateWorkspace(',self.js)
+        self.assertIn('function uniqueWorkspaceCopyName(original)',self.js)
+        start=self.js.index('function duplicateWorkspace(index)')
+        end=self.js.index('async function deleteWorkspace(index)',start)
+        self.assertIn('openWorkspaceDialog(-1,existing)',self.js[start:end])
+        self.assertIn('$("#workspaceDescription").value=item.description;',self.js[start:end])
+        self.assertNotIn('persistProjectSettings()',self.js[start:end])
+
+    def test_workspace_quick_add_uses_existing_ids_and_validation(self):
+        for control in ('workspacePickerLayer','workspacePickerList',
+                        'workspacePickerTitle','workspacePickerClose',
+                        'workspacePickerCancel','workspacePickerSummary'):
+            self.assertIn(f'id="{control}"',self.html)
+            self.assertIn(control,self.js)
+        self.assertIn('["workspace-add","加入项目工作区…"]',self.js)
+        self.assertIn('function openWorkspacePicker(nodeId)',self.js)
+        self.assertIn('async function addNodeToWorkspace(index)',self.js)
+        self.assertIn('if(!item||!byId(nodeId)||workspaceSaving',self.js)
+        self.assertIn('item.members.length>=30',self.js)
+        self.assertIn('persistProjectSettings()',self.js)
+        self.assertIn('state.workspaces=before;',self.js)
+        self.assertIn('.workspace-picker-option',self.css)
+
     def test_workspace_is_browsable_not_a_bulk_explorer_launcher(self):
         start=self.js.index('function renderWorkspaces()')
         end=self.js.index('function renderCrumb()',start)
