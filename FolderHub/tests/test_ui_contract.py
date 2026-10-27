@@ -117,6 +117,18 @@ class AdminUiContractTests(unittest.TestCase):
             self.assertIn(endpoint, self.js)
         self.assertIn('.path-results', self.css)
 
+    def test_migration_suggestion_workflow_contract(self):
+        for control in ('pathSuggestedRoot','pathSuggest','pathSuggestSummary','pathSuggestList'):
+            self.assertIn(f'id="{control}"',self.html)
+            self.assertIn(control,self.js)
+        self.assertIn('"/api/paths/suggest"',self.js)
+        self.assertIn('function suggestPaths()',self.js)
+        self.assertIn('function clearPathSuggestions(',self.js)
+        self.assertIn('async function acceptPathSuggestion(event)',self.js)
+        self.assertIn('await previewPaths(); // Read-only',self.js)
+        self.assertNotIn('await applyPaths(); // Read-only',self.js)
+        self.assertIn('.path-suggestion',self.css)
+
     def test_path_health_repair_and_export_contract(self):
         self.assertIn('id="pathExport"', self.html)
         self.assertIn('data-path-action="locate"', self.js)
