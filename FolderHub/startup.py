@@ -32,7 +32,7 @@ def launch_command():
     hidden = executable.with_name("pythonw.exe")
     if not hidden.is_file():
         raise StartupError("找不到 pythonw.exe，无法注册静默启动；请安装完整的 Windows Python")
-    cmd = command_for(hidden, Path(__file__).resolve().parent / "app.py")
+    cmd = command_for(hidden, Path(__file__).resolve().parent / "start_silent.pyw")
     if len(cmd) > 260:
         raise StartupError("启动命令超过 Windows Run 启动项长度限制（260 字符），请将项目放到更短的路径")
     return cmd

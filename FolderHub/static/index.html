@@ -95,9 +95,9 @@
     </section>
     </div>
     <div id="settingsPanelLaunch" class="settings-page hidden" data-settings-page="launch" role="tabpanel" aria-labelledby="settingsTabLaunch">
-    <section class="settings-section"><div class="setting-heading"><h3>⏻ 开机自启动</h3><p>Windows 登录后使用 pythonw.exe 静默启动，不显示命令行窗口，也不会主动打开浏览器。</p></div>
+    <section class="settings-section"><div class="setting-heading"><h3>⏻ 开机自启动</h3><p>Windows 登录后使用 pythonw.exe 静默启动系统托盘与本地服务，不显示命令行窗口，也不会主动打开浏览器。</p></div>
       <label class="toggle-row" for="startupToggle"><div><strong>登录 Windows 后自动运行</strong><small id="startupStatus">正在检查启动状态...</small></div><span class="switch"><input type="checkbox" id="startupToggle" disabled><span class="slider"></span></span></label>
-      <p class="settings-note">默认关闭。仅操作当前用户的启动项，无需管理员权限；关闭开关不会停止当前服务。手动静默启动可双击 start_silent.pyw；如需查看错误则使用 start_windows.bat。</p>
+      <p class="settings-note">默认关闭。仅操作当前用户的启动项，无需管理员权限；关闭开关不会停止当前服务。手动静默启动可双击 start_silent.pyw；右键系统托盘图标可以重启或退出服务。升级旧版自启动请关闭开关后重新开启；调试时使用 start_windows.bat。</p>
     </section>
     <section class="settings-section"><div class="setting-heading"><h3>⌂ 设为浏览器启动页</h3><p>先开启开机自启动，再将以下地址设置为浏览器“启动时打开的页面”。</p></div>
       <div class="homepage-row"><code id="homepageUrl">http://127.0.0.1:8765/</code><button type="button" class="outline-btn" id="copyHomepage">复制地址</button></div>

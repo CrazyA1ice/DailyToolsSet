@@ -418,3 +418,16 @@ FolderHub/
 
 
 - 如果已保存规则中的标签暂时没有模块使用，仍在筛选区域显示该标签（数量为 0），并允许点击移除；不会静默修改已经保存的规则。
+
+
+## V3.6：Windows 系统托盘管理（无第三方依赖）
+
+- Windows 资源管理器双击 `start_silent.pyw`：使用 pythonw.exe 静默启动本机服务，并在系统通知区域显示 FolderHub 托盘图标。没有 CMD 窗口。
+- **双击托盘图标**打开 `http://127.0.0.1:8765/`；**右键托盘图标**有「打开 FolderHub」「重启服务」「退出 FolderHub」菜单。退出会正常调用 HTTP 服务的 `shutdown()` / `server_close()`，不会强制结束其他 Python 进程；关闭浏览器标签页不会关闭服务。
+- 托盘程序和 Web 服务处于同一 `pythonw.exe` 进程，托盘结束时会停止它管理的服务；通过单实例互斥量避免多个托盘实例。Windows Explorer 重启后会尝试重建托盘图标。
+- 如果当前已有通过旧版 `app.py` 或 `start_windows.bat` 独立启动的 FolderHub，托盘只附着为打开入口：**重启服务不可用**，退出托盘不会关闭那个独立服务，避免误杀。
+- 开机自启动的注册表项现在指向 `start_silent.pyw --no-browser`，登录 Windows 后只显示托盘图标，不主动打开浏览器。**升级前已开启自启动的用户必须在设置里先关闭再开启一次**（或运行 `python app.py --startup enable`）才会切换到托盘启动方式；下次登录生效。
+- `start_windows.bat` 继续保持带控制台的调试模式，不会出现托盘图标。设置页开关只管理下次登录是否启动，不会立即结束现有进程。
+- Windows 标准版 Python 需包含 `pythonw.exe`，并使 `.pyw` 关联正确；托盘使用 ctypes + Win32 API 的系统图标，不依赖 pystray、Pillow、第三方安装包或管理员权限。
+- 无托盘或启动失败时请查看用户主目录中的 `FolderHub-startup-error.log`；手动调试可双击 `start_windows.bat`。
+- 仅在 Windows 上提供托盘；数据库、模块、封面、备份、路径处理不变，不会扫描或修改实际文件夹。
