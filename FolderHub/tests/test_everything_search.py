@@ -17,7 +17,8 @@ class EverythingBridgeTests(unittest.TestCase):
             command.append((args,kwargs))
             return subprocess.CompletedProcess(args,0,
                 "C:\\Data\\paper.pdf\nC:\\Data\\results\nC:\\Data\\paper.pdf\nrelative.txt\n","")
-        with patch.object(es.os.path,"isdir",side_effect=lambda p:p.endswith("results")):
+        with patch.object(es.os.path,"isdir",side_effect=lambda p:p.endswith("results")), \
+             patch.object(es.os.path,"isfile",side_effect=lambda p:p.endswith("paper.pdf")):
             got=es.search("paper | report",run=fake,executable=r"C:\Tools\es.exe")
         self.assertEqual([n["path"] for n in got["items"]],
                          [r"C:\Data\paper.pdf",r"C:\Data\results"])
@@ -28,6 +29,22 @@ class EverythingBridgeTests(unittest.TestCase):
         self.assertEqual(args[-2:],["--","paper | report"])
         self.assertEqual(opts["timeout"],4)
         self.assertNotIn("shell",opts)
+
+    def test_missing_index_entries_are_not_misclassified_as_files(self):
+        seen=[]
+        def fake(args,**kwargs):
+            seen.append(args)
+            return subprocess.CompletedProcess(args,0,
+                "C:\\Offline\\missing_folder\n"
+                "C:\\Real\\notes.pdf\n"
+                "C:\\Real\\project\n","")
+        with patch.object(es.os.path,"isdir",side_effect=lambda p:p.endswith("project")), \
+             patch.object(es.os.path,"isfile",side_effect=lambda p:p.endswith("notes.pdf")):
+            response=es.search("work",run=fake,executable="es.exe")
+        self.assertEqual([(item["name"],item["kind"]) for item in response["items"]],
+                         [("notes.pdf","file"),("project","folder")])
+        self.assertEqual(response["unavailable"],1)
+        self.assertEqual(len(seen),1)
 
     def test_invalid_queries_rejected_without_launching_process(self):
         for query in (None,"","a","x"*101,"test\ncmd"):
