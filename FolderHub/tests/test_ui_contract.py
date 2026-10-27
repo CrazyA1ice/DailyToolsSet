@@ -246,7 +246,7 @@ class AdminUiContractTests(unittest.TestCase):
             self.assertIn(code, self.js)
         self.assertIn('workspaces:state.workspaces.map(item=>copyWorkspaceRecord(item))',self.js)
         self.assertIn('saved.workspaces.map(item=>copyWorkspaceRecord(item))',self.js)
-        self.assertIn('const current={name,description,members:ids,status,links};',self.js)
+        self.assertIn('const current={name,description,members:ids,status,links,launch_ids};',self.js)
         self.assertIn('$("#workspaceStatus").value=item.status||"planning"',self.js)
         self.assertIn('renderWorkspaceLinkEditor();',self.js)
         self.assertIn('.workspace-resources',self.css)
