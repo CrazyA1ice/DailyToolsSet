@@ -759,3 +759,74 @@ class TagStoreTests(unittest.TestCase):
         self.assertEqual(send("GET","/api/nodes")[1]["nodes"][0]["tags"],["金融","论文"])
         self.assertEqual(send("PATCH",f"/api/nodes/{node_id}",{"tags":["金融","量化"]})[0],200)
         self.assertEqual(send("GET","/api/nodes")[1]["nodes"][0]["tags"],["金融","量化"])
+
+
+class TagMaintenanceTests(unittest.TestCase):
+    """Tag management changes only the navigation DB, not real folder paths."""
+
+    def setUp(self):
+        folder=tempfile.TemporaryDirectory();self.addCleanup(folder.cleanup)
+        self.store=app.Store(Path(folder.name)/"db"/"folderhub.db")
+        self.a=self.store.create({"title":"A","node_type":"root","tags":["A股","数据"]})
+        self.b=self.store.create({"title":"B","node_type":"root","tags":["论文"]})
+
+    def tags(self,node_id):
+        return next(node["tags"] for node in self.store.all() if node["id"]==node_id)
+
+    def test_batch_add_remove_and_preserve_order(self):
+        out=self.store.batch_tags("add",[self.a,self.b],["量化","A股"])
+        self.assertEqual((out["changed"],out["selected"]),(2,2))
+        self.assertEqual(self.tags(self.a),["A股","数据","量化"])
+        self.assertEqual(self.tags(self.b),["论文","量化","A股"])
+        self.assertEqual(self.store.batch_tags("add",[self.a],["A股"])["changed"],0)
+        self.assertEqual(self.store.batch_tags("remove",[self.a,self.b],["数据","量化"])["changed"],2)
+        self.assertEqual(self.tags(self.a),["A股"])
+        self.assertEqual(self.tags(self.b),["论文","A股"])
+
+    def test_validation_and_limit_errors_are_atomic(self):
+        self.store.update(self.a,{"tags":[str(i) for i in range(12)]})
+        initial=self.store.export()["nodes"]
+        for action,ids,tags in (
+            ("add",[self.a,self.b],["overflow"]),
+            ("add",[self.a,9999],["x"]),
+            ("add",[self.a,self.a],["x"]),
+            ("remove",[self.a],[]),
+            ("add",[self.a],[True]),
+            ("add",[self.a],["x","X"]),
+            ("unknown",[self.a],["x"]),
+            ("remove",[True],["x"]),
+        ):
+            with self.subTest(action=action,ids=ids,tags=tags),self.assertRaises(app.UserError):
+                self.store.batch_tags(action,ids,tags)
+            self.assertEqual(self.store.export()["nodes"],initial)
+
+    def test_global_rename_merges_and_carries_into_recycle_bin(self):
+        self.store.update(self.a,{"tags":["A股","论文"]})
+        deleted=self.store.delete(self.b)
+        result=self.store.rename_tag("论文","A股")
+        self.assertEqual(result["changed"],2)
+        self.assertEqual(self.tags(self.a),["A股"])
+        self.store.restore_trash(deleted["trash_id"])
+        self.assertEqual(self.tags(self.b),["A股"])
+        self.assertEqual(self.store.rename_tag("A股","股票")["changed"],2)
+        self.assertEqual(self.tags(self.a),["股票"])
+        self.assertEqual(self.tags(self.b),["股票"])
+        with self.assertRaises(app.UserError):self.store.rename_tag("不存在","测试")
+
+    def test_http_tag_mutations_require_auth(self):
+        server=app.FolderServer(("127.0.0.1",0),self.store)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        self.addCleanup(server.server_close);self.addCleanup(server.shutdown)
+        def call(path,body,auth=True):
+            conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=4)
+            headers={"Host":f"127.0.0.1:{server.server_port}","Content-Type":"application/json"}
+            if auth:headers["X-FolderHub-Token"]=server.token
+            conn.request("POST",path,json.dumps(body),headers)
+            r=conn.getresponse();status=r.status;payload=json.loads(r.read());conn.close()
+            return status,payload
+        bulk={"action":"add","ids":[self.a,self.b],"tags":["整理"]}
+        self.assertEqual(call("/api/tags/batch",bulk,False)[0],403)
+        self.assertEqual(call("/api/tags/batch",bulk)[0],200)
+        self.assertEqual(call("/api/tags/rename",{"source":"整理","target":"归档"},False)[0],403)
+        self.assertEqual(call("/api/tags/rename",{"source":"整理","target":"归档"})[0],200)
+        self.assertIn("归档",self.tags(self.a))

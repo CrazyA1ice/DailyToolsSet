@@ -683,6 +683,73 @@ class Store:
                        [value, now(), *ids])
         return {"ok": True, "changed": len(ids)}
 
+    def batch_tags(self, action, ids, tags):
+        """Validate all rows and atomically edit labels on up to 200 nodes."""
+        if action not in ("add", "remove"):
+            raise UserError("只支持批量添加或移除标签")
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 200
+                or any(type(node_id) is not int or node_id < 1 for node_id in ids)
+                or len(set(ids)) != len(ids)):
+            raise UserError("请选择 1 至 200 个不重复的有效模块")
+        labels = validate_tags(tags)
+        if not labels:
+            raise UserError("请至少输入一个标签")
+        with self.connect() as db:
+            sql_ids = ",".join("?" for _ in ids)
+            rows = db.execute(f"SELECT id,tags FROM nodes WHERE id IN ({sql_ids})", ids).fetchall()
+            if len(rows) != len(ids):
+                raise UserError("部分模块已不存在，整个批量操作未执行")
+            changed = []
+            remove_keys = {label.casefold() for label in labels}
+            for row in rows:
+                original = json.loads(row["tags"])
+                if action == "add":
+                    updated = original[:]
+                    existing = {label.casefold() for label in updated}
+                    for label in labels:
+                        if label.casefold() not in existing:
+                            updated.append(label)
+                            existing.add(label.casefold())
+                else:
+                    updated = [label for label in original
+                               if label.casefold() not in remove_keys]
+                updated = validate_tags(updated)  # fail before any write
+                if updated != original:
+                    changed.append((json.dumps(updated, ensure_ascii=False), now(), row["id"]))
+            db.executemany("UPDATE nodes SET tags=?,updated_at=? WHERE id=?", changed)
+        return {"ok": True, "changed": len(changed), "selected": len(ids)}
+
+    def rename_tag(self, source, target):
+        """Rename or merge a label across active nodes and recycle-bin snapshots."""
+        old = validate_tags([source])[0]
+        new = validate_tags([target])[0]
+        old_key = old.casefold()
+        with self.connect() as db:
+            changes = []
+            for table in ("nodes", "trash_nodes"):
+                for row in db.execute(f"SELECT rowid,tags FROM {table}"):
+                    current = json.loads(row["tags"])
+                    if not any(tag.casefold() == old_key for tag in current):
+                        continue
+                    merged, seen = [], set()
+                    for tag in current:
+                        candidate = new if tag.casefold() == old_key else tag
+                        if candidate.casefold() not in seen:
+                            seen.add(candidate.casefold())
+                            merged.append(candidate)
+                    encoded = json.dumps(validate_tags(merged), ensure_ascii=False)
+                    if encoded != row["tags"]:
+                        changes.append((table, row["rowid"], encoded))
+            if not changes:
+                raise UserError("没有找到需要更改的标签")
+            for table, rowid, value in changes:
+                if table == "nodes":
+                    db.execute("UPDATE nodes SET tags=?,updated_at=? WHERE rowid=?",
+                               (value, now(), rowid))
+                else:
+                    db.execute("UPDATE trash_nodes SET tags=? WHERE rowid=?", (value, rowid))
+        return {"ok": True, "changed": len(changes), "source": old, "target": new}
+
     def save_image(self, node_id, data_url):
         mime, raw = decode_image(data_url)
         with self._image_lock:
@@ -999,6 +1066,14 @@ class Handler(BaseHTTPRequestHandler):
             if method=="POST" and path=="/api/batch":
                 data=self.request_json()
                 return self.reply(200,self.server.store.batch(data.get("action"),data.get("ids")))
+            if method=="POST" and path=="/api/tags/batch":
+                data=self.request_json()
+                return self.reply(200,self.server.store.batch_tags(
+                    data.get("action"),data.get("ids"),data.get("tags")))
+            if method=="POST" and path=="/api/tags/rename":
+                data=self.request_json()
+                return self.reply(200,self.server.store.rename_tag(
+                    data.get("source"),data.get("target")))
             if method=="POST" and path=="/api/order":
                 data=self.request_json()
                 self.server.store.order(data.get("parent_id"),data.get("ids"))
