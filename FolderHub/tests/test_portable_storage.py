@@ -1,6 +1,7 @@
 """Portable SQLite + cover files regression tests (Windows source migrations are mocked)."""
 import base64
 import hashlib
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 import shutil
@@ -125,7 +126,7 @@ class PortableTests(unittest.TestCase):
         """Regression: sqlite3 context managers do not close handles on Windows."""
         legacy=self.tmp/'legacy-locked';legacy.mkdir()
         old=legacy/'folderhub.db'
-        with sqlite3.connect(old) as conn:
+        with closing(sqlite3.connect(old)) as conn:
             conn.execute('CREATE TABLE keep (value TEXT)')
             conn.execute('INSERT INTO keep VALUES (?)',('must survive',))
         copied=self.tmp/'copied'/'data'
@@ -147,16 +148,16 @@ class PortableTests(unittest.TestCase):
             self.assertTrue(app.migrate_legacy_database(copied,legacy))
         self.assertEqual(len(observed),2)
         self.assertEqual(list(copied.glob('.migrate-*.db')),[])
-        with sqlite3.connect(copied/'folderhub.db') as conn:
+        with closing(sqlite3.connect(copied/'folderhub.db')) as conn:
             self.assertEqual(conn.execute('SELECT value FROM keep').fetchone()[0],
                              'must survive')
-        with sqlite3.connect(old) as conn:
+        with closing(sqlite3.connect(old)) as conn:
             self.assertEqual(conn.execute('SELECT value FROM keep').fetchone()[0],
                              'must survive')
 
     def test_migration_cleanup_failure_does_not_mask_replace_error(self):
         legacy=self.tmp/'legacy-cleanup';legacy.mkdir()
-        with sqlite3.connect(legacy/'folderhub.db') as conn:
+        with closing(sqlite3.connect(legacy/'folderhub.db')) as conn:
             conn.execute('CREATE TABLE keep (value INTEGER)')
         copied=self.tmp/'copied-failure'/'data'
         original_unlink=Path.unlink
