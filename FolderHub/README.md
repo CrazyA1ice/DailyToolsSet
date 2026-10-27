@@ -476,3 +476,12 @@ FolderHub/
 
 
 - 工作组批量打开由服务端互斥锁保护：一个工作组尚未打开结束时，其他窗口或标签页重复提交的批量打开请求会得到明确提示，而不会额外弹出多组资源管理器窗口。
+
+
+## V3.8.1：Windows Python 3.15 全量回归测试修复
+
+- 根据 119 项本地回归测试报告，修复 ZIP 备份中 SQLite 快照和目标临时数据库的连接未显式关闭问题（`with sqlite3.connect(...)` 只处理事务、不关闭句柄）。现在备份结束或失败时都关闭连接，避免 `data/.backup-db-*.db` 在 Windows 上被锁定、备份下载返回 500 或临时测试目录删除失败。
+- 修复旧版回收站图片 BLOB 表迁移到相对路径文件表时遗漏 `tags` 列的问题。迁移会保持回收站中的标签数据，旧记录的标签默认 `[]`，恢复时可正常读取。
+- 修复标签重命名使用 `rowid` 在 `INTEGER PRIMARY KEY` 表里被 SQLite 列别名覆盖导致 `IndexError`：现在为内部行标识使用明确的 `_tag_rowid` 别名。
+- 修正 Windows 测试夹具的临时数据库连接未关闭和缺少事务提交问题，并使 5 项前端静态契约断言与实际最新功能保持一致。新增回收站重建后的标签列验证。
+- 本仓库修复已提交，但完整 Windows 测试仍需在本机通过 `python -m unittest discover -s FolderHub/tests -t FolderHub -v` 执行；如果测试出现新的失败，请保留末尾 `FAIL/ERROR` 段落，不要删除正式 `data/folderhub.db`。

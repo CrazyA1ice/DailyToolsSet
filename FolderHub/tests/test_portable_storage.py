@@ -82,7 +82,7 @@ class PortableTests(unittest.TestCase):
         legacy = self.tmp / 'LegacyAppData'
         legacy.mkdir()
         old = legacy / 'folderhub.db'
-        with sqlite3.connect(old) as db:
+        with closing(sqlite3.connect(old)) as db, db:
             db.executescript('''
                 CREATE TABLE nodes (id INTEGER PRIMARY KEY,parent_id INTEGER,title TEXT NOT NULL,
                     folder_path TEXT,node_type TEXT NOT NULL,icon TEXT NOT NULL,favorite INTEGER,
@@ -116,6 +116,10 @@ class PortableTests(unittest.TestCase):
                 fields={r['name'] for r in db.execute(f'PRAGMA table_info({table})')}
                 self.assertIn('image_path',fields)
                 self.assertNotIn('image_data',fields)
+        with new.connect() as db:
+            self.assertIn('tags', {r['name'] for r in db.execute('PRAGMA table_info(trash_nodes)')})
+            self.assertEqual(db.execute(
+                'SELECT tags FROM trash_nodes WHERE node_id=2').fetchone()[0], '[]')
         restored = new.restore_trash(1)
         self.assertEqual(restored['restored'],1)
         self.assertEqual(new.get_image(2),('image/png',PNG))
@@ -126,7 +130,7 @@ class PortableTests(unittest.TestCase):
         """Regression: sqlite3 context managers do not close handles on Windows."""
         legacy=self.tmp/'legacy-locked';legacy.mkdir()
         old=legacy/'folderhub.db'
-        with closing(sqlite3.connect(old)) as conn:
+        with closing(sqlite3.connect(old)) as conn, conn:
             conn.execute('CREATE TABLE keep (value TEXT)')
             conn.execute('INSERT INTO keep VALUES (?)',('must survive',))
         copied=self.tmp/'copied'/'data'
@@ -157,7 +161,7 @@ class PortableTests(unittest.TestCase):
 
     def test_migration_cleanup_failure_does_not_mask_replace_error(self):
         legacy=self.tmp/'legacy-cleanup';legacy.mkdir()
-        with closing(sqlite3.connect(legacy/'folderhub.db')) as conn:
+        with closing(sqlite3.connect(legacy/'folderhub.db')) as conn, conn:
             conn.execute('CREATE TABLE keep (value INTEGER)')
         copied=self.tmp/'copied-failure'/'data'
         original_unlink=Path.unlink
@@ -174,7 +178,7 @@ class PortableTests(unittest.TestCase):
 
     def test_existing_portable_db_never_overwritten_by_legacy(self):
         legacy=self.tmp/'old';legacy.mkdir()
-        with sqlite3.connect(legacy/'folderhub.db') as conn:
+        with closing(sqlite3.connect(legacy/'folderhub.db')) as conn, conn:
             conn.execute('CREATE TABLE t(x)')
         node=self.store.create({'title':'保留','node_type':'root'})
         self.assertFalse(app.migrate_legacy_database(self.project/'data', legacy))

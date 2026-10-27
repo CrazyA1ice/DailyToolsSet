@@ -1,6 +1,8 @@
 """Run: python -m unittest discover -s tests -v"""
 import http.client
 import json
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 import tempfile
 import threading
@@ -120,8 +122,7 @@ class StoreTests(unittest.TestCase):
 
     def test_legacy_migration_keeps_paths_and_old_backups(self):
         db_path=Path(self.tmp.name)/"old.db"
-        import sqlite3
-        with sqlite3.connect(db_path) as conn:
+        with closing(sqlite3.connect(db_path)) as conn, conn:
             conn.executescript(r"""CREATE TABLE nodes (id INTEGER PRIMARY KEY,
                 parent_id INTEGER, title TEXT NOT NULL, folder_path TEXT, favorite INTEGER NOT NULL DEFAULT 0,
                 sort_order INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
@@ -569,8 +570,9 @@ class RecentUsageTests(unittest.TestCase):
         self.store.record_open(leaf)
         folder=Path(self.store.db_path.parent)
         moved=folder.parent/"moved.db"
-        with self.store.connect() as src, app.sqlite3.connect(moved) as target:
+        with self.store.connect() as src, closing(app.sqlite3.connect(moved)) as target:
             src.backup(target)
+            target.commit()
         restored=app.Store(moved)
         self.assertEqual(restored.recent()[0]["node_id"],leaf)
         data=restored.export()

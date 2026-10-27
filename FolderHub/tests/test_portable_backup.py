@@ -3,6 +3,7 @@ import base64
 import http.client
 import io
 import json
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import sys
@@ -49,7 +50,7 @@ class PortableBackupTests(unittest.TestCase):
                 self.assertEqual(z.read(next(x for x in names if x.startswith('uploads/'))), PNG)
                 restored_db = self.root / 'restored.db'
                 restored_db.write_bytes(z.read('data/folderhub.db'))
-            with sqlite3.connect(restored_db) as conn:
+            with closing(sqlite3.connect(restored_db)) as conn:
                 self.assertEqual(conn.execute('SELECT COUNT(*) FROM nodes').fetchone()[0], 1)
                 self.assertEqual(conn.execute('SELECT COUNT(*) FROM trash_nodes').fetchone()[0], 1)
                 self.assertEqual(conn.execute('PRAGMA integrity_check').fetchone()[0], 'ok')

@@ -318,16 +318,17 @@ class Store:
                 batch_id INTEGER NOT NULL REFERENCES trash_batches(id) ON DELETE CASCADE,
                 node_id INTEGER NOT NULL, parent_id INTEGER, title TEXT NOT NULL,
                 folder_path TEXT, node_type TEXT NOT NULL, icon TEXT NOT NULL,
-                favorite INTEGER NOT NULL, sort_order INTEGER NOT NULL,
-                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-                image_mime TEXT, image_path TEXT, PRIMARY KEY(batch_id,node_id))""")
+                favorite INTEGER NOT NULL, tags TEXT NOT NULL DEFAULT '[]',
+                sort_order INTEGER NOT NULL, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL, image_mime TEXT, image_path TEXT,
+                PRIMARY KEY(batch_id,node_id))""")
             for row in db.execute("SELECT * FROM trash_nodes"):
                 image_path = (self._write_image(row["image_mime"],bytes(row["image_data"]))
                               if row["image_data"] is not None else None)
-                db.execute("""INSERT INTO trash_nodes_portable VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                db.execute("""INSERT INTO trash_nodes_portable VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                            (row["batch_id"],row["node_id"],row["parent_id"],row["title"],
                             row["folder_path"],row["node_type"],row["icon"],row["favorite"],
-                            row["sort_order"],row["created_at"],row["updated_at"],
+                            row["tags"],row["sort_order"],row["created_at"],row["updated_at"],
                             row["image_mime"],image_path))
             db.execute("DROP TABLE trash_nodes")
             db.execute("ALTER TABLE trash_nodes_portable RENAME TO trash_nodes")
@@ -381,9 +382,13 @@ class Store:
                 fd, name = tempfile.mkstemp(dir=self.db_path.parent, prefix=".backup-db-", suffix=".db")
                 os.close(fd)
                 db_temp = Path(name)
-                with self.connect() as source, sqlite3.connect(db_temp) as target:
+                # sqlite3.Connection.__exit__ does not close the connection.
+                # Windows cannot delete a temporary database while any of these
+                # handles remain open, including on errors during ZIP creation.
+                with self.connect() as source, closing(sqlite3.connect(db_temp)) as target:
                     source.backup(target)
-                with sqlite3.connect(db_temp) as snapshot:
+                    target.commit()
+                with closing(sqlite3.connect(db_temp)) as snapshot:
                     refs = {row[0] for row in snapshot.execute("SELECT image_path FROM node_images")}
                     refs.update(row[0] for row in snapshot.execute(
                         "SELECT image_path FROM trash_nodes WHERE image_path IS NOT NULL"))
@@ -783,7 +788,7 @@ class Store:
         with self.connect() as db:
             changes = []
             for table in ("nodes", "trash_nodes"):
-                for row in db.execute(f"SELECT rowid,tags FROM {table}"):
+                for row in db.execute(f"SELECT rowid AS _tag_rowid,tags FROM {table}"):
                     current = json.loads(row["tags"])
                     if not any(tag.casefold() == old_key for tag in current):
                         continue
@@ -795,7 +800,7 @@ class Store:
                             merged.append(candidate)
                     encoded = json.dumps(validate_tags(merged), ensure_ascii=False)
                     if encoded != row["tags"]:
-                        changes.append((table, row["rowid"], encoded))
+                        changes.append((table, row["_tag_rowid"], encoded))
             if not changes:
                 raise UserError("没有找到需要更改的标签")
             for table, rowid, value in changes:

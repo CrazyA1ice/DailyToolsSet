@@ -158,7 +158,7 @@ class AdminUiContractTests(unittest.TestCase):
         # Search lineage and visit counts should survive in list view.
         self.assertIn('const contextText=state.search?',self.js)
         self.assertIn('const listContext=state.layout==="list" && contextText?',self.js)
-        self.assertIn('${listContext}</button>',self.js)
+        self.assertIn('${listContext}${tagChips}</button>',self.js)
         self.assertIn('state.layout!=="list" && recentText',self.js)
         self.assertIn('data-action="copy-path"',self.js)
         self.assertIn('async function copyFolderPath(id)',self.js)
@@ -192,7 +192,7 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('classList.add("is-opening")',body)
         self.assertIn('classList.remove("is-opening")',body)
         self.assertNotIn('state.openingIds.add(id);render()',body)
-        self.assertIn('if(state.view==="recent"&&!state.search.trim())render(true)',body)
+        self.assertIn('if(["recent","frequent"].includes(state.view)&&!state.search.trim())render(true)',body)
 
     def test_highlight_locate_and_focus_restoration(self):
         self.assertIn("function highlightSearch(value,query)",self.js)
@@ -227,9 +227,11 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
 
     def test_quick_palette_navigation_and_accessibility(self):
-        for item in ("quickOpenBtn","quickLayer","quickInput","quickResults","quickClose","quickHelp"):
+        for item in ("quickOpenBtn","quickLayer","quickInput","quickResults","quickClose"):
             self.assertIn('id="'+item+'"',self.html)
             self.assertIn(item,self.js)
+        # Descriptive help is static HTML, not a JavaScript-controlled element.
+        self.assertIn('id="quickHelp"',self.html)
         self.assertIn('aria-keyshortcuts="Control+Shift+P"',self.html)
         self.assertIn('role="combobox"',self.html)
         self.assertIn('role="listbox"',self.html)
@@ -268,7 +270,7 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('data-tag-rename="1"',self.js)
         self.assertIn('"/api/tags/batch"',self.js)
         self.assertIn('"/api/tags/rename"',self.js)
-        self.assertIn('state.activeTag=target',self.js)
+        self.assertIn('state.activeTag=state.tagSelection.length===1?state.tagSelection[0]:null;',self.js)
         self.assertIn('bulkTagAdd","bulkTagRemove"',self.js)
         self.assertIn('.tag-filters .tag-manage',self.css)
 
@@ -305,7 +307,7 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('const restoredSmartView=fromHistory&&view==="tags"?',self.js)
         self.assertIn('const keepTag=tag=>typeof tag==="string"',self.js)
         self.assertIn('state.activeSmartView=restoredSmartView?.name||null;',self.js)
-        self.assertIn('else renderSavedViews();',self.js)
+        self.assertIn('else {renderSavedViews();renderFolderGroups()}',self.js)
         self.assertIn('const rewritten=state.savedViews.map(view=>{',self.js)
         self.assertIn('state.savedViews=rewritten;',self.js)
 
