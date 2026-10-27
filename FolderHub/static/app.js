@@ -179,13 +179,15 @@ async function persistProjectSettings(){
           preferencesRevision=saved.revision;
         }catch(e){
           success=false;
-          if(e.code==="preferences_conflict"||e.status===409){
-            preferencesConflict=true;
-            pendingSettings=null;
+          // A failed request may have reached the server. Never replay later
+          // snapshots using a revision whose outcome is no longer certain.
+          preferencesConflict=true;
+          pendingSettings=null;
+          if(e.code==="preferences_conflict"||e.status===409)
             toast("其他页面已修改设置，已阻止旧配置覆盖。请先记录本页未保存的内容，再刷新页面。",true);
-            break;
-          }
-          toast("保存项目个性化设置失败："+e.message,true);
+          else
+            toast("保存设置失败，无法确认服务器是否已写入。已暂停后续保存，请记录当前修改后刷新页面："+e.message,true);
+          break;
         }
       }
     }finally{settingsWriteInFlight=false;settingsWritePromise=null}
