@@ -1046,11 +1046,12 @@ class Store:
                            (node_id,mime,image_path,now()))
 
 
-def launch_workspace(store, name):
+def launch_workspace(store, name, expected_items=None):
     """Open only explicitly selected, saved workspace members (at most eight).
 
     Client supplies a workspace NAME, never arbitrary node IDs or executable
-    paths. Every selected target is validated again by open_saved_resource.
+    paths. The caller must echo the exact items (title, kind and target)
+    displayed in its confirmation; a stale tab cannot launch changed targets.
     One bad/missing node must not prevent remaining resources from opening.
     """
     if type(name) is not str or not 1 <= len(name) <= 40:
@@ -1064,11 +1065,32 @@ def launch_workspace(store, name):
         raise UserError("这个工作区尚未设置一键启动资源，请先编辑工作区")
     if len(selected) > 8 or not set(selected).issubset(workspace["members"]):
         raise UserError("工作区启动清单无效")
+    # Every launch requires an explicit snapshot of what the user confirmed.
+    # Reject missing/old clients and bool IDs (True == 1 in Python).
+    stale_message = "工作区启动清单或资源信息已变化，请刷新页面并重新确认"
+    if (type(expected_items) is not list or len(expected_items) != len(selected)
+            or any(type(item) is not dict
+                   or set(item) != {"id", "title", "kind", "target"}
+                   or type(item["id"]) is not int for item in expected_items)):
+        raise UserError(stale_message)
     # Take a snapshot before opening anything; do not hold a SQLite lock while
     # Windows Explorer, document associations or web browsers start.
     with store.connect() as db:
         records = {node_id: db.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
                    for node_id in selected}
+    current_items = []
+    for node_id in selected:
+        row = records[node_id]
+        kind = row["resource_kind"] if row is not None else None
+        current_items.append({
+            "id": node_id,
+            "title": row["title"] if row is not None else None,
+            "kind": kind,
+            "target": (row["folder_path"] if kind == "folder"
+                       else row["resource_target"]) if row is not None else None,
+        })
+    if expected_items != current_items:
+        raise UserError(stale_message)
     results = []
     for node_id in selected:
         node = records[node_id]
@@ -1356,7 +1378,8 @@ class Handler(BaseHTTPRequestHandler):
             if path=="/api/workspaces/launch":
                 if method=="POST":
                     data=self.request_json()
-                    return self.reply(200,launch_workspace(self.server.store,data.get("name")))
+                    return self.reply(200,launch_workspace(self.server.store,data.get("name"),
+                                                           data.get("expected_items")))
                 return self.reply(405,{"error":"不支持的请求方法"})
             if method=="POST" and path=="/api/nodes":
                 node_id=self.server.store.create(self.request_json())

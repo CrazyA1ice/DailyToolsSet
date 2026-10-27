@@ -47,6 +47,21 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('h(item.error||"未知错误")',self.js)
         self.assertIn('.workspace-launch-settings',self.css)
 
+    def test_v54_workspace_launch_matches_confirmed_resource_snapshot(self):
+        # The confirmation and HTTP body must use the same frozen array,
+        # not a fresh lookup after the user has accepted the dialog.
+        start = self.js.index("async function launchActiveWorkspace()")
+        end = self.js.index("function movedWorkspaceLinkItems(", start)
+        body = self.js[start:end]
+        self.assertIn("const expectedItems=ids.map(id=>{", body)
+        self.assertIn("title:node?.title??null", body)
+        self.assertIn("kind:node?kind:null", body)
+        self.assertIn('kind==="folder"?node.folder_path??null:node.resource_target??null', body)
+        self.assertIn("const names=expectedItems.map(", body)
+        self.assertIn("expected_items:expectedItems", body)
+        self.assertLess(body.index("const expectedItems="),body.index("if(!confirm("))
+        self.assertLess(body.index("if(!confirm("),body.index("expected_items:expectedItems"))
+
     def test_everything_search_is_optional_local_and_explicit(self):
         for control in ("everythingBtn","everythingLayer","everythingForm",
                         "everythingQuery","everythingResults","everythingStatus","everythingClose"):
