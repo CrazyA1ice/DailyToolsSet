@@ -31,6 +31,11 @@
       <div class="nav-label">文件夹工作组 <span id="folderGroupCount" class="saved-view-count">0</span></div>
       <nav id="folderGroupNav" class="folder-group-nav" aria-label="保存的文件夹工作组"></nav>
     </div>
+    <div id="workspaceSection" class="workspace-section">
+      <div class="nav-group-header"><span class="nav-label">项目工作区 <span class="saved-view-count" id="workspaceCount">0</span></span>
+        <button id="workspaceNew" type="button" class="icon-button" title="新建项目工作区" aria-label="新建项目工作区">＋</button></div>
+      <nav id="workspaceNav" class="workspace-nav" aria-label="已保存的项目工作区"></nav>
+    </div>
     <div class="nav-group-header"><span class="nav-label">分层目录</span><button id="addRoot" class="icon-button" title="添加根模块" aria-label="添加根模块">＋</button></div>
     <nav id="treeNav" class="tree-nav" aria-label="模块树"></nav>
     <div class="side-footer"><div class="side-footer-icon">✓</div><div><strong>本地安全运行</strong><small>只管理入口，不移动文件</small></div></div>
@@ -59,12 +64,34 @@
         <button type="button" id="bulkTagAdd" class="outline-btn">⌗ 批量添加标签</button>
         <button type="button" id="bulkTagRemove" class="outline-btn">− 批量移除标签</button>
         <button type="button" id="bulkSaveGroup" class="outline-btn" title="选中 2—8 个已绑定文件夹后保存为工作组">◈ 保存为工作组</button>
+        <button type="button" id="bulkSaveWorkspace" class="outline-btn" title="将选中的 1—30 个模块保存为项目工作区">▣ 保存为工作区</button>
         <button type="button" id="bulkDelete" class="outline-btn danger-btn">移除所选</button>
         <button type="button" id="bulkCancel" class="outline-btn">完成</button>
       </div>
       <section class="entries" id="entries" aria-live="polite"></section>
     </div>
   </main>
+</div>
+<div id="workspaceLayer" class="dialog-layer hidden" role="presentation">
+  <div class="dialog workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="workspaceDialogTitle">
+    <div class="dialog-header"><div><div class="eyebrow">PROJECT WORKSPACE</div><h2 id="workspaceDialogTitle">新建工作区</h2></div>
+      <button id="workspaceClose" type="button" class="icon-button" aria-label="关闭工作区编辑">✕</button></div>
+    <form id="workspaceForm" class="workspace-form">
+      <label for="workspaceName">工作区名称</label>
+      <input id="workspaceName" type="text" maxlength="40" autocomplete="off" required placeholder="例如：科研项目、前端开发">
+      <label for="workspaceDescription">项目说明（可选，最多240字）</label>
+      <textarea id="workspaceDescription" rows="3" maxlength="240" placeholder="记录工作区的用途、当前进展和备注"></textarea>
+      <label for="workspaceMemberSearch">选择模块（至少1个，最多30个）</label>
+      <input id="workspaceMemberSearch" type="search" autocomplete="off" placeholder="筛选模块名称或所属目录">
+      <p id="workspaceMemberSummary" class="settings-note" role="status">请选择需要集中浏览的模块</p>
+      <div id="workspaceMemberList" class="workspace-member-list" role="group" aria-label="工作区成员"></div>
+      <p class="settings-note">工作区只保存已有模块的引用，不移动真实文件夹；分类模块和文件夹入口都可加入。</p>
+      <div class="dialog-footer">
+        <button id="workspaceCancel" type="button" class="outline-btn">取消</button>
+        <button id="workspaceSave" type="submit" class="primary-btn">保存工作区</button>
+      </div>
+    </form>
+  </div>
 </div>
 <div id="groupResultLayer" class="dialog-layer hidden" role="presentation">
   <div class="dialog group-report-dialog" role="dialog" aria-modal="true" aria-labelledby="groupResultTitle">
