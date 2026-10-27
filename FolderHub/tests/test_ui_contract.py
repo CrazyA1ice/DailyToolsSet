@@ -151,6 +151,34 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('.workspace-member-list',self.css)
         self.assertIn('.workspace-nav',self.css)
 
+    def test_workspace_resource_editor_and_portable_schema(self):
+        for widget in ('workspaceResources', 'workspaceStatus', 'workspaceLinkAdd',
+                       'workspaceLinkList'):
+            self.assertIn(f'id="{widget}"', self.html)
+            self.assertIn(widget, self.js)
+        for code in ('function copyWorkspaceRecord(item)', 'function validWorkspaceUrl(value)',
+                     'function validateWorkspaceDraftLinks()', 'function renderWorkspaceResources()',
+                     'function renderWorkspaceLinkEditor()'):
+            self.assertIn(code, self.js)
+        self.assertIn('workspaces:state.workspaces.map(item=>copyWorkspaceRecord(item))',self.js)
+        self.assertIn('saved.workspaces.map(item=>copyWorkspaceRecord(item))',self.js)
+        self.assertIn('const current={name,description,members:ids,status,links};',self.js)
+        self.assertIn('$("#workspaceStatus").value=item.status||"planning"',self.js)
+        self.assertIn('renderWorkspaceLinkEditor();',self.js)
+        self.assertIn('.workspace-resources',self.css)
+
+    def test_workspace_web_resources_are_explicit_and_safe(self):
+        begin=self.js.index('function renderWorkspaceResources()')
+        end=self.js.index('function renderCrumb()',begin)
+        region=self.js[begin:end]
+        self.assertIn('validWorkspaceUrl(link.url)',region)
+        self.assertIn('target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer"',region)
+        self.assertIn('h(link.name)',region)
+        self.assertIn('h(validWorkspaceUrl(link.url))',region)
+        self.assertNotIn('fetch(',region)
+        self.assertIn('["http:","https:"]',self.js)
+        self.assertIn('function validateWorkspaceDraftLinks()',self.js)
+
     def test_workspace_member_ordering_controls(self):
         for control in ('data-workspace-move=', 'data-workspace-step="1"',
                         'data-workspace-step="-1"'):
