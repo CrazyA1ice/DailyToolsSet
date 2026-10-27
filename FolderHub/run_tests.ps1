@@ -51,9 +51,11 @@ try {
     $StderrText = if (Test-Path -LiteralPath $StderrFile) {
         [System.IO.File]::ReadAllText($StderrFile, [System.Text.Encoding]::UTF8)
     } else { "" }
+    $Separator = if ($StdoutText.Length -gt 0 -and $StderrText.Length -gt 0 -and
+                    -not $StdoutText.EndsWith("`n")) { [Environment]::NewLine } else { "" }
     [System.IO.File]::WriteAllText(
-        $Log, $StdoutText + $StderrText,
-        (New-Object System.Text.UTF8Encoding($false)))
+        $Log, $StdoutText + $Separator + $StderrText,
+        [System.Text.UTF8Encoding]::new($false))
 } finally {
     $env:TEMP = $PreviousTemp
     $env:TMP = $PreviousTmp
