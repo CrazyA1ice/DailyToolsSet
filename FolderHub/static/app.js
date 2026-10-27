@@ -2281,11 +2281,13 @@ function bind(){
       const index=state.searchKeyboardIndex<0?0:Math.min(state.searchKeyboardIndex,results.length-1);
       await act("primary",results[index].id);return;
     }
+    // Navigate only cards that are currently rendered. Previously ArrowUp
+    // from the first search state jumped to the last of 20k results and
+    // immediately built up to 20k DOM cards just to move keyboard focus.
+    const visibleCount=Math.min(results.length,state.renderLimit);
     const old=state.searchKeyboardIndex;
-    state.searchKeyboardIndex=e.key==="ArrowDown"?(old+1)%results.length:
-      old<0?results.length-1:(old-1+results.length)%results.length;
-    if(state.searchKeyboardIndex>=state.renderLimit)
-      state.renderLimit=Math.ceil((state.searchKeyboardIndex+1)/100)*100;
+    state.searchKeyboardIndex=e.key==="ArrowDown"?(old+1)%visibleCount:
+      old<0?visibleCount-1:(old-1+visibleCount)%visibleCount;
     flushSearchRender();
     document.getElementById(`folderhub-entry-${results[state.searchKeyboardIndex].id}`)?.scrollIntoView({block:"nearest"});
   });
