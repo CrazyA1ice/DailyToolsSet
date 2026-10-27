@@ -360,6 +360,51 @@ class HttpTests(unittest.TestCase):
         except ValueError:pass
         return r.status,content
 
+    def test_v53_workspace_launch_http_auth_saved_ids_and_partial_failures(self):
+        root=self.srv.store.create({"title":"Project","node_type":"root"})
+        doc=self.srv.store.create({"title":"Paper","node_type":"leaf",
+              "parent_id":root,"resource_kind":"file",
+              "resource_target":r"D:\\Project\\paper.pdf"})
+        web=self.srv.store.create({"title":"Website","node_type":"leaf",
+              "parent_id":root,"resource_kind":"url",
+              "resource_target":"https://example.org/"})
+        self.srv.store.preferences.save({"workspaces":[{
+            "name":"科研","description":"","members":[doc,web],
+            "launch_ids":[doc,web]}]})
+        endpoint="/api/workspaces/launch"
+        self.assertEqual(self.request("POST",endpoint,{"name":"科研"},token=False)[0],403)
+        self.assertEqual(self.request("POST",endpoint,{"name":"科研"},
+                                      origin="https://evil.example")[0],403)
+        self.assertEqual(self.request("POST",endpoint,{"name":"Unknown"})[0],400)
+        self.assertEqual(self.request("POST",endpoint,{"name":"科研","ids":[root]})[0],200)
+        called=[]
+        def run(node):
+            called.append(node["id"])
+            if node["id"]==web:raise app.UserError("目标网页暂时无法启动")
+        with patch.object(app,"open_saved_resource",side_effect=run):
+            status,body=self.request("POST",endpoint,{"name":"科研"})
+        self.assertEqual(status,200)
+        self.assertEqual(body["attempted"],2)
+        self.assertEqual(body["succeeded"],1)
+        self.assertEqual([item["ok"] for item in body["results"]],[True,False])
+        self.assertIn("目标网页暂时无法启动",body["results"][1]["error"])
+        self.assertEqual(called,[doc,web])
+
+    def test_v53_workspace_launch_empty_missing_and_category_never_execute(self):
+        root=self.srv.store.create({"title":"Root","node_type":"root"})
+        self.srv.store.preferences.save({"workspaces":[{
+            "name":"Old","description":"","members":[root]}]})
+        with patch.object(app,"open_saved_resource") as opener:
+            self.assertEqual(self.request("POST","/api/workspaces/launch",{"name":"Old"})[0],400)
+            self.srv.store.preferences.save({"workspaces":[{
+                "name":"BadType","description":"","members":[root],
+                "launch_ids":[root]}]})
+            status,response=self.request("POST","/api/workspaces/launch",{"name":"BadType"})
+            self.assertEqual(status,200)
+            self.assertFalse(response["results"][0]["ok"])
+            self.assertIn("分类模块",response["results"][0]["error"])
+            opener.assert_not_called()
+
     def test_everything_search_endpoint_is_opt_in_and_bounds_input(self):
         payload={"items":[{"name":"report.pdf","path":r"C:\Docs\report.pdf",
                             "kind":"file"}],"source":"Everything","limit":30}
