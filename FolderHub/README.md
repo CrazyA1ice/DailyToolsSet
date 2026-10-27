@@ -689,3 +689,11 @@ powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1
 - **保护路径隐私与兼容性**：新接口不包含真实文件夹路径或网页目标 URL，只提供经检查已绑定的 `has_target` 标记；不会预打开资源。托盘连接仍运行 V5.5 或更老版本的独立服务时，如果新接口返回 404，则回退到旧读取方式；其他 HTTP 错误不静默吞掉。
 - **现有行为不变**：原本资源类型预留规则、排序、Windows 单全局快捷键及“显式点击才打开资源”的规则全部保留。首次升级只增加 SQLite 索引，不修改、迁移或删除任何用户导航记录。
 - **回归验收**：测试包含 1,600 个文件夹与混合文档、网页，核对新旧菜单结果相同、最多 24 条候选、最小接口不泄露路径、旧服务兼容及普通 GET 不写入数据。可运行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`，日志仍位于 `FolderHub/test-results/`。性能收益来自有界 SQL 读取与减少响应大小；**尚未在用户 Windows 设备上进行真实耗时基准测试**。
+
+## V5.6.1：修复 Windows PowerShell 单元测试日志捕获
+
+- **修复原因**：`python -m unittest discover -s tests -t . -v` 的正常用例进度（例如 `test_... ... ok`）默认输出到 stderr；旧版 `run_tests.ps1` 使用 `$ErrorActionPreference = "Stop"` 和 `*>&1`，在 **Windows PowerShell 5.1** 中会将这类正常输出误判为 `NativeCommandError`，提前中止测试。
+- **解决方案**：使用 PowerShell 内置 `Start-Process -Wait -PassThru` 启动相同的 Python unittest 命令，将 stdout/stderr 分别重定向至 `FolderHub/tmp/` 的临时文件，再统一写入原有的 `FolderHub/test-results/folderhub-tests-*.txt`。**以 Python 进程退出码为准**，测试真正失败时仍返回非零退出码，不会误报通过。
+- **保证兼容**：保持 Windows PowerShell 5.1 / PowerShell 7 兼容用法；使用 UTF-8 捕获中文测试输出；测试结束后恢复原有 `TEMP`、`TMP`、`TMPDIR`、`PYTHONIOENCODING`，删除临时捕获文件。未新增第三方 Python 依赖，也不在仓库外生成日志。
+- **运行方式**：更新仓库后在 `DailyToolsSet` 根目录执行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`，完成时应看到测试结果文件路径和 `Ran ... tests` / `OK` 或 `FAILED` 摘要。若测试报告 `FAILED`，请依据同一日志定位 Python 测试本身的问题。
+- **验证范围**：新增跨平台静态回归检查，确保 `unittest` stderr 不再进入 PowerShell 的错误管道、测试结果遵循真实退出码及日志目录边界。Windows PowerShell 5.1 真机完整运行需要在用户设备上验收。
