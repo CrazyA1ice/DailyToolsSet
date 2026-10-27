@@ -138,6 +138,22 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('data-action="pin"',self.js)
         self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
 
+    def test_list_view_spacing_and_density_controls(self):
+        # Covers in compact mode must never use the grid-mode negative margin.
+        self.assertIn('data-pref="listDensity" data-value="compact"',self.html)
+        self.assertIn('data-pref="listDensity" data-value="normal"',self.html)
+        self.assertIn('data-pref="listDensity" data-value="relaxed"',self.html)
+        self.assertIn('root.dataset.listDensity=preferences.listDensity',self.js)
+        self.assertIn('html[data-density="compact"] .entries.list .entry-card .card-cover',self.css)
+        self.assertIn('html[data-density="compact"] .entries.list .entry-card {',self.css)
+        self.assertIn('margin:0;',self.css.split(
+            'html[data-density="compact"] .entries.list .entry-card .card-cover {',1)[1].split('}',1)[0])
+        self.assertIn('padding:var(--list-pad-y) var(--list-pad-x)',self.css)
+        self.assertIn('data-action="edit"',self.css)
+        self.assertIn('focus-within',self.css)
+        self.assertGreater(self.css.index('/* V2.6 - List view layout.'),
+                           self.css.index('margin-left:-15px;margin-right:-15px'))
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)

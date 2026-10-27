@@ -8,7 +8,7 @@ import tempfile
 from threading import RLock
 
 DEFAULTS = {
-    'font': 'large', 'density': 'comfortable', 'sidebar': 'normal',
+    'font': 'large', 'density': 'comfortable', 'listDensity': 'normal', 'sidebar': 'normal',
     'columns': 'auto', 'accent': 'blue', 'showCovers': True,
     'coverHeight': 'normal', 'coverFit': 'cover', 'sidebarCollapsed': False,
     'theme': 'cloud', 'layout': 'grid', 'expanded': None,
@@ -16,6 +16,7 @@ DEFAULTS = {
 CHOICES = {
     'font': ('normal', 'large', 'xlarge'),
     'density': ('comfortable', 'compact'),
+    'listDensity': ('compact', 'normal', 'relaxed'),
     'sidebar': ('normal', 'wide'),
     'columns': ('auto', '2', '3', '4'),
     'accent': ('blue', 'purple', 'teal', 'orange', 'rose'),

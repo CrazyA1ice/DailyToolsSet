@@ -487,3 +487,194 @@ html[data-cover-fit="contain"] .cover-preview img{object-fit:contain}
 .recent-pin{font-size:1rem;min-width:35px;height:35px}
 .recent-pin.on{color:var(--accent);background:var(--accent-faint)}
 @media(prefers-reduced-motion:reduce){.entries .entry-card.keyboard-active{scroll-behavior:auto}}
+
+
+/* V2.6 - List view layout. The compact cover rule above used negative margins,
+   which accidentally pushed the cover to the list item's outer border.
+   These selectors deliberately outrank html[data-density="compact"] .entry-card .card-cover. */
+.entries.list {
+  --list-icon-size:54px;
+  --list-pad-x:24px;
+  --list-pad-y:18px;
+  --list-row-height:106px;
+  padding-inline:4px;
+  gap:12px;
+}
+html[data-list-density="compact"] .entries.list {
+  --list-icon-size:46px;
+  --list-pad-x:20px;
+  --list-pad-y:12px;
+  --list-row-height:82px;
+  gap:8px;
+}
+html[data-list-density="relaxed"] .entries.list {
+  --list-icon-size:64px;
+  --list-pad-x:30px;
+  --list-pad-y:22px;
+  --list-row-height:122px;
+  gap:14px;
+}
+.entries.list .entry-card,
+html[data-density="compact"] .entries.list .entry-card {
+  display:grid;
+  grid-template-columns:var(--list-icon-size) minmax(0,1fr) auto;
+  column-gap:20px;
+  row-gap:0;
+  align-items:center;
+  min-height:var(--list-row-height);
+  padding:var(--list-pad-y) var(--list-pad-x);
+  border-radius:12px;
+  min-width:0;
+}
+.entries.list .entry-card .card-cover,
+html[data-density="compact"] .entries.list .entry-card .card-cover {
+  grid-column:1;
+  grid-row:1;
+  margin:0;
+  width:var(--list-icon-size);
+  height:var(--list-icon-size);
+  min-width:0;
+  border-radius:11px;
+  --cover-height:var(--list-icon-size);
+  overflow:hidden;
+}
+.entries.list .entry-card .card-cover .cover-image {
+  width:100%;
+  height:100%;
+  object-position:center;
+}
+.entries.list .entry-card .card-cover .cover-emoji {
+  font-size:calc(var(--list-icon-size) * .52);
+  line-height:1;
+}
+html[data-show-covers="false"] .entries.list .entry-card .folder-icon {
+  display:grid;
+  grid-column:1;
+  grid-row:1;
+  width:var(--list-icon-size);
+  height:var(--list-icon-size);
+  margin:0;
+  border-radius:11px;
+  font-size:calc(var(--list-icon-size) * .5);
+}
+.entries.list .entry-card .card-primary,
+html[data-density="compact"] .entries.list .entry-card .card-primary {
+  grid-column:2;
+  grid-row:1;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:flex-start;
+  gap:6px;
+  min-width:0;
+  width:100%;
+  padding:0;
+}
+.entries.list .entry-card .card-primary strong {
+  font-size:1.08rem;
+  line-height:1.4;
+  max-width:100%;
+  font-weight:750;
+}
+.entries.list .entry-card .card-primary .path {
+  font-size:.86rem;
+  line-height:1.4;
+  margin:0;
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.entries.list .entry-card .card-actions {
+  grid-column:3;
+  grid-row:1;
+  display:flex;
+  flex-wrap:nowrap;
+  justify-self:end;
+  align-self:start;
+  gap:5px;
+  opacity:1;
+  min-width:0;
+}
+.entries.list .entry-card .card-bottom {
+  grid-column:3;
+  grid-row:1;
+  align-self:end;
+  justify-self:end;
+  width:auto;
+  min-width:0;
+  padding:0;
+  margin:0;
+  border:0;
+}
+.entries.list .entry-card .card-links {
+  padding:0;
+  margin:0;
+  display:flex;
+  flex-wrap:nowrap;
+  gap:6px;
+}
+.entries.list .entry-card .card-links button {
+  font-size:.84rem;
+  padding:5px 9px;
+}
+.entries.list .entry-card .card-actions .small-action {
+  width:34px;
+  min-width:34px;
+  height:34px;
+  border-radius:7px;
+}
+@media(hover:hover) and (pointer:fine) {
+  .entries.list .entry-card .card-actions [data-action="edit"],
+  .entries.list .entry-card .card-actions [data-action="delete"] {
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .15s;
+  }
+  .entries.list .entry-card:hover .card-actions [data-action="edit"],
+  .entries.list .entry-card:hover .card-actions [data-action="delete"],
+  .entries.list .entry-card:focus-within .card-actions [data-action="edit"],
+  .entries.list .entry-card:focus-within .card-actions [data-action="delete"] {
+    opacity:1;
+    pointer-events:auto;
+  }
+}
+/* Existing global density remains separate from this list-only row spacing. */
+@media(max-width:1080px) {
+  .entries.list .entry-card,
+  html[data-density="compact"] .entries.list .entry-card {
+    grid-template-columns:var(--list-icon-size) minmax(0,1fr);
+    grid-template-rows:auto auto;
+    column-gap:16px;
+    row-gap:8px;
+  }
+  .entries.list .entry-card .card-actions {
+    grid-column:2;
+    grid-row:2;
+    justify-self:start;
+    align-self:center;
+  }
+  .entries.list .entry-card .card-bottom {
+    grid-column:2;
+    grid-row:2;
+    justify-self:end;
+    align-self:center;
+  }
+}
+@media(max-width:640px) {
+  .entries.list .entry-card,
+  html[data-density="compact"] .entries.list .entry-card {
+    grid-template-rows:auto auto auto;
+    column-gap:12px;
+    padding-inline:16px;
+  }
+  .entries.list .entry-card .card-actions {
+    grid-column:2;
+    grid-row:2;
+  }
+  .entries.list .entry-card .card-bottom {
+    grid-column:2;
+    grid-row:3;
+    justify-self:start;
+  }
+}

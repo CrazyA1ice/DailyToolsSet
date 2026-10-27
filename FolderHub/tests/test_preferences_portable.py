@@ -55,6 +55,16 @@ class PortablePreferencesTests(unittest.TestCase):
                 self.prefs.save(invalid)
             self.assertEqual((self.root/'data'/'preferences.json').read_bytes(),baseline)
 
+    def test_list_density_is_portable_and_strictly_validated(self):
+        self.assertEqual(self.prefs.get()['settings']['listDensity'],'normal')
+        self.prefs.save({'layout':'list','listDensity':'relaxed'})
+        reopened=PreferencesStore(self.root/'data'/'preferences.json')
+        self.assertEqual(reopened.get()['settings']['listDensity'],'relaxed')
+        snapshot=(self.root/'data'/'preferences.json').read_bytes()
+        with self.assertRaises(PreferenceError):
+            self.prefs.save({'listDensity':'oversized'})
+        self.assertEqual((self.root/'data'/'preferences.json').read_bytes(),snapshot)
+
     def test_backup_includes_preferences_even_when_not_created(self):
         archive=self.store.make_portable_backup()
         try:

@@ -15,8 +15,8 @@ const ICONS = {
   folder:"📁",book:"📚",code:"💻",chart:"📊",database:"🗃️",image:"🖼️",
   briefcase:"💼",school:"🎓",music:"🎵",video:"🎬",archive:"🗄️",star:"⭐"
 };
-const PREF_DEFAULTS = Object.freeze({font:"large",density:"comfortable",sidebar:"normal",columns:"auto",accent:"blue",showCovers:true,coverHeight:"normal",coverFit:"cover",sidebarCollapsed:false});
-const PREF_ALLOWED = {font:["normal","large","xlarge"],density:["comfortable","compact"],sidebar:["normal","wide"],columns:["auto","2","3","4"],accent:["blue","purple","teal","orange","rose"],coverHeight:["short","normal","tall"],coverFit:["cover","contain"]};
+const PREF_DEFAULTS = Object.freeze({font:"large",density:"comfortable",listDensity:"normal",sidebar:"normal",columns:"auto",accent:"blue",showCovers:true,coverHeight:"normal",coverFit:"cover",sidebarCollapsed:false});
+const PREF_ALLOWED = {font:["normal","large","xlarge"],density:["comfortable","compact"],listDensity:["compact","normal","relaxed"],sidebar:["normal","wide"],columns:["auto","2","3","4"],accent:["blue","purple","teal","orange","rose"],coverHeight:["short","normal","tall"],coverFit:["cover","contain"]};
 function readPreferences(){
   try {
     const stored=JSON.parse(localStorage.getItem("folderhub.appearance")||"{}");
@@ -32,6 +32,7 @@ function applyPreferences(){
   const root=document.documentElement;
   root.dataset.font=preferences.font;
   root.dataset.density=preferences.density;
+  root.dataset.listDensity=preferences.listDensity;
   root.dataset.sidebarWidth=preferences.sidebar;
   root.dataset.columns=preferences.columns;
   root.dataset.accent=preferences.accent;
