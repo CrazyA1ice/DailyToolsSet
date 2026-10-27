@@ -234,6 +234,30 @@ class PortablePreferencesTests(unittest.TestCase):
         self.assertEqual(self.prefs.get()['settings']['savedViews'],[])
         self.assertEqual(self.prefs.snapshot_bytes().count(b'"savedViews"'),1)
 
+    def test_v53_launch_ids_persist_in_zip_and_validate_order_and_bounds(self):
+        workspace={"name":"研究","description":"", "members":[1,2,3,4,5,6,7,8,9],
+                   "launch_ids":[1,3,4,9]}
+        self.prefs.save({"workspaces":[workspace]})
+        opened=PreferencesStore(self.root/"data"/"preferences.json")
+        self.assertEqual(opened.get()["settings"]["workspaces"][0]["launch_ids"],
+                         [1,3,4,9])
+        backup=self.store.make_portable_backup()
+        try:
+            with zipfile.ZipFile(backup) as z:
+                saved=json.loads(z.read("data/preferences.json"))
+                self.assertEqual(saved["settings"]["workspaces"][0]["launch_ids"],
+                                 [1,3,4,9])
+        finally:
+            backup.unlink(missing_ok=True)
+        unchanged=(self.root/"data"/"preferences.json").read_bytes()
+        for ids in ([10],[4,1],[1,1],[False],["1"],list(range(1,10))):
+            with self.subTest(ids=ids),self.assertRaises(PreferenceError):
+                self.prefs.save({"workspaces":[dict(workspace,launch_ids=ids)]})
+            self.assertEqual((self.root/"data"/"preferences.json").read_bytes(),unchanged)
+        legacy={"name":"旧工作区","description":"","members":[1]}
+        self.prefs.save({"workspaces":[legacy]})
+        self.assertNotIn("launch_ids",self.prefs.get()["settings"]["workspaces"][0])
+
     def test_workspaces_persist_in_zip_and_reject_invalid_input_atomically(self):
         valid = [
             {'name': '论文项目', 'description': '网络流量预测' + chr(10) + '实验与图表',
