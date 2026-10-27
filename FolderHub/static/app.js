@@ -2101,18 +2101,49 @@ function bindQuickPalette(){
 
 /* Optional local-only Everything ES search. Results never launch automatically. */
 let everythingItems=[];
+let everythingRequestVersion=0;
+let everythingController=null;
+let everythingPendingQuery="";
+const everythingDefaultStatus="需要本机安装并运行 Everything，且 es.exe 可用。";
+function resetEverythingSearch(message=everythingDefaultStatus){
+  // Closing, editing the query or reopening a dialog invalidates every
+  // previous response, even if abort races with a completed fetch.
+  everythingRequestVersion++;
+  if(everythingController)everythingController.abort();
+  everythingController=null;
+  everythingPendingQuery="";
+  everythingItems=[];
+  $("#everythingResults").replaceChildren();
+  $("#everythingResults").setAttribute("aria-busy","false");
+  $("#everythingSubmit").disabled=false;
+  $("#everythingStatus").textContent=message;
+}
 function closeEverything(){
+  resetEverythingSearch();
   $("#everythingLayer").classList.add("hidden");
 }
 async function runEverythingSearch(event){
   event.preventDefault();
   const query=$("#everythingQuery").value.trim(),button=$("#everythingSubmit");
   if(query.length<2||query.length>100){toast("请输入 2—100 字搜索词",true);return}
+  // Enter can submit a form even while its button is disabled. Do not launch
+  // duplicate ES subprocesses for the same outstanding query.
+  if(everythingController&&everythingPendingQuery===query)return;
+  const version=++everythingRequestVersion;
+  if(everythingController)everythingController.abort();
+  const controller=new AbortController();
+  everythingController=controller;
+  everythingPendingQuery=query;
+  everythingItems=[];
   button.disabled=true;
   $("#everythingStatus").textContent="正在查询本机 Everything 索引…";
   $("#everythingResults").replaceChildren();
+  $("#everythingResults").setAttribute("aria-busy","true");
   try{
-    const result=await api("/api/everything/search?q="+encodeURIComponent(query));
+    const result=await api("/api/everything/search?q="+encodeURIComponent(query),
+                           {signal:controller.signal});
+    if(version!==everythingRequestVersion||controller.signal.aborted||
+       $("#everythingLayer").classList.contains("hidden"))return;
     everythingItems=result.items||[];
     const skipped=Number(result.unavailable||0);
     $("#everythingStatus").textContent="找到 "+everythingItems.length+" 项"
@@ -2126,9 +2157,17 @@ async function runEverythingSearch(event){
         +'>'+(supported?'＋ 加入导航':'文件类型不支持')+'</button></div>';
     }).join("");
   }catch(error){
+    if(version!==everythingRequestVersion||controller.signal.aborted)return;
     everythingItems=[];
     $("#everythingStatus").textContent=error.message;
-  }finally{button.disabled=false}
+  }finally{
+    if(version===everythingRequestVersion){
+      everythingController=null;
+      everythingPendingQuery="";
+      button.disabled=false;
+      $("#everythingResults").setAttribute("aria-busy","false");
+    }
+  }
 }
 function chooseEverythingResult(index){
   const item=everythingItems[index];if(!item||item.supported===false)return;
@@ -2145,8 +2184,12 @@ function chooseEverythingResult(index){
 }
 function bindEverything(){
   $("#everythingBtn").addEventListener("click",()=>{
+    resetEverythingSearch();
     $("#everythingLayer").classList.remove("hidden");
     $("#everythingQuery").focus();
+  });
+  $("#everythingQuery").addEventListener("input",()=>{
+    resetEverythingSearch("搜索词已变化，请按 Enter 或点击「搜索」重新查询。");
   });
   $("#everythingClose").addEventListener("click",closeEverything);
   $("#everythingLayer").addEventListener("click",event=>{
