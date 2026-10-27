@@ -139,6 +139,16 @@
         <div id="pathHealthList" class="path-results" aria-live="polite"></div>
       </section>
       <section class="settings-section">
+        <div class="setting-heading"><h3>🧭 智能迁移建议</h3><p>换盘符或换电脑后，填写已存在的新项目根目录。仅对已收藏的导航路径尝试推断旧目录前缀，不递归搜索磁盘，也不会自动更改数据库。</p></div>
+        <div class="path-prefix-grid">
+          <label for="pathSuggestedRoot">新根目录<input id="pathSuggestedRoot" type="text" spellcheck="false" autocomplete="off" placeholder="E:\Research"></label>
+        </div>
+        <div class="storage-actions"><button id="pathSuggest" type="button" class="outline-btn">分析可能的迁移规则</button></div>
+        <p id="pathSuggestSummary" class="settings-note" role="status">输入新根目录后手动生成建议；较慢的网络共享目录可能延长检查时间。</p>
+        <div id="pathSuggestList" class="path-results" aria-live="polite"></div>
+        <p class="settings-note">建议依赖新目录中实际可访问的少量路径样本，不保证所有子目录都存在；点击「采用并生成预览」仍须核对全部模块，再手动确认。请先下载完整 ZIP 备份。</p>
+      </section>
+      <section class="settings-section">
         <div class="setting-heading"><h3>🔁 批量修改盘符 / 目录前缀</h3><p>例如将 D:\Research 替换为 E:\Research，保留后面的各级子文件夹；也支持共享目录迁移。仅修改 FolderHub 数据库记录。</p></div>
         <div class="path-prefix-grid">
           <label for="pathPrefixFrom">旧路径前缀<input id="pathPrefixFrom" type="text" spellcheck="false" autocomplete="off" placeholder="D:\Research"></label>
