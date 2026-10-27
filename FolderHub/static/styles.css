@@ -1010,3 +1010,26 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
 .workspace-link-row button:hover{background:var(--accent-faint)}
 @media(max-width:650px){.workspace-link-row{grid-template-columns:1fr auto}
   .workspace-link-row input[data-workspace-link-url]{grid-column:1/3;grid-row:2}}
+
+/* V4.4: workstation overview, cross-workspace navigation and link ordering. */
+.workspace-quick-switch{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.workspace-quick-switch label{font-size:.83rem;font-weight:650;color:var(--muted)}
+.workspace-quick-switch select{min-width:170px;max-width:min(100%,340px);flex:1;
+  border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);
+  color:var(--text);min-height:38px;padding:8px 10px;font:inherit}
+.workspace-quick-switch select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.workspace-overview-metrics{display:flex;flex-wrap:wrap;gap:8px}
+.workspace-overview-metrics>span{font-size:.8rem;padding:7px 10px;line-height:1.3;
+  border-radius:7px;background:var(--surface);border:1px solid var(--line);color:var(--muted)}
+.workspace-overview-metrics strong{font-size:.95rem;color:var(--text)}
+.workspace-overview-metrics .workspace-missing-count{color:var(--danger,#bd5660)}
+.workspace-overview-metrics .workspace-missing-count strong{color:inherit}
+.workspace-link-row{grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto}
+.workspace-link-order{display:flex;gap:3px;align-items:center}
+.workspace-link-order button{min-width:29px;padding:7px 6px}
+.workspace-link-order button:disabled{opacity:.3;cursor:default}
+@media(max-width:650px){
+  .workspace-link-order{grid-column:1/3;grid-row:3;justify-content:flex-end}
+  .workspace-quick-switch{align-items:stretch;flex-direction:column;gap:5px}
+  .workspace-quick-switch select{width:100%;max-width:100%}
+}
