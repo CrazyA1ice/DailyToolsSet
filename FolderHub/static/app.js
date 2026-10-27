@@ -62,7 +62,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {savedViews:[],folderGroups:[],groupBusy:false,activeSmartView:null,openingIds:new Set(),nodes:[],trash:[],recent:[],frequent:[], activeTag:null, tagSelection:[], tagExcluded:[], tagMatchMode:"any", tagPickMode:"include", renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+const state = {savedViews:[],folderGroups:[],workspaces:[],activeWorkspace:null,groupBusy:false,activeSmartView:null,openingIds:new Set(),nodes:[],trash:[],recent:[],frequent:[], activeTag:null, tagSelection:[], tagExcluded:[], tagMatchMode:"any", tagPickMode:"include", renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
 
 /* V3.0 — Native browser history for modules and special views.
    Search text is stored in the current tab's history.state, never in the URL. */
@@ -75,17 +75,24 @@ function routeFromLocation(){
     const id=Number(match[1]);
     return Number.isSafeInteger(id)?{view:"node",id}:{view:"all",id:null};
   }
+  if(hash.startsWith("#workspace/")){
+    try{
+      const name=decodeURIComponent(hash.slice("#workspace/".length));
+      if(name&&name.length<=40)return {view:"workspace",id:name};
+    }catch(_){/* Invalid deep link goes to home. */}
+    return {view:"all",id:null};
+  }
   const view=hash.slice(1);
   return ["favorites","recent","frequent","trash","tags"].includes(view)?
     {view,id:null}:{view:"all",id:null};
 }
 function routeUrl(view,id=null){
-  const suffix=view==="node"?`#node/${id}`:view==="all"?"":`#${view}`;
+  const suffix=view==="node"?`#node/${id}`:view==="workspace"?`#workspace/${encodeURIComponent(id||"")}`:view==="all"?"":`#${view}`;
   return window.location.pathname+window.location.search+suffix;
 }
 function navigationSnapshot(){
   return {folderhubRoute:1,view:state.view,
-    id:state.view==="node"?state.selected:null,
+    id:state.view==="node"?state.selected:state.view==="workspace"?state.activeWorkspace:null,
     tag:state.view==="tags"?state.activeTag:null,
     tagSelection:state.view==="tags"?[...state.tagSelection]:[],
     tagExcluded:state.view==="tags"?[...state.tagExcluded]:[],
@@ -132,7 +139,8 @@ function collectProjectSettings(){
     expanded:state.treeInitialized?[...state.expanded]:initialExpanded,
     savedViews:state.savedViews.map(view=>({name:view.name,includes:[...view.includes],
       excludes:[...view.excludes],mode:view.mode})),
-    folderGroups:state.folderGroups.map(group=>({name:group.name,members:[...group.members]}))};
+    folderGroups:state.folderGroups.map(group=>({name:group.name,members:[...group.members]})),
+    workspaces:state.workspaces.map(item=>({name:item.name,description:item.description,members:[...item.members]}))};
 }
 async function persistProjectSettings(){
   if(!projectSettingsReady)return true;
@@ -179,6 +187,9 @@ async function loadProjectSettings(){
   })):[];
   state.folderGroups=Array.isArray(saved.folderGroups)?saved.folderGroups.map(group=>({
     name:group.name,members:[...group.members]
+  })):[];
+  state.workspaces=Array.isArray(saved.workspaces)?saved.workspaces.map(item=>({
+    name:item.name,description:item.description,members:[...item.members]
   })):[];
   projectSettingsReady=true;
   document.documentElement.dataset.theme=state.theme;
@@ -311,7 +322,9 @@ function setView(view,id=null,{fromHistory=false,saved=null}={}){
   if(!fromHistory)rememberNavigation();
   closeCardMenu();exitSelectMode();
   if(view==="node"&&!byId(id)){view="all";id=null}
+  if(view==="workspace"&&!state.workspaces.some(item=>item.name===id)){view="all";id=null}
   state.view=view;state.selected=view==="node"?id:null;
+  state.activeWorkspace=view==="workspace"?id:null;
   const available=new Set(state.nodes.flatMap(n=>n.tags||[]));
   const restoredSmartView=fromHistory&&view==="tags"?
     state.savedViews.find(item=>item.name===saved?.smartView):null;
@@ -397,6 +410,7 @@ function renderNav(){
   $("#treeNav").innerHTML=walk(roots);
   renderSavedViews();
   renderFolderGroups();
+  renderWorkspaces();
 }
 function renderSavedViews(){
   const list=$("#smartViewNav"),section=$("#smartViewSection");
@@ -421,6 +435,19 @@ function renderFolderGroups(){
     </div>`;
   }).join("");
 }
+function renderWorkspaces(){
+  $("#workspaceCount").textContent=String(state.workspaces.length);
+  $("#workspaceNav").innerHTML=state.workspaces.map((item,index)=>{
+    const present=item.members.filter(id=>Boolean(byId(id))).length;
+    return `<div class="workspace-nav-row">
+      <button type="button" class="nav-item workspace-link ${state.view==="workspace"&&state.activeWorkspace===item.name?"active":""}" data-workspace-open="${index}" title="${h(item.name)} · ${present}/${item.members.length} 个模块">
+        <span aria-hidden="true">▣</span><span class="workspace-nav-name">${h(item.name)}</span><span class="workspace-nav-count">${present}/${item.members.length}</span>
+      </button>
+      <button type="button" class="folder-group-command" data-workspace-edit="${index}" aria-label="编辑工作区 ${h(item.name)}" title="编辑工作区">✎</button>
+      <button type="button" class="folder-group-command" data-workspace-delete="${index}" aria-label="删除工作区 ${h(item.name)}" title="删除工作区">×</button>
+    </div>`;
+  }).join("");
+}
 function renderCrumb(){
   const bits=[`<button type="button" data-crumb="all">首页</button>`];
   if(state.search.trim()){
@@ -432,6 +459,7 @@ function renderCrumb(){
   if(state.view==="frequent") bits.push(`<span>›</span><strong>常用文件夹</strong>`);
   if(state.view==="tags") bits.push(`<span>›</span><strong>标签筛选${state.activeTag?" · "+h(state.activeTag):""}</strong>`);
   if(state.view==="trash") bits.push(`<span>›</span><strong>回收站</strong>`);
+  if(state.view==="workspace") bits.push(`<span>›</span><strong>项目工作区 · ${h(state.activeWorkspace)}</strong>`);
   if(state.view==="node"){
     for(const n of ancestors(state.selected)){
       bits.push(`<span>›</span><button type="button" data-crumb="${n.id}">${h(n.title)}</button>`);
@@ -682,17 +710,18 @@ function trashCard(item){
   </article>`;
 }
 function render(skipNav=false){
-  if(state.view==="node" && !byId(state.selected)){
-    state.view="all";state.selected=null;
+  if((state.view==="node" && !byId(state.selected)) ||
+     (state.view==="workspace"&&!state.workspaces.some(item=>item.name===state.activeWorkspace))){
+    state.view="all";state.selected=null;state.activeWorkspace=null;
     if(navigationReady)window.history.replaceState(navigationSnapshot(),"",routeUrl("all"));
   }
   if(!skipNav)renderNav();
-  else {renderSavedViews();renderFolderGroups()}
+  else {renderSavedViews();renderFolderGroups();renderWorkspaces()}
   renderCrumb();
   renderTagFilters();
   const trashView=state.view==="trash"&&!state.search.trim();
   $("#newBtn").hidden=trashView ||
-    (["recent","frequent"].includes(state.view)&&!state.search.trim());
+    (["recent","frequent","workspace"].includes(state.view)&&!state.search.trim());
   $("#selectModeBtn").hidden=trashView;
   if(trashView){
     state.visibleIds=[];
@@ -726,10 +755,17 @@ function render(skipNav=false){
     const node=byId(state.selected);
     display=node.node_type==="leaf"?[node]:children(state.selected);
     sectionTitle=node.node_type==="leaf"?"当前文件夹":"下级模块";
+  }
+  else if(state.view==="workspace"){
+    const workspace=state.workspaces.find(item=>item.name===state.activeWorkspace);
+    display=workspace.members.map(id=>byId(id)).filter(Boolean);
+    sectionTitle=workspace.name;
   } else{display=children(null);sectionTitle="根模块";}
   $("#sectionHeading").hidden=state.view==="all"&&!searching;
   $("#sectionTitle").textContent=sectionTitle;
-  $("#sectionMeta").textContent=state.view==="tags"&&!searching?
+  $("#sectionMeta").textContent=state.view==="workspace"&&!searching?
+    (state.workspaces.find(item=>item.name===state.activeWorkspace)?.description||"项目工作区 · 集中浏览，不会自动打开多个文件夹"):
+    state.view==="tags"&&!searching?
     `跨目录匹配 ${display.length} 个模块 · 包含 ${state.tagSelection.length} 个，排除 ${state.tagExcluded.length} 个标签（${state.tagMatchMode==="all"?"AND":"OR"}）` :
     state.view==="recent"&&!searching?
     "置顶项目优先显示，其余按最近打开时间排列 · 只记录通过 FolderHub 打开的文件夹":
@@ -739,7 +775,9 @@ function render(skipNav=false){
   const canAddChild=state.view==="node"&&!searching&&byId(state.selected)?.node_type!=="leaf";
   $("#newBtnText").textContent=canAddChild?"新建子模块":"新建根模块";
   $("#searchHint").textContent=searching?`${display.length} 项结果`:"Ctrl K";
-  $("#sectionOperations").innerHTML=state.view==="node"&&!searching?
+  $("#sectionOperations").innerHTML=state.view==="workspace"&&!searching?
+    '<button type="button" data-action="edit-workspace">编辑工作区</button>':
+    state.view==="node"&&!searching?
     `<button data-action="edit-current">编辑当前模块</button>`:
     state.view==="recent"&&!searching&&state.recent.length?
       '<button type="button" data-action="clear-recent" title="只清除访问记录，不删除导航模块或实际文件夹">清空访问记录</button>':"";
@@ -1008,6 +1046,7 @@ async function act(action,id){
     case "favorite":await favoriteNode(id);break;
     case "empty-create":editDialog();break;
     case "edit-current":editDialog(state.selected);break;
+    case "edit-workspace":openWorkspaceDialog(state.workspaces.findIndex(item=>item.name===state.activeWorkspace));break;
     case "load-more":{
       const previous=state.visibleIds.length;
       state.renderLimit+=100;
