@@ -19,18 +19,47 @@ New-Item -ItemType Directory -Path $Scratch -Force | Out-Null
 $PreviousTemp = $env:TEMP
 $PreviousTmp = $env:TMP
 $PreviousTmpDir = $env:TMPDIR
+$PreviousPythonIOEncoding = $env:PYTHONIOENCODING
+# Standard unittest progress ("test_... ... ok") goes to stderr, even on
+# success. With ErrorActionPreference=Stop, Windows PowerShell 5.1 can turn
+# native stderr redirected by *>&1 into a terminating NativeCommandError.
+# Redirect both native streams to files without going through the PS pipeline.
+$RunId = [guid]::NewGuid().ToString("N")
+$StdoutFile = Join-Path $Scratch ("unittest-stdout-" + $RunId + ".tmp")
+$StderrFile = Join-Path $Scratch ("unittest-stderr-" + $RunId + ".tmp")
+$ExitCode = 1
 Push-Location $Project
 try {
-    # Python tempfile / unittest scratch also stays under FolderHub/tmp.
+    # Python tempfile and temporary capture streams stay inside FolderHub/tmp.
     $env:TEMP = $Scratch
     $env:TMP = $Scratch
     $env:TMPDIR = $Scratch
-    python -m unittest discover -s tests -t . -v *>&1 | Out-File -FilePath $Log -Encoding UTF8
-    $ExitCode = $LASTEXITCODE
+    # Ensure unicode test messages survive Windows console code pages.
+    $env:PYTHONIOENCODING = "utf-8"
+    $Python = (Get-Command python -CommandType Application -ErrorAction Stop).Source
+    $Process = Start-Process -FilePath $Python `
+        -ArgumentList @("-m", "unittest", "discover", "-s", "tests", "-t", ".", "-v") `
+        -WorkingDirectory $Project -NoNewWindow -Wait -PassThru `
+        -RedirectStandardOutput $StdoutFile -RedirectStandardError $StderrFile
+    $ExitCode = $Process.ExitCode
+
+    # Python unittest writes normal test status and the final OK/FAILED line
+    # to stderr; preserve both streams without treating either as PS errors.
+    $StdoutText = if (Test-Path -LiteralPath $StdoutFile) {
+        [System.IO.File]::ReadAllText($StdoutFile, [System.Text.Encoding]::UTF8)
+    } else { "" }
+    $StderrText = if (Test-Path -LiteralPath $StderrFile) {
+        [System.IO.File]::ReadAllText($StderrFile, [System.Text.Encoding]::UTF8)
+    } else { "" }
+    [System.IO.File]::WriteAllText(
+        $Log, $StdoutText + $StderrText,
+        (New-Object System.Text.UTF8Encoding($false)))
 } finally {
     $env:TEMP = $PreviousTemp
     $env:TMP = $PreviousTmp
     $env:TMPDIR = $PreviousTmpDir
+    $env:PYTHONIOENCODING = $PreviousPythonIOEncoding
+    Remove-Item -LiteralPath $StdoutFile, $StderrFile -Force -ErrorAction SilentlyContinue
     Pop-Location
 }
 Write-Host ("测试结果: " + $Log)
