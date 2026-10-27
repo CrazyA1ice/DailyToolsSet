@@ -162,7 +162,7 @@ function collectProjectSettings(){
 async function persistProjectSettings(){
   if(!projectSettingsReady)return true;
   if(preferencesConflict){
-    toast("其他页面已保存更新；本页停止写入，请记录未保存的修改后刷新页面",true);
+    toast("设置版本未确认，本页已暂停写入；请记录未保存的修改并刷新页面后继续",true);
     return false;
   }
   pendingSettings=collectProjectSettings();
