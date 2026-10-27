@@ -139,6 +139,23 @@ class PortablePreferencesTests(unittest.TestCase):
                 self.prefs.save(case)
             self.assertEqual((self.root / 'data' / 'preferences.json').read_bytes(), unchanged)
 
+    def test_workspace_member_order_survives_reopen_and_backup(self):
+        original = [{'name': '排序验证', 'description': '',
+                     'members': [7, 3, 11, 2]}]
+        self.prefs.save({'workspaces': original})
+        self.assertEqual(self.prefs.get()['settings']['workspaces'][0]['members'],
+                         [7, 3, 11, 2])
+        reopened = PreferencesStore(self.root / 'data' / 'preferences.json')
+        self.assertEqual(reopened.get()['settings']['workspaces'], original)
+        archive = self.store.make_portable_backup()
+        try:
+            with zipfile.ZipFile(archive) as bundle:
+                record = json.loads(bundle.read('data/preferences.json'))
+                self.assertEqual(record['settings']['workspaces'][0]['members'],
+                                 [7, 3, 11, 2])
+        finally:
+            archive.unlink(missing_ok=True)
+
     def test_workspace_defaults_are_not_shared(self):
         view = self.prefs.get()['settings']
         view['workspaces'].append({'name': '临时', 'description': '', 'members': [1]})
