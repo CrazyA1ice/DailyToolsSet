@@ -21,7 +21,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlsplit
 import webbrowser
 import startup
 import explorer_window
@@ -40,6 +40,42 @@ MAX_IMAGE_REQUEST = 3 * 1024 * 1024
 MAX_IMPORT_REQUEST = 32 * 1024 * 1024
 ALLOWED_ICONS = frozenset(("folder", "book", "code", "chart", "database", "image", "briefcase", "school", "music", "video", "archive", "star"))
 NODE_TYPES = ("root", "group", "leaf")
+RESOURCE_KINDS = ("folder", "file", "url")
+SAFE_FILE_EXTENSIONS = frozenset((
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml",
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg",
+    ".rtf", ".odt", ".ods", ".odp", ".ipynb", ".log", ".html", ".htm",
+))
+
+
+def validate_resource(kind, target):
+    if type(kind) is not str or kind not in RESOURCE_KINDS:
+        raise UserError("资源类型必须是文件夹、文件或网页")
+    if kind == "folder":
+        if target is not None:
+            raise UserError("文件夹不能设置额外资源地址")
+        return None
+    if kind == "file":
+        target = validate_path(target)
+        if target is None or ntpath.splitext(target)[1].lower() not in SAFE_FILE_EXTENSIONS:
+            raise UserError("文件入口仅支持常见文档、图片及非可执行文件的绝对路径")
+        return target
+    if (not isinstance(target, str) or not 1 <= len(target) <= 2048
+            or any(ord(c) <= 32 or ord(c) == 127 or c == chr(92) for c in target)):
+        raise UserError("网页链接无效")
+    try:
+        parsed = urlsplit(target)
+        valid = (parsed.scheme in ("http", "https") and target.startswith(parsed.scheme + "://")
+                 and bool(parsed.hostname) and parsed.username is None
+                 and parsed.password is None and parsed.port != 0
+                 and not parsed.netloc.endswith(":"))
+    except ValueError:
+        valid = False
+    if not valid:
+        raise UserError("网页只允许完整 HTTP/HTTPS 地址，且不得包含账号密码")
+    return target
+
 
 
 class UserError(Exception):
@@ -87,17 +123,25 @@ def inferred_type(parent, path, has_children=False):
     return "group" if has_children or not path else "leaf"
 
 
-def validate_structure(node_type, parent, path, *, existing=None):
-    """New/edited nodes obey strict types. Unchanged legacy category paths survive updates."""
+def validate_structure(node_type, parent, path, *, existing=None,
+                       resource_kind="folder", resource_target=None):
+    """Preserve existing module hierarchy, but support three leaf resource kinds."""
     if (node_type == "root") != (parent is None):
         raise UserError("根模块只能位于顶层；普通模块和叶子模块必须设置上级模块")
-    if node_type == "leaf" and not path:
-        raise UserError("叶子模块必须关联一个实际文件夹")
-    if node_type != "leaf" and path:
-        legacy_unchanged = (existing is not None and existing["node_type"] == node_type
-                            and existing["folder_path"] == path)
-        if not legacy_unchanged:
-            raise UserError("根模块和普通模块仅用于分类，请在叶子模块关联文件夹")
+    if node_type == "leaf":
+        if resource_kind == "folder" and not path:
+            raise UserError("文件夹入口必须填写绑定文件夹")
+        if resource_kind != "folder" and path:
+            raise UserError("文件、网页入口不能同时绑定文件夹")
+        if resource_kind != "folder" and not resource_target:
+            raise UserError("文件、网页入口必须提供目标地址")
+    else:
+        if resource_kind != "folder" or resource_target is not None:
+            raise UserError("分类模块不能关联文件或网页")
+        if path:
+            unchanged = existing is not None and existing["node_type"] == node_type and existing["folder_path"] == path
+            if not unchanged:
+                raise UserError("分类模块仅支持保留旧版路径，不允许新增绑定路径")
 
 
 def validate_icon(value):
@@ -246,6 +290,14 @@ class Store:
             db.execute("CREATE INDEX IF NOT EXISTS idx_node_visits_pin_time "
                        "ON node_visits(pinned DESC, last_opened_at DESC)")
             cols = {row["name"] for row in db.execute("PRAGMA table_info(nodes)")}
+            if "resource_kind" not in cols:
+                db.execute("ALTER TABLE nodes ADD COLUMN resource_kind TEXT NOT NULL DEFAULT 'folder'")
+            if "resource_target" not in cols:
+                db.execute("ALTER TABLE nodes ADD COLUMN resource_target TEXT")
+            if "resource_kind" not in trash_cols:
+                db.execute("ALTER TABLE trash_nodes ADD COLUMN resource_kind TEXT NOT NULL DEFAULT 'folder'")
+            if "resource_target" not in trash_cols:
+                db.execute("ALTER TABLE trash_nodes ADD COLUMN resource_target TEXT")
             if "tags" not in cols:
                 db.execute("ALTER TABLE nodes ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
             trash_cols = {row["name"] for row in db.execute("PRAGMA table_info(trash_nodes)")}
@@ -622,15 +674,17 @@ class Store:
         node_type = validate_node_type(data.get("node_type", inferred_type(parent, path)))
         icon = validate_icon(data.get("icon", "folder"))
         tags = validate_tags(data.get("tags", []))
-        validate_structure(node_type, parent, path)
+        kind = data.get("resource_kind", "folder")
+        target = validate_resource(kind, data.get("resource_target"))
+        validate_structure(node_type, parent, path, resource_kind=kind, resource_target=target)
         stamp = now()
         with self.connect() as db:
             self.check_parent(db, None, parent)
             result = db.execute("""INSERT INTO nodes
-                (parent_id,title,folder_path,node_type,icon,favorite,tags,sort_order,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?)""", (parent,title,path,node_type,icon,
+                (parent_id,title,folder_path,node_type,icon,favorite,tags,sort_order,created_at,updated_at,resource_kind,resource_target)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", (parent,title,path,node_type,icon,
                 int(bool(data.get("favorite",False))),json.dumps(tags,ensure_ascii=False),
-                self.next_order(db,parent),stamp,stamp))
+                self.next_order(db,parent),stamp,stamp,kind,target))
             return result.lastrowid
 
     def update(self, node_id, data):
@@ -642,7 +696,10 @@ class Store:
             node_type = validate_node_type(data.get("node_type", original["node_type"]))
             icon = validate_icon(data.get("icon", original["icon"]))
             tags = validate_tags(data.get("tags", json.loads(original["tags"])))
-            validate_structure(node_type, parent, path, existing=original)
+            kind = data.get("resource_kind", original["resource_kind"])
+            target = validate_resource(kind, data.get("resource_target", original["resource_target"]))
+            validate_structure(node_type, parent, path, existing=original,
+                               resource_kind=kind, resource_target=target)
             self.check_parent(db, node_id, parent)
             if node_type == "leaf" and db.execute(
                 "SELECT 1 FROM nodes WHERE parent_id=? LIMIT 1", (node_id,)).fetchone():
@@ -650,9 +707,9 @@ class Store:
             favorite = bool(data.get("favorite", original["favorite"]))
             order = original["sort_order"] if parent == original["parent_id"] else self.next_order(db,parent)
             db.execute("""UPDATE nodes SET parent_id=?,title=?,folder_path=?,node_type=?,
-                icon=?,favorite=?,tags=?,sort_order=?,updated_at=? WHERE id=?""",
+                icon=?,favorite=?,tags=?,sort_order=?,updated_at=?,resource_kind=?,resource_target=? WHERE id=?""",
                 (parent,title,path,node_type,icon,int(favorite),
-                 json.dumps(tags,ensure_ascii=False),order,now(),node_id))
+                 json.dumps(tags,ensure_ascii=False),order,now(),kind,target,node_id))
 
     @staticmethod
     def _trash_delete(db, ids):
