@@ -90,6 +90,73 @@ class PathManagementTests(unittest.TestCase):
             paths.check_health(self.store, exists_fn=None) if sys.platform != 'win32' else paths.preview(self.store, 'D:bad', 'E:\\')
 
 
+    def test_suggestions_rank_reachable_new_root_without_writing(self):
+        extra = self.store.create({'title': '实验记录', 'node_type': 'leaf',
+                                   'parent_id': self.root,
+                                   'folder_path': r'D:\Research\Records'})
+        existing = {r'E:\NewResearch', r'E:\NewResearch\Paper2026',
+                    r'E:\NewResearch\Records'}
+        calls = []
+        def fake_exists(path):
+            calls.append(path)
+            return path in existing
+        report = paths.suggest_migrations(self.store, r'E:\NewResearch', exists_fn=fake_exists)
+        self.assertEqual(report['total'], 3)
+        self.assertGreaterEqual(len(report['suggestions']), 1)
+        best = report['suggestions'][0]
+        self.assertEqual((best['source'], best['target']),
+                         (r'D:\Research', r'E:\NewResearch'))
+        self.assertEqual((best['linked'], best['checked'], best['verified']), (2, 2, 2))
+        self.assertEqual(self.get_path(self.paper), r'D:\Research\Paper2026')
+        self.assertEqual(self.get_path(extra), r'D:\Research\Records')
+        self.assertLessEqual(len(calls), 1 + paths.MAX_SUGGEST_CANDIDATES * paths.MAX_SUGGEST_PROBES)
+        # Choosing a proposal fills the existing preview workflow; suggestion alone cannot modify records.
+        plan = paths.preview(self.store, best['source'], best['target'])
+        self.assertEqual(plan['count'], 2)
+        self.assertEqual(self.get_path(extra), r'D:\Research\Records')
+
+    def test_suggestions_fail_closed_for_invalid_roots_and_empty_evidence(self):
+        for target in ('', r'..\Work', r'E:relative', r'\\?\E:\Work'):
+            with self.subTest(target=target), self.assertRaises(paths.PathRuleError):
+                paths.suggest_migrations(self.store, target, exists_fn=lambda _: True)
+        with self.assertRaisesRegex(paths.PathRuleError, '无法访问'):
+            paths.suggest_migrations(self.store, r'E:\Absent', exists_fn=lambda _: False)
+        report = paths.suggest_migrations(self.store, r'E:\Empty',
+                                         exists_fn=lambda path: path == r'E:\Empty')
+        self.assertEqual(report['suggestions'], [])
+        self.assertEqual(self.get_path(self.paper), r'D:\Research\Paper2026')
+
+    def test_suggestions_single_path_and_unc_shared_root(self):
+        share = self.store.create({'title': '共享目录', 'node_type': 'leaf',
+                                  'parent_id': self.root,
+                                  'folder_path': r'\\oldserver\share\Team\Docs'})
+        existing = {r'\\newserver\files\Projects',
+                    r'\\newserver\files\Projects\Docs'}
+        report = paths.suggest_migrations(self.store, r'\\newserver\files\Projects',
+                                         exists_fn=lambda p: p in existing)
+        matching = [s for s in report['suggestions']
+                    if s['source'] == r'\\oldserver\share\Team']
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]['verified'], 1)
+        self.assertEqual(self.get_path(share), r'\\oldserver\share\Team\Docs')
+
+    def test_suggestions_cap_directory_probes(self):
+        for index in range(35):
+            self.store.create({'title': f'批次 {index}', 'node_type': 'leaf',
+                               'parent_id': self.root,
+                               'folder_path': rf'D:\Bulk\item{index}'})
+        paths_checked = []
+        def fake_exists(path):
+            paths_checked.append(path)
+            return path == r'E:\Bulk' or path.startswith('E:\\Bulk\\item')
+        report = paths.suggest_migrations(self.store, r'E:\Bulk', exists_fn=fake_exists)
+        matching = [s for s in report['suggestions'] if s['source'] == r'D:\Bulk']
+        self.assertEqual(len(matching), 1)
+        self.assertEqual((matching[0]['linked'], matching[0]['checked'],
+                          matching[0]['verified']), (35, 24, 24))
+        self.assertLessEqual(len(paths_checked), 1 + paths.MAX_SUGGEST_CANDIDATES * paths.MAX_SUGGEST_PROBES)
+
+
 class PathApiTests(unittest.TestCase):
     def setUp(self):
         temp=tempfile.TemporaryDirectory()
@@ -114,7 +181,7 @@ class PathApiTests(unittest.TestCase):
         return resp.status,json.loads(raw)
 
     def test_auth_required_for_diagnostics_and_writes(self):
-        for endpoint in ('/api/paths/check','/api/paths/preview','/api/paths/apply'):
+        for endpoint in ('/api/paths/check','/api/paths/suggest','/api/paths/preview','/api/paths/apply'):
             with self.subTest(endpoint=endpoint):
                 status,_=self.request(endpoint,auth=False)
                 self.assertEqual(status,403)
@@ -131,6 +198,21 @@ class PathApiTests(unittest.TestCase):
         self.assertEqual(result['changed'],1)
         late,_=self.request('/api/paths/apply',{'source':plan['source'],'target':plan['target'],'fingerprint':plan['fingerprint']})
         self.assertEqual(late,400)
+
+    def test_http_suggestions_are_read_only_and_token_protected(self):
+        suggested = {'target': r'E:\New', 'total': 1, 'sample_limit': 24,
+                     'suggestions': [{'source': r'D:\Project', 'target': r'E:\New',
+                                      'linked': 1, 'checked': 1, 'verified': 1, 'examples': []}]}
+        with patch.object(paths, 'suggest_migrations', return_value=suggested) as helper:
+            code, payload = self.request('/api/paths/suggest', {'target': r'E:\New'})
+            self.assertEqual(code, 200)
+            self.assertEqual(payload, suggested)
+            helper.assert_called_once_with(self.store, r'E:\New')
+        with patch.object(paths, 'suggest_migrations',
+                          side_effect=paths.PathRuleError('不可访问')):
+            code, payload = self.request('/api/paths/suggest', {'target': r'E:\Absent'})
+            self.assertEqual(code, 400)
+            self.assertIn('不可访问', payload['error'])
 
     def test_http_health_uses_local_paths(self):
         with patch.object(paths,'check_health',return_value={'total':1,'accessible':0,'missing':1,'items':[]}) as health:
