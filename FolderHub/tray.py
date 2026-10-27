@@ -49,8 +49,15 @@ def safe_menu_title(value, limit=46):
     """Never treat saved resource names as Win32 menu mnemonics or new lines."""
     text = "".join(char if char.isprintable() and char not in "\r\n" else " "
                    for char in str(value or ""))
-    text = " ".join(text.split()).replace("&", "&&")
-    return text[:limit] + ("…" if len(text) > limit else "")
+    text = " ".join(text.split())
+    safe, consumed = [], 0
+    for char in text:
+        token = "&&" if char == "&" else char
+        if sum(len(bit) for bit in safe) + len(token) > limit:
+            break
+        safe.append(token)
+        consumed += 1
+    return "".join(safe) + ("…" if consumed < len(text) else "")
 
 
 def build_quick_entries(nodes, recent, workspaces):
