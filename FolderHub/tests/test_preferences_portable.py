@@ -121,7 +121,7 @@ class PortablePreferencesTests(unittest.TestCase):
             {'folderGroups':[{'name':'A','members':[1,1]}]},
             {'folderGroups':[{'name':'A','members':[1,'2']}]},
             {'folderGroups':[{'name':' A ','members':[1,2]}]},
-            {'folderGroups':[{'name':'A\\n','members':[1,2]}]},
+            {'folderGroups':[{'name':'A\nB','members':[1,2]}]},
             {'folderGroups':[{'name':'A','members':list(range(1,10))}]},
             {'folderGroups':[{'name':'A','members':[1,2]},
                              {'name':'a','members':[3,4]}]},
