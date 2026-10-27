@@ -51,7 +51,7 @@ class AdminUiContractTests(unittest.TestCase):
         # The confirmation and HTTP body must use the same frozen array,
         # not a fresh lookup after the user has accepted the dialog.
         start = self.js.index("async function launchActiveWorkspace()")
-        end = self.js.index("\\nfunction movedWorkspaceLinkItems(", start)
+        end = self.js.index("function movedWorkspaceLinkItems(", start)
         body = self.js[start:end]
         self.assertIn("const expectedItems=ids.map(id=>{", body)
         self.assertIn("title:node?.title??null", body)
