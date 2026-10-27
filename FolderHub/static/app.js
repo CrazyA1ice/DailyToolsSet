@@ -240,7 +240,14 @@ function card(n,reorderable=false,keyboardActive=false){
   const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
   const usage=state.view==="recent" && !state.search ? state.recent.find(item=>item.node_id===n.id) : null;
   const lastUsed=usage?new Date(usage.last_opened_at):null;
-  const recentCaption=usage?`<div class="entry-lineage">${usage.pinned?"📌 已置顶 · ":""}最近打开：${h(lastUsed && !Number.isNaN(lastUsed.getTime()) ? lastUsed.toLocaleString("zh-CN") : "未知时间")} · 累计 ${Number(usage.open_count)||0} 次</div>`:"";
+  const recentText=usage?`${usage.pinned?"📌 已置顶 · ":""}最近打开：${lastUsed && !Number.isNaN(lastUsed.getTime()) ? lastUsed.toLocaleString("zh-CN") : "未知时间"} · 累计 ${Number(usage.open_count)||0} 次`:"";
+  const contextText=state.search?`所属：${lineage}`:recentText;
+  // List metadata belongs in the primary information column, not the grid's
+  // auxiliary sibling row (which was deliberately hidden in list mode).
+  const listContext=state.layout==="list" && contextText?
+    `<span class="list-card-context" title="${h(contextText)}">${h(contextText)}</span>`:"";
+  const recentCaption=state.layout!=="list" && recentText?
+    `<div class="entry-lineage">${h(recentText)}</div>`:"";
   const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
   return `<article class="entry-card ${leaf?"is-leaf":"is-container"} ${state.openingIds.has(n.id)?"is-opening":""} ${state.selectedIds.has(n.id)?"is-selected":""} ${keyboardActive?"keyboard-active":""}" id="folderhub-entry-${n.id}" data-id="${n.id}" tabindex="0" aria-label="${h(n.title)}，右键打开快捷菜单">
     <div class="card-cover tone-${n.id%6} ${n.has_image?'with-image':'with-icon'}" aria-hidden="true">
@@ -260,12 +267,14 @@ function card(n,reorderable=false,keyboardActive=false){
     </div>
     <button type="button" class="card-primary" data-action="primary" data-id="${n.id}" title="${primaryTitle}">
       <strong>${h(n.title)}</strong><span class="type-chip ${n.node_type}">${TYPE_LABEL[n.node_type]||'模块'}</span>
-      <span class="path" title="${h(n.folder_path||lineage)}">${h(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`))}</span></button>
-    ${state.search?`<div class="entry-lineage" title="${h(lineage)}">⌁ ${h(lineage)}</div>`:''}
+      <span class="path" title="${h(n.folder_path||lineage)}">${h(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`))}</span>
+      ${listContext}</button>
+    ${state.search && state.layout!=="list"?`<div class="entry-lineage" title="${h(lineage)}">⌁ ${h(lineage)}</div>`:''}
     ${recentCaption}
     <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?'● 文件夹入口':`${childCount} 个子模块`}</span>
       <div class="card-links">${!leaf?`<button data-action="enter" data-id="${n.id}">进入 ›</button>`:''}
         ${linked?`<button data-action="open" data-id="${n.id}">打开 ↗</button>`:''}
+        ${linked && state.layout==="list"?`<button type="button" data-action="copy-path" data-id="${n.id}" title="复制关联的文件夹路径">复制路径</button>`:''}
         ${!leaf?`<button data-action="child" data-id="${n.id}">＋ 子模块</button>`:''}
       </div></div>
   </article>`;
@@ -572,6 +581,7 @@ async function act(action,id){
     case "select":toggleSelected(id);break;
     case "menu":{const card=[...document.querySelectorAll("#entries .entry-card")].find(x=>Number(x.dataset.id)===id);const bounds=card?.getBoundingClientRect();if(bounds)openCardMenu(id,bounds.right-235,bounds.top+42);break}
     case "open":await openFolder(id);break;
+    case "copy-path":await copyFolderPath(id);break;
     case "enter":setView("node",id);break;
     case "child":if(byId(id)?.node_type!=="leaf")editDialog(null,id);else toast("叶子模块不能拥有子模块",true);break;
     case "edit":editDialog(id);break;
@@ -658,13 +668,35 @@ function openCardMenu(id,x,y){
   menu.style.top=Math.max(8,Math.min(y,window.innerHeight-bounds.height-8))+"px";
   menu.querySelector("button")?.focus();
 }
+async function copyFolderPath(id){
+  const folder=byId(id)?.folder_path;
+  if(!folder){toast("该模块未关联文件夹",true);return}
+  let copied=false;
+  try{
+    if(navigator.clipboard?.writeText){
+      await navigator.clipboard.writeText(folder);
+      copied=true;
+    }
+  }catch(_){/* Clipboard permissions vary between browsers. */}
+  if(!copied){
+    // Fallback works with older local browsers that do not expose Clipboard API.
+    const input=document.createElement("textarea");
+    input.value=folder;
+    input.setAttribute("readonly","");
+    input.style.position="fixed";
+    input.style.opacity="0";
+    input.style.pointerEvents="none";
+    document.body.appendChild(input);
+    try{input.focus();input.select();copied=Boolean(document.execCommand("copy"))}
+    catch(_){copied=false}
+    finally{input.remove()}
+  }
+  toast(copied?"文件夹路径已复制":"复制失败，可在“编辑模块”中手动复制路径",!copied);
+}
 async function contextAction(action,id){
   const n=byId(id);closeCardMenu();if(!n)return;
-  if(action==="copy-path"){
-    if(!n.folder_path)return;
-    try{await navigator.clipboard.writeText(n.folder_path);toast("文件夹路径已复制")}
-    catch(_){toast("复制失败，请使用模块编辑界面复制路径",true)}
-  }else await act(action,id);
+  if(action==="copy-path")await copyFolderPath(id);
+  else await act(action,id);
 }
 async function exportBackup(){
   try {

@@ -678,3 +678,63 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
     justify-self:start;
   }
 }
+
+/* V2.7 — Show search breadcrumb/recent history inside the list information column. */
+.entries.list .card-primary .list-card-context {
+  display:block;
+  width:100%;
+  max-width:100%;
+  min-width:0;
+  margin-top:2px;
+  color:var(--muted);
+  font-size:.78rem;
+  font-weight:500;
+  line-height:1.5;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.entries:not(.list) .list-card-context{display:none}
+.entries.list .entry-card .card-links button[data-action="copy-path"]{
+  color:var(--muted);
+  font-weight:550;
+}
+.entries.list .entry-card .card-links button[data-action="copy-path"]:hover,
+.entries.list .entry-card .card-links button[data-action="copy-path"]:focus-visible{
+  color:var(--accent);
+  background:var(--accent-faint);
+}
+/* At medium/narrow widths the two action groups must occupy separate rows.
+   The old <=1080px rule put both in the same grid cell and caused overlap. */
+@media(max-width:1200px){
+  .entries.list .entry-card,
+  html[data-density="compact"] .entries.list .entry-card {
+    grid-template-columns:var(--list-icon-size) minmax(0,1fr);
+    grid-template-rows:auto auto auto;
+    row-gap:8px;
+    column-gap:16px;
+  }
+  .entries.list .entry-card .card-actions {
+    grid-column:2;
+    grid-row:2;
+    justify-self:start;
+    align-self:center;
+    flex-wrap:wrap;
+  }
+  .entries.list .entry-card .card-bottom {
+    grid-column:2;
+    grid-row:3;
+    justify-self:start;
+    align-self:center;
+  }
+  .entries.list .entry-card .card-links {
+    flex-wrap:wrap;
+  }
+}
+@media(max-width:640px){
+  .entries.list .entry-card,
+  html[data-density="compact"] .entries.list .entry-card {
+    column-gap:12px;
+    padding-inline:16px;
+  }
+}

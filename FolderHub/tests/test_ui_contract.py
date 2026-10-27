@@ -154,6 +154,22 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertGreater(self.css.index('/* V2.6 - List view layout.'),
                            self.css.index('margin-left:-15px;margin-right:-15px'))
 
+    def test_list_metadata_copy_path_and_no_action_overlap(self):
+        # Search lineage and visit counts should survive in list view.
+        self.assertIn('const contextText=state.search?',self.js)
+        self.assertIn('const listContext=state.layout==="list" && contextText?',self.js)
+        self.assertIn('${listContext}</button>',self.js)
+        self.assertIn('state.layout!=="list" && recentText',self.js)
+        self.assertIn('data-action="copy-path"',self.js)
+        self.assertIn('async function copyFolderPath(id)',self.js)
+        self.assertIn('case "copy-path":await copyFolderPath(id);break;',self.js)
+        self.assertIn('.entries.list .card-primary .list-card-context',self.css)
+        self.assertIn('@media(max-width:1200px)',self.css)
+        responsive=self.css.split('/* V2.7 — Show search breadcrumb/recent history',1)[1]
+        self.assertIn('grid-row:2;',responsive)
+        self.assertIn('grid-row:3;',responsive)
+        self.assertIn('flex-wrap:wrap;',responsive)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)
