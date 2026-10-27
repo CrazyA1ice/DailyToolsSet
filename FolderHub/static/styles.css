@@ -858,3 +858,34 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
 .tag-filters .tag-manage:hover,.tag-filters .tag-manage:focus-visible{
   border-style:solid;background:color-mix(in srgb,var(--accent) 15%,var(--surface));
 }
+
+/* V3.4 — multi-tag boolean filter toolbar. */
+.tag-filter-toolbar{
+  display:flex;flex-wrap:wrap;align-items:center;gap:7px;width:100%;
+  padding:10px 12px;background:var(--surface-soft);border:1px solid var(--line);
+  border-radius:11px;
+}
+.tag-filter-options{display:flex;flex-wrap:wrap;gap:8px;width:100%}
+.tag-filter-label{font-size:.8rem;font-weight:650;color:var(--muted)}
+.tag-filter-separator{height:25px;width:1px;background:var(--line-strong);margin:0 5px}
+.tag-filter-toolbar .tag-mode{
+  border:1px solid var(--line-strong);border-radius:7px;
+  padding:6px 10px;color:var(--text);background:var(--surface);
+  font:inherit;font-size:.81rem;cursor:pointer;
+}
+.tag-filter-toolbar .tag-mode:hover,.tag-filter-toolbar .tag-mode:focus-visible{
+  color:var(--accent);border-color:var(--accent)
+}
+.tag-filter-toolbar .tag-mode.active{
+  color:var(--accent);background:var(--accent-faint);
+  border-color:var(--accent);font-weight:750;
+}
+.tag-filter-toolbar .tag-mode:disabled{opacity:.45;cursor:not-allowed}
+.tag-filter-toolbar .tag-reset{margin-left:auto}
+.tag-filter-summary{width:100%;margin:0;color:var(--muted);font-size:.83rem}
+.tag-filters .tag-choice.excluded{
+  border-color:var(--danger, #bd5660);color:var(--danger, #bd5660);
+  background:color-mix(in srgb,var(--danger, #bd5660) 7%,var(--surface));
+  font-weight:700;
+}
+@media(max-width:650px){.tag-filter-toolbar .tag-reset{margin-left:0}.tag-filter-separator{display:none}}

@@ -62,7 +62,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {openingIds:new Set(),nodes:[],trash:[],recent:[], activeTag:null, renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+const state = {openingIds:new Set(),nodes:[],trash:[],recent:[], activeTag:null, tagSelection:[], tagExcluded:[], tagMatchMode:"any", tagPickMode:"include", renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
 
 /* V3.0 — Native browser history for modules and special views.
    Search text is stored in the current tab's history.state, never in the URL. */
@@ -87,6 +87,10 @@ function navigationSnapshot(){
   return {folderhubRoute:1,view:state.view,
     id:state.view==="node"?state.selected:null,
     tag:state.view==="tags"?state.activeTag:null,
+    tagSelection:state.view==="tags"?[...state.tagSelection]:[],
+    tagExcluded:state.view==="tags"?[...state.tagExcluded]:[],
+    tagMatchMode:state.tagMatchMode,
+    tagPickMode:state.tagPickMode,
     search:state.search,renderLimit:state.renderLimit,
     scrollY:Math.max(0,Math.round(window.scrollY||0))};
 }
@@ -291,7 +295,16 @@ function setView(view,id=null,{fromHistory=false,saved=null}={}){
   closeCardMenu();exitSelectMode();
   if(view==="node"&&!byId(id)){view="all";id=null}
   state.view=view;state.selected=view==="node"?id:null;
-  state.activeTag=view==="tags"?(fromHistory&&saved?.tag||null):null;
+  const available=new Set(state.nodes.flatMap(n=>n.tags||[]));
+  const previousIncludes=Array.isArray(saved?.tagSelection)?saved.tagSelection:
+    (saved?.tag?[saved.tag]:[]);
+  state.tagSelection=view==="tags"&&fromHistory?
+    [...new Set(previousIncludes.filter(t=>typeof t==="string"&&available.has(t)))].slice(0,30):[];
+  state.tagExcluded=view==="tags"&&fromHistory&&Array.isArray(saved?.tagExcluded)?
+    [...new Set(saved.tagExcluded.filter(t=>typeof t==="string"&&available.has(t)&&!state.tagSelection.includes(t)))].slice(0,30):[];
+  state.tagMatchMode=fromHistory&&saved?.tagMatchMode==="all"?"all":"any";
+  state.tagPickMode=fromHistory&&saved?.tagPickMode==="exclude"?"exclude":"include";
+  state.activeTag=view==="tags"&&state.tagSelection.length===1?state.tagSelection[0]:null;
   state.search=fromHistory&&typeof saved?.search==="string"?saved.search.slice(0,300):"";
   state.searchKeyboardIndex=-1;
   state.renderLimit=fromHistory&&Number.isSafeInteger(saved?.renderLimit)?
@@ -374,10 +387,40 @@ function renderCrumb(){
   }
   $("#breadcrumb").innerHTML=bits.join("");
 }
+function filterTaggedNodes(nodes,includes,excludes,mode="any"){
+  const need=new Set(includes),blocked=new Set(excludes);
+  return nodes.filter(node=>{
+    const tags=Array.isArray(node.tags)?node.tags:[];
+    if(!tags.length)return false;
+    if(tags.some(tag=>blocked.has(tag)))return false;
+    if(!need.size)return true;
+    return mode==="all"?[...need].every(tag=>tags.includes(tag)):
+      tags.some(tag=>need.has(tag));
+  });
+}
 function chooseTag(tag){
   if(tag&&!state.nodes.some(node=>(node.tags||[]).includes(tag)))return;
   if(state.view!=="tags")setView("tags");
-  state.activeTag=tag||null;state.renderLimit=100;state.searchKeyboardIndex=-1;
+  if(!tag){state.tagSelection=[];state.tagExcluded=[]}
+  else{
+    const include=state.tagPickMode==="include";
+    const selected=include?state.tagSelection:state.tagExcluded;
+    const opposite=include?state.tagExcluded:state.tagSelection;
+    if(selected.includes(tag))selected.splice(selected.indexOf(tag),1);
+    else{
+      selected.push(tag);
+      if(opposite.includes(tag))opposite.splice(opposite.indexOf(tag),1);
+    }
+  }
+  state.activeTag=state.tagSelection.length===1?state.tagSelection[0]:null;
+  state.renderLimit=100;state.searchKeyboardIndex=-1;
+  render(true);rememberNavigation();
+}
+function updateTagFilterMode(mode,value){
+  if(state.view!=="tags" || state.search.trim())return;
+  if(mode==="match" && ["any","all"].includes(value))state.tagMatchMode=value;
+  if(mode==="pick" && ["include","exclude"].includes(value))state.tagPickMode=value;
+  state.renderLimit=100;state.searchKeyboardIndex=-1;
   render(true);rememberNavigation();
 }
 function renderTagFilters(){
@@ -387,14 +430,39 @@ function renderTagFilters(){
   for(const n of state.nodes)for(const tag of n.tags||[])counts.set(tag,(counts.get(tag)||0)+1);
   const ordered=[...counts].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],"zh-CN"));
   const subset=ordered.slice(0,80);
-  if(state.activeTag&&!subset.some(([tag])=>tag===state.activeTag)){
-    const current=ordered.find(([tag])=>tag===state.activeTag);if(current)subset.push(current);
+  const selectedTags=[...state.tagSelection,...state.tagExcluded];
+  for(const tag of selectedTags){
+    if(subset.some(([name])=>name===tag))continue;
+    const row=ordered.find(([name])=>name===tag);
+    if(row)subset.push(row);
   }
-  box.innerHTML=`<button type="button" class="tag-choice ${state.activeTag?"":"active"}" data-tag-filter="" aria-pressed="${!state.activeTag}">全部标签</button>`+
-    subset.map(([tag,n])=>`<button type="button" class="tag-choice ${state.activeTag===tag?"active":""}" data-tag-filter="${h(tag)}" aria-pressed="${state.activeTag===tag}">⌗ ${h(tag)} <span>${n}</span></button>`).join("");
-  if(state.activeTag)
+  const include=state.tagSelection,exclude=state.tagExcluded;
+  const mode=state.tagMatchMode, pick=state.tagPickMode;
+  const summary=include.length||exclude.length?
+    `已包含 ${include.length} 项 · 已排除 ${exclude.length} 项`:
+    "当前显示全部已标记模块";
+  box.innerHTML=`<div class="tag-filter-toolbar" role="group" aria-label="标签组合筛选模式">
+    <span class="tag-filter-label">匹配</span>
+    <button type="button" class="tag-mode ${mode==="any"?"active":""}" data-tag-match="any" aria-pressed="${mode==="any"}">任一（OR）</button>
+    <button type="button" class="tag-mode ${mode==="all"?"active":""}" data-tag-match="all" aria-pressed="${mode==="all"}">全部（AND）</button>
+    <span class="tag-filter-separator" aria-hidden="true"></span>
+    <span class="tag-filter-label">选择标签</span>
+    <button type="button" class="tag-mode ${pick==="include"?"active":""}" data-tag-pick="include" aria-pressed="${pick==="include"}">＋ 包含</button>
+    <button type="button" class="tag-mode ${pick==="exclude"?"active":""}" data-tag-pick="exclude" aria-pressed="${pick==="exclude"}">− 排除（NOT）</button>
+    <button type="button" class="tag-mode tag-reset" data-tag-clear="1" ${!include.length&&!exclude.length?"disabled":""}>清空条件</button>
+  </div>
+  <p class="tag-filter-summary" role="status">${h(summary)} · 点击下方标签可切换当前选择状态。</p>
+  <div class="tag-filter-options" role="group" aria-label="标签列表">
+    <button type="button" class="tag-choice ${!include.length&&!exclude.length?"active":""}" data-tag-filter="" aria-pressed="${!include.length&&!exclude.length}">全部标签</button>
+    ${subset.map(([tag,n])=>{
+      const yes=include.includes(tag),no=exclude.includes(tag);
+      return `<button type="button" class="tag-choice ${yes?"included active":no?"excluded":""}" data-tag-filter="${h(tag)}" aria-pressed="${yes||no}" title="${yes?"已包含":no?"已排除":"点击以"+(pick==="include"?"包含":"排除")}：${h(tag)}">${no?"−":yes?"✓":"⌗"} ${h(tag)} <span>${n}</span></button>`;
+    }).join("")}
+  </div>`;
+  if(state.tagSelection.length===1 && !state.tagExcluded.length)
     box.insertAdjacentHTML("beforeend",'<button type="button" class="tag-choice tag-manage" data-tag-rename="1" title="重命名或合并所选标签">✎ 重命名/合并</button>');
-  if(ordered.length>subset.length)box.insertAdjacentHTML("beforeend",'<span class="tag-overflow">其余标签可通过搜索查找</span>');
+  if(ordered.length>80)
+    box.insertAdjacentHTML("beforeend",'<span class="tag-overflow">仅显示使用较多的 80 个标签，其他标签可通过全局搜索查找</span>');
 }
 function card(n,reorderable=false,keyboardActive=false){
   const childCount=children(n.id).length;
@@ -505,8 +573,8 @@ function render(skipNav=false){
     sectionTitle="最近打开的文件夹";
   }
   else if(state.view==="tags"){
-    display=sorted(state.nodes.filter(node=>(node.tags||[]).length&&(!state.activeTag||node.tags.includes(state.activeTag))));
-    sectionTitle=state.activeTag?`标签：${state.activeTag}`:"全部已标记模块";
+    display=sorted(filterTaggedNodes(state.nodes,state.tagSelection,state.tagExcluded,state.tagMatchMode));
+    sectionTitle=state.tagSelection.length||state.tagExcluded.length?"组合标签筛选":"全部已标记模块";
   }
   else if(state.view==="node"){
     const node=byId(state.selected);
@@ -516,7 +584,7 @@ function render(skipNav=false){
   $("#sectionHeading").hidden=state.view==="all"&&!searching;
   $("#sectionTitle").textContent=sectionTitle;
   $("#sectionMeta").textContent=state.view==="tags"&&!searching?
-    `跨目录显示 ${display.length} 个模块 · 可在模块编辑中添加标签`:
+    `跨目录匹配 ${display.length} 个模块 · 包含 ${state.tagSelection.length} 个，排除 ${state.tagExcluded.length} 个标签（${state.tagMatchMode==="all"?"AND":"OR"}）` :
     state.view==="recent"&&!searching?
     "置顶项目优先显示，其余按最近打开时间排列 · 只记录通过 FolderHub 打开的文件夹":
     `共 ${display.length} 个项目 · ${searching?'搜索覆盖整个目录树，结果显示完整所属层级':'叶子模块直接打开文件资源管理器'}`;
@@ -866,7 +934,11 @@ async function renameCurrentTag(){
   if(!confirm(`将「${old}」重命名/合并为「${target}」？\n\n所有模块和回收站的同名标签都会更新，不会更改真实文件夹。`))return;
   try{
     const result=await mutate("POST","/api/tags/rename",{source:old,target});
-    state.activeTag=target;
+    state.tagSelection=state.tagSelection.map(tag=>tag===old?target:tag);
+    state.tagSelection=[...new Set(state.tagSelection)];
+    state.tagExcluded=state.tagExcluded.map(tag=>tag===old?target:tag);
+    state.tagExcluded=[...new Set(state.tagExcluded)];
+    state.activeTag=state.tagSelection.length===1?state.tagSelection[0]:null;
     await refresh();rememberNavigation();
     toast(`已更新 ${result.changed} 条标签记录`);
   }catch(e){toast("重命名失败："+e.message,true)}
@@ -1286,7 +1358,13 @@ function bind(){
   $("#specialNav").addEventListener("click",e=>{const item=e.target.closest("[data-view]");if(item)setView(item.dataset.view)});
   $("#tagFilters").addEventListener("click",e=>{
     if(e.target.closest("[data-tag-rename]")){renameCurrentTag();return}
-    const btn=e.target.closest("[data-tag-filter]");if(btn)chooseTag(btn.dataset.tagFilter||null);
+    const mode=e.target.closest("[data-tag-match]");
+    if(mode){updateTagFilterMode("match",mode.dataset.tagMatch);return}
+    const pick=e.target.closest("[data-tag-pick]");
+    if(pick){updateTagFilterMode("pick",pick.dataset.tagPick);return}
+    if(e.target.closest("[data-tag-clear]")){chooseTag(null);return}
+    const btn=e.target.closest("[data-tag-filter]");
+    if(btn)chooseTag(btn.dataset.tagFilter||null);
   });
   $("#treeNav").addEventListener("click",e=>{
     const toggle=e.target.closest("[data-toggle]");

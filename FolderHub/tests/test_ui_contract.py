@@ -272,6 +272,20 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('bulkTagAdd","bulkTagRemove"',self.js)
         self.assertIn('.tag-filters .tag-manage',self.css)
 
+    def test_boolean_tag_combinations_and_history(self):
+        self.assertIn('function filterTaggedNodes(nodes,includes,excludes,mode="any")',self.js)
+        self.assertIn('function updateTagFilterMode(mode,value)',self.js)
+        self.assertIn('data-tag-match="any"',self.js)
+        self.assertIn('data-tag-match="all"',self.js)
+        self.assertIn('data-tag-pick="exclude"',self.js)
+        self.assertIn('data-tag-clear="1"',self.js)
+        self.assertIn('tagSelection:state.view==="tags"?[...state.tagSelection]:[]',self.js)
+        self.assertIn('tagExcluded:state.view==="tags"?[...state.tagExcluded]:[]',self.js)
+        self.assertIn('tagMatchMode:state.tagMatchMode',self.js)
+        self.assertIn('filterTaggedNodes(state.nodes,state.tagSelection,state.tagExcluded,state.tagMatchMode)',self.js)
+        self.assertIn('.tag-filter-toolbar',self.css)
+        self.assertIn('.tag-choice.excluded',self.css)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)
