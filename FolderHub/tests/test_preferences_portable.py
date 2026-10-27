@@ -21,7 +21,7 @@ class PortablePreferencesTests(unittest.TestCase):
         self.store=app.Store(self.root/'data'/'folderhub.db',self.root/'uploads')
         self.prefs=self.store.preferences
 
-    def test_quick_capture_creates_favorite_leaf_in_single_root(self):
+    def test_quick_capture_creates_navigation_leaf_in_single_root(self):
         folder=self.root/'Research'
         folder.mkdir()
         first=self.store.capture_folder(str(folder))
@@ -30,18 +30,18 @@ class PortablePreferencesTests(unittest.TestCase):
         self.assertFalse(second['created'])
         self.assertEqual(first['id'],second['id'])
         records=self.store.all()
-        roots=[node for node in records if node['title']=='快速收藏'
+        roots=[node for node in records if node['title']=='快速收录'
                and node['node_type']=='root']
         self.assertEqual(len(roots),1)
         leaves=[node for node in records if node['id']==first['id']]
         self.assertEqual(len(leaves),1)
         self.assertEqual(leaves[0]['parent_id'],roots[0]['id'])
         self.assertEqual(leaves[0]['node_type'],'leaf')
-        self.assertTrue(leaves[0]['favorite'])
+        self.assertFalse(leaves[0]['favorite'])
         self.assertEqual(leaves[0]['folder_path'],str(folder))
         self.assertEqual(len(records),2)
 
-    def test_quick_capture_reuses_existing_folder_and_sets_favorite(self):
+    def test_quick_capture_reuses_existing_folder_without_changing_metadata(self):
         folder=self.root/'Existing'
         folder.mkdir()
         root_id=self.store.create({'title':'Projects','node_type':'root'})
@@ -49,9 +49,9 @@ class PortablePreferencesTests(unittest.TestCase):
                                     'node_type':'leaf','parent_id':root_id,
                                     'folder_path':str(folder),'favorite':False})
         captured=self.store.capture_folder(str(folder))
-        self.assertEqual(captured,{'id':existing,'created':False,'favorite':True})
+        self.assertEqual(captured,{'id':existing,'created':False})
         self.assertEqual(len(self.store.all()),2)
-        self.assertTrue(next(node for node in self.store.all()
+        self.assertFalse(next(node for node in self.store.all()
                              if node['id']==existing)['favorite'])
 
     def test_quick_capture_rejects_nonexistent_paths_atomically(self):
