@@ -102,7 +102,7 @@ class PortablePreferencesTests(unittest.TestCase):
 
     def test_workspaces_persist_in_zip_and_reject_invalid_input_atomically(self):
         valid = [
-            {'name': '论文项目', 'description': '网络流量预测\\n实验与图表',
+            {'name': '论文项目', 'description': '网络流量预测' + chr(10) + '实验与图表',
              'members': [3, 9, 12]},
             {'name': '开发', 'description': '', 'members': [5]},
         ]
