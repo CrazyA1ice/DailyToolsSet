@@ -83,4 +83,10 @@ finally {
 
 Write-Host ("Test log: " + $Log)
 Select-String -CaseSensitive -Path $Log -Pattern "Ran \d+ tests", "^OK$", "^FAILED", "^ERROR:", "^FAIL:" | ForEach-Object { $_.Line }
+if ($ExitCode -ne 0) {
+    # A failure headline is not enough to diagnose a Python test error.
+    # Print the traceback tail; the complete log remains under FolderHub.
+    Write-Host "Test failure details (last 180 lines):"
+    Get-Content -LiteralPath $Log -Encoding UTF8 -Tail 180 | ForEach-Object { Write-Host $_ }
+}
 exit $ExitCode

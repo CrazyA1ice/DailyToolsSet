@@ -36,7 +36,10 @@ class AdminUiContractTests(unittest.TestCase):
                      "workspaceLaunchTitle","workspaceLaunchRows","workspaceLaunchSummary",
                      "workspaceLaunchDone","workspaceLaunchClose"):
             self.assertIn('id="'+ctrl+'"',self.html)
-            self.assertIn(ctrl,self.js)
+            # A static HTML heading has no reason to appear in JavaScript.
+            # Only behavior-driven elements must be referenced by app.js.
+            if ctrl!="workspaceLaunchTitle":
+                self.assertIn(ctrl,self.js)
         self.assertIn('function renderWorkspaceLaunchChoices()',self.js)
         self.assertIn('const current={name,description,members:ids,status,links,launch_ids};',self.js)
         self.assertIn('data-action="launch-workspace"',self.js)

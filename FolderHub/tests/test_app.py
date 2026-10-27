@@ -38,7 +38,9 @@ class StoreTests(unittest.TestCase):
 
     def test_v51_upgrade_legacy_v4_sqlite_preserves_nodes_and_recycle(self):
         legacy=Path(self.tmp.name)/"legacy-v4.db"
-        with sqlite3.connect(legacy) as db:
+        # sqlite3.Connection.__exit__ commits but does NOT close. Keep the
+        # synthetic legacy file unlocked on Windows, including failed tests.
+        with closing(sqlite3.connect(legacy)) as db, db:
             db.executescript("""
                 CREATE TABLE nodes(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -498,7 +500,9 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(response["succeeded"],2)
             self.assertEqual(opener.call_count,2)
 
-            reordered = {**workspace,"launch_ids":[web,doc]}
+            # The preferences schema requires launch_ids to follow member
+            # order. Reorder both to test a *valid* concurrent-tab change.
+            reordered = {**workspace,"members":[web,doc],"launch_ids":[web,doc]}
             self.srv.store.preferences.save({"workspaces":[reordered]})
             opener.reset_mock()
             status, response = self.request("POST",endpoint,
