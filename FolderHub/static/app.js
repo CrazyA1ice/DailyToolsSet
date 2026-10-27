@@ -462,6 +462,13 @@ function renderWorkspaces(){
     </div>`;
   }).join("");
 }
+function workspaceOverviewCounts(item){
+  const members=item.members.map(id=>byId(id));
+  return {total:members.length,
+    available:members.filter(Boolean).length,
+    folders:members.filter(node=>Boolean(node?.folder_path)).length,
+    missing:members.filter(node=>!node).length};
+}
 function renderWorkspaceResources(){
   const box=$("#workspaceResources");
   const active=state.view==="workspace"&&!state.search.trim();
@@ -470,9 +477,20 @@ function renderWorkspaceResources(){
   if(!item){box.replaceChildren();return}
   const status=WORKSPACE_STATUS_NAMES[item.status]||WORKSPACE_STATUS_NAMES.planning;
   const links=(item.links||[]).filter(link=>validWorkspaceUrl(link.url));
+  const info=workspaceOverviewCounts(item);
+  const switcher='<div class="workspace-quick-switch"><label for="workspaceSwitcher">快速切换工作区</label>'
+    +'<select id="workspaceSwitcher" data-workspace-switch aria-label="快速切换工作区">'
+    +state.workspaces.map(w=>'<option value="'+h(w.name)+'" '+(w.name===item.name?'selected':'')+'>'+h(w.name)+'</option>').join("")
+    +'</select></div>';
+  const metrics='<div class="workspace-overview-metrics" aria-label="项目概览">'
+    +'<span><strong>'+info.available+'</strong> / '+info.total+' 有效模块</span>'
+    +'<span><strong>'+info.folders+'</strong> 个绑定目录</span>'
+    +(info.missing?'<span class="workspace-missing-count"><strong>'+info.missing+'</strong> 项已失效</span>':"")
+    +'</div>';
   box.innerHTML='<div class="workspace-resource-heading"><strong>项目概况</strong>'
     +'<span class="workspace-status-badge" data-workspace-status="'+h(item.status||"planning")+'">'+h(status)+'</span>'
     +'<span class="workspace-resource-empty">'+links.length+' 条资源链接</span></div>'
+    +switcher+metrics
     +(links.length?'<nav class="workspace-resource-links" aria-label="项目资源">'
     +links.map(link=>'<a href="'+h(validWorkspaceUrl(link.url))+'" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" title="'+h(link.url)+'">↗ '+h(link.name)+'</a>').join("")
     +'</nav>':'<span class="workspace-resource-empty">尚未添加资源链接，可点击「编辑工作区」保存论文、仓库、文档等网页入口。</span>');
@@ -1165,13 +1183,32 @@ function renderWorkspaceMembers(){
     +(remaining.length>page.length?'<p class="settings-note">仅显示前 120 个匹配模块，请继续输入关键词缩小范围。</p>':"");
   $("#workspaceMemberSummary").textContent="已选择 "+selected.length+"/30 个模块；可添加候选 "+remaining.length+" 个。";
 }
+function movedWorkspaceLinkItems(links,index,direction){
+  const next=links.map(link=>({...link})),target=index+direction;
+  if(!Number.isInteger(index)||![-1,1].includes(direction)||
+     index<0||index>=next.length||target<0||target>=next.length)return next;
+  [next[index],next[target]]=[next[target],next[index]];
+  return next;
+}
+function moveWorkspaceDraftLink(index,direction){
+  const next=movedWorkspaceLinkItems(workspaceDraftLinks,index,direction);
+  if(index<0||index>=workspaceDraftLinks.length||index+direction<0||
+     index+direction>=workspaceDraftLinks.length||![-1,1].includes(direction))return;
+  workspaceDraftLinks=next;
+  renderWorkspaceLinkEditor();
+  $("#workspaceLinkList").querySelector('[data-workspace-link-move="'+(index+direction)+'"][data-workspace-step="'+direction+'"]')?.focus();
+}
 function renderWorkspaceLinkEditor(){
   $("#workspaceLinkAdd").disabled=workspaceDraftLinks.length>=8;
   $("#workspaceLinkList").innerHTML=workspaceDraftLinks.map((link,index)=>
     '<div class="workspace-link-row">'
     +'<input type="text" maxlength="60" data-workspace-link-name="'+index+'" aria-label="资源名称 '+(index+1)+'" placeholder="例如：GitHub项目" value="'+h(link.name)+'">'
     +'<input type="url" maxlength="2048" data-workspace-link-url="'+index+'" aria-label="资源链接 '+(index+1)+'" placeholder="https://example.com/" value="'+h(link.url)+'">'
-    +'<button type="button" data-workspace-link-remove="'+index+'" aria-label="删除第 '+(index+1)+' 条资源">移除</button></div>').join("");
+    +'<div class="workspace-link-order">'
+    +'<button type="button" data-workspace-link-move="'+index+'" data-workspace-step="-1" aria-label="资源 '+(index+1)+' 上移" '+(index===0?'disabled':'')+'>↑</button>'
+    +'<button type="button" data-workspace-link-move="'+index+'" data-workspace-step="1" aria-label="资源 '+(index+1)+' 下移" '+(index===workspaceDraftLinks.length-1?'disabled':'')+'>↓</button>'
+    +'<button type="button" data-workspace-link-remove="'+index+'" aria-label="删除第 '+(index+1)+' 条资源">移除</button>'
+    +'</div></div>').join("");
 }
 function validateWorkspaceDraftLinks(){
   if(workspaceDraftLinks.length>8)throw new Error("最多添加8条网页资源");
@@ -2042,6 +2079,13 @@ function bind(){
   $("#bulkSaveGroup").addEventListener("click",saveSelectedFolderGroup);
   $("#bulkSaveWorkspace").addEventListener("click",()=>openWorkspaceDialog(-1,[...state.selectedIds]));
   $("#workspaceNew").addEventListener("click",()=>openWorkspaceDialog());
+  $("#workspaceResources").addEventListener("change",event=>{
+    const select=event.target.closest("[data-workspace-switch]");
+    if(!select)return;
+    const destination=select.value;
+    if(state.workspaces.some(item=>item.name===destination)&&destination!==state.activeWorkspace)
+      setView("workspace",destination);
+  });
   $("#workspaceNav").addEventListener("click",e=>{
     const open=e.target.closest("[data-workspace-open]");
     if(open){const item=state.workspaces[Number(open.dataset.workspaceOpen)];if(item)setView("workspace",item.name);return}
@@ -2069,6 +2113,12 @@ function bind(){
     }
   });
   $("#workspaceLinkList").addEventListener("click",e=>{
+    const move=e.target.closest("[data-workspace-link-move]");
+    if(move){
+      const index=Number(move.dataset.workspaceLinkMove),direction=Number(move.dataset.workspaceStep);
+      if(Number.isInteger(index))moveWorkspaceDraftLink(index,direction);
+      return;
+    }
     const button=e.target.closest("[data-workspace-link-remove]");
     if(!button)return;
     const index=Number(button.dataset.workspaceLinkRemove);
