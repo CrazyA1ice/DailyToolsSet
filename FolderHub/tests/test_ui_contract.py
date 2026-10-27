@@ -76,6 +76,26 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('editDialog(null,parent.id)',self.js)
         self.assertIn('.everything-result',self.css)
 
+    def test_v55_everything_search_discards_stale_results_and_resets_dialog(self):
+        start=self.js.index('let everythingItems=[];')
+        end=self.js.index('function chooseEverythingResult(index)',start)
+        body=self.js[start:end]
+        self.assertIn('let everythingRequestVersion=0;',body)
+        self.assertIn('let everythingController=null;',body)
+        self.assertIn('function resetEverythingSearch(message=everythingDefaultStatus)',body)
+        self.assertIn('everythingController.abort();',body)
+        self.assertIn('everythingItems=[];',body)
+        self.assertIn('const controller=new AbortController();',body)
+        self.assertIn('everythingPendingQuery===query',body)
+        self.assertIn('{signal:controller.signal}',body)
+        self.assertIn('version!==everythingRequestVersion||controller.signal.aborted',body)
+        self.assertIn('$("#everythingLayer").classList.contains("hidden")',body)
+        self.assertIn('$("#everythingResults").setAttribute("aria-busy","false")',body)
+        binding=self.js[self.js.index('function bindEverything()'):self.js.index('function bind(){')]
+        self.assertIn('$("#everythingQuery").addEventListener("input"',binding)
+        self.assertIn('resetEverythingSearch();',binding)
+        self.assertIn('$("#everythingForm").addEventListener("submit",runEverythingSearch)',binding)
+
     def test_unified_file_folder_web_resource_editor(self):
         for control in ("entryKindRow","entryResourceKind","entryTargetRow",
                         "entryResourceTarget","entryTargetLabel"):
