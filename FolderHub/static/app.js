@@ -1077,6 +1077,106 @@ function toggleSelected(id){
   render(true);
 }
 
+/* V4.1 — A workspace is a browsable collection of module IDs, separate from
+   folder groups that bulk-open 2–8 Windows Explorer windows. */
+let editingWorkspaceIndex=-1;
+let workspaceDraftMembers=new Set();
+let workspaceSaving=false;
+function validateWorkspaceName(value){
+  const name=String(value??"").trim();
+  if(!name||name.length>40||/[\x00-\x1f\x7f]/.test(name))
+    throw new Error("工作区名称必须是 1—40 字，不能包含控制字符");
+  return name;
+}
+function renderWorkspaceMembers(){
+  const needle=$("#workspaceMemberSearch").value.trim().toLocaleLowerCase();
+  const candidates=state.nodes.filter(node=>
+    !needle || (node.title+" "+(node.folder_path||"")+" "+ancestors(node.id).map(p=>p.title).join(" ")).toLocaleLowerCase().includes(needle));
+  const ordered=candidates.sort((a,b)=>Number(workspaceDraftMembers.has(b.id))-Number(workspaceDraftMembers.has(a.id))||a.id-b.id);
+  const page=ordered.slice(0,120);
+  const missing=[...workspaceDraftMembers].filter(id=>!byId(id));
+  const row=node=>{
+    const selected=workspaceDraftMembers.has(node.id);
+    const label=ancestors(node.id).map(x=>x.title).join(" / ");
+    return `<label class="workspace-member-row"><input type="checkbox" data-workspace-member="${node.id}" ${selected?"checked":""} ${!selected&&workspaceDraftMembers.size>=30?"disabled":""}>
+      <span>${h(node.title)}<small>${h(label||node.folder_path||"根模块")}</small></span></label>`;
+  };
+  $("#workspaceMemberList").innerHTML=page.map(row).join("")+
+    missing.map(id=>`<label class="workspace-member-row workspace-member-missing"><input type="checkbox" data-workspace-member="${id}" checked><span>已删除模块 #${id}<small>取消勾选以移除失效引用</small></span></label>`).join("")+
+    (ordered.length>page.length?`<p class="settings-note">当前筛选仅显示前 120 个模块，请继续输入关键词缩小范围。</p>`:"")+
+    (!page.length&&!missing.length?'<p class="settings-note">没有匹配的模块。</p>':"");
+  $("#workspaceMemberSummary").textContent=`已选择 ${workspaceDraftMembers.size}/30 个模块；筛选匹配 ${ordered.length} 个。`;
+}
+function openWorkspaceDialog(index=-1,initialMembers=null){
+  if(workspaceSaving)return;
+  const record=index>=0?state.workspaces[index]:null;
+  if(index>=0&&!record)return;
+  editingWorkspaceIndex=record?index:-1;
+  workspaceDraftMembers=new Set(record?record.members:
+    (initialMembers||[]).filter(id=>byId(id)).slice(0,30));
+  $("#workspaceDialogTitle").textContent=record?"编辑项目工作区":"新建项目工作区";
+  $("#workspaceName").value=record?.name||"";
+  $("#workspaceDescription").value=record?.description||"";
+  $("#workspaceMemberSearch").value="";
+  renderWorkspaceMembers();
+  $("#workspaceLayer").classList.remove("hidden");
+  $("#workspaceName").focus();
+}
+function closeWorkspaceDialog(){
+  if(workspaceSaving)return;
+  $("#workspaceLayer").classList.add("hidden");
+  editingWorkspaceIndex=-1;
+  workspaceDraftMembers=new Set();
+}
+async function submitWorkspace(event){
+  event.preventDefault();
+  if(workspaceSaving)return;
+  let name;
+  try{name=validateWorkspaceName($("#workspaceName").value)}catch(e){toast(e.message,true);return}
+  const description=$("#workspaceDescription").value;
+  if(description.length>240||/[\x00-\x09\x0b-\x1f\x7f]/.test(description)){
+    toast("项目说明不能超过 240 字或包含控制字符",true);return;
+  }
+  const ids=[...workspaceDraftMembers];
+  if(ids.length<1||ids.length>30||ids.some(id=>!byId(id))){
+    toast("请关联 1—30 个现有模块；如有失效模块，请先取消选择",true);return;
+  }
+  if(state.workspaces.some((item,i)=>i!==editingWorkspaceIndex&&item.name.toLocaleLowerCase()===name.toLocaleLowerCase())){
+    toast("已有同名工作区",true);return;
+  }
+  if(editingWorkspaceIndex<0&&state.workspaces.length>=20){
+    toast("最多保存20个工作区",true);return;
+  }
+  const previous=state.workspaces;
+  const updated=previous.map(item=>({name:item.name,description:item.description,members:[...item.members]}));
+  const current={name,description,members:ids};
+  if(editingWorkspaceIndex<0)updated.push(current);
+  else updated[editingWorkspaceIndex]=current;
+  workspaceSaving=true;
+  $("#workspaceSave").disabled=true;
+  state.workspaces=updated;
+  try{
+    if(!await persistProjectSettings()){
+      state.workspaces=previous;render();return;
+    }
+    workspaceSaving=false;
+    closeWorkspaceDialog();
+    exitSelectMode();
+    setView("workspace",name);
+    toast("项目工作区已保存（不会修改真实文件）");
+  }catch(e){state.workspaces=previous;toast("工作区保存失败："+e.message,true)}
+  finally{workspaceSaving=false;$("#workspaceSave").disabled=false;render()}
+}
+async function deleteWorkspace(index){
+  const item=state.workspaces[index];
+  if(!item||workspaceSaving)return;
+  if(!confirm(`删除工作区「${item.name}」？仅删除工作区配置，不删除任何模块或真实文件。`))return;
+  const old=state.workspaces;
+  state.workspaces=old.filter((_,i)=>i!==index);
+  if(!await persistProjectSettings()){state.workspaces=old;render();return}
+  if(state.view==="workspace"&&state.activeWorkspace===item.name)setView("all");
+  render();toast("工作区已删除，文件夹和模块均未删除");
+}
 /* V3.8 — named groups of existing linked modules; nothing touches real folders. */
 function validateFolderGroupName(value){
   if(typeof value!=="string"||!value.trim()||value.trim().length>40||
@@ -1186,6 +1286,7 @@ function updateBatchBar(){
   $("#selectModeBtn").textContent=state.selectMode?"✓ 退出多选":"☑ 多选";
   for(const id of ["bulkFavorite","bulkUnfavorite","bulkTagAdd","bulkTagRemove","bulkDelete"]){$("#"+id).disabled=state.batchBusy||count===0}
   $("#bulkSaveGroup").disabled=state.batchBusy||state.groupBusy||count<2||count>8;
+  $("#bulkSaveWorkspace").disabled=state.batchBusy||count<1||count>30;
   $("#bulkSelectAll").disabled=state.batchBusy||state.visibleIds.length===0;
   $("#bulkCancel").disabled=state.batchBusy;
 }
@@ -1773,6 +1874,31 @@ function bind(){
   $("#bulkTagAdd").addEventListener("click",()=>batchTags("add"));
   $("#bulkTagRemove").addEventListener("click",()=>batchTags("remove"));
   $("#bulkSaveGroup").addEventListener("click",saveSelectedFolderGroup);
+  $("#bulkSaveWorkspace").addEventListener("click",()=>openWorkspaceDialog(-1,[...state.selectedIds]));
+  $("#workspaceNew").addEventListener("click",()=>openWorkspaceDialog());
+  $("#workspaceNav").addEventListener("click",e=>{
+    const open=e.target.closest("[data-workspace-open]");
+    if(open){const item=state.workspaces[Number(open.dataset.workspaceOpen)];if(item)setView("workspace",item.name);return}
+    const edit=e.target.closest("[data-workspace-edit]");
+    if(edit){openWorkspaceDialog(Number(edit.dataset.workspaceEdit));return}
+    const remove=e.target.closest("[data-workspace-delete]");
+    if(remove)deleteWorkspace(Number(remove.dataset.workspaceDelete));
+  });
+  $("#workspaceForm").addEventListener("submit",submitWorkspace);
+  $("#workspaceMemberSearch").addEventListener("input",renderWorkspaceMembers);
+  $("#workspaceMemberList").addEventListener("change",e=>{
+    if(!e.target.matches("[data-workspace-member]"))return;
+    const id=Number(e.target.dataset.workspaceMember);
+    if(!Number.isSafeInteger(id)||id<1)return;
+    if(e.target.checked){
+      if(workspaceDraftMembers.size>=30){e.target.checked=false;toast("最多选择30个模块",true);return}
+      workspaceDraftMembers.add(id);
+    }else workspaceDraftMembers.delete(id);
+    renderWorkspaceMembers();
+  });
+  $("#workspaceClose").addEventListener("click",closeWorkspaceDialog);
+  $("#workspaceCancel").addEventListener("click",closeWorkspaceDialog);
+  $("#workspaceLayer").addEventListener("click",e=>{if(e.target===$("#workspaceLayer"))closeWorkspaceDialog()});
   $("#folderGroupNav").addEventListener("click",event=>{
     const open=event.target.closest("[data-group-open]");
     if(open){openFolderGroup(Number(open.dataset.groupOpen));return}
@@ -1916,6 +2042,9 @@ function bind(){
       return;
     }
     if(quickPalette.open)return;
+    if(e.key==="Escape"&&!$("#workspaceLayer").classList.contains("hidden")){
+      closeWorkspaceDialog();return;
+    }
     if(e.key==="Escape"&&!$("#groupResultLayer").classList.contains("hidden")){
       closeGroupReport();return;
     }
