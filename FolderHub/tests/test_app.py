@@ -422,6 +422,38 @@ class HttpTests(unittest.TestCase):
             self.assertIn("分类模块",response["results"][0]["error"])
             opener.assert_not_called()
 
+    def test_v56_quick_menu_api_is_read_only_bounded_and_path_free(self):
+        root=self.srv.store.create({"title":"Projects","node_type":"root"})
+        folder=self.srv.store.create({"title":"Folder","node_type":"leaf",
+                   "parent_id":root,"folder_path":r"D:\\Data"})
+        doc=self.srv.store.create({"title":"PDF","node_type":"leaf",
+                   "parent_id":root,"resource_kind":"file",
+                   "resource_target":r"D:\\Data\\report.pdf"})
+        web=self.srv.store.create({"title":"Web","node_type":"leaf",
+                   "parent_id":root,"resource_kind":"url",
+                   "resource_target":"https://example.org/"})
+        # More than eight workspaces should still produce eight quick links.
+        self.srv.store.preferences.save({"workspaces":[
+            {"name":"Workspace "+str(i),"description":"","members":[folder]}
+            for i in range(12)]})
+        status,body=self.request("GET","/api/quick-menu")
+        self.assertEqual(status,200)
+        self.assertEqual({row["id"] for row in body["nodes"]},{folder,doc,web})
+        self.assertEqual([w["name"] for w in body["workspaces"]],
+                         ["Workspace "+str(i) for i in range(8)])
+        self.assertLessEqual(len(body["nodes"]),24)
+        self.assertTrue(all(row.get("has_target") is True for row in body["nodes"]))
+        self.assertTrue(all("folder_path" not in row and
+                            "resource_target" not in row and
+                            "tags" not in row for row in body["nodes"]))
+        self.assertFalse("D:\\\\Data" in json.dumps(body,ensure_ascii=False))
+        self.assertEqual(self.request("POST","/api/quick-menu",{})[0],405)
+        # No navigation state changes, even if requested repeatedly.
+        original=self.srv.store.export()
+        for _ in range(3):
+            self.assertEqual(self.request("GET","/api/quick-menu")[0],200)
+        self.assertEqual(self.srv.store.export(),original)
+
     def test_v54_workspace_launch_requires_fresh_ordered_resource_snapshot(self):
         root = self.srv.store.create({"title":"Project","node_type":"root"})
         doc = self.srv.store.create({"title":"Report","node_type":"leaf",
