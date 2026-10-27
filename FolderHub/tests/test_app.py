@@ -36,6 +36,61 @@ class StoreTests(unittest.TestCase):
         self.store.delete(child)
         self.assertEqual([n["id"] for n in self.store.all()],[root])
 
+    def test_v50_mixed_resource_roundtrip_and_recycle(self):
+        root=self.store.create({"title":"项目","node_type":"root"})
+        file_id=self.store.create({
+            "title":"实验报告","node_type":"leaf","parent_id":root,
+            "resource_kind":"file","resource_target":r"D:\Research\report.pdf"})
+        url_id=self.store.create({
+            "title":"项目主页","node_type":"leaf","parent_id":root,
+            "resource_kind":"url","resource_target":"https://example.org/docs?q=1"})
+        resources={n["id"]:n for n in self.store.all()}
+        self.assertEqual(resources[file_id]["resource_kind"],"file")
+        self.assertEqual(resources[file_id]["resource_target"],r"D:\Research\report.pdf")
+        self.assertIsNone(resources[url_id]["folder_path"])
+        self.store.update(file_id,{"title":"正式报告"})
+        self.assertEqual(next(n for n in self.store.all() if n["id"]==file_id)["resource_kind"],"file")
+        exported=self.store.export()
+        self.assertEqual(exported["version"],5)
+        self.store.delete(url_id)
+        self.assertEqual(self.store.restore_trash(self.store.trash_list()[0]["id"])["restored"],1)
+        self.assertEqual(next(n for n in self.store.all() if n["id"]==url_id)["resource_target"],
+                         "https://example.org/docs?q=1")
+        self.store.import_backup(exported)
+        restored={n["id"]:n for n in self.store.all()}
+        self.assertEqual(restored[file_id]["resource_target"],r"D:\Research\report.pdf")
+        self.assertEqual(restored[url_id]["resource_kind"],"url")
+
+    def test_v50_rejects_executable_and_unsafe_web_links(self):
+        root=self.store.create({"title":"项目","node_type":"root"})
+        baseline=self.store.export()
+        bad=[
+            ("file",r"D:\Tools\start.exe"),("file",r"D:\Tools\run.bat"),
+            ("file","relative/report.pdf"),("url","javascript:alert(1)"),
+            ("url","file:///C:/private"),("url","https://u:p@example.com/"),
+            ("url","https://example.com/space here"),("url","http://"),
+            ("url","https://example.org\\@evil.example"),
+        ]
+        for kind,target in bad:
+            with self.subTest(kind=kind,target=target),self.assertRaises(app.UserError):
+                self.store.create({"title":"Unsafe","node_type":"leaf","parent_id":root,
+                                   "resource_kind":kind,"resource_target":target})
+            self.assertEqual(self.store.export()["nodes"],baseline["nodes"])
+        with self.assertRaises(app.UserError):
+            self.store.create({"title":"Bad Group","node_type":"group","parent_id":root,
+                               "resource_kind":"url","resource_target":"https://example.org/"})
+
+    def test_v50_web_open_only_after_explicit_call(self):
+        row={"resource_kind":"url","resource_target":"https://example.org/",
+             "folder_path":None}
+        with patch.object(app.webbrowser,"open",return_value=True) as browser:
+            app.open_saved_resource(row)
+            browser.assert_called_once_with("https://example.org/")
+        with patch.object(app.webbrowser,"open") as browser:
+            with self.assertRaises(app.UserError):
+                app.open_saved_resource({**row,"resource_target":"data:text/html,hello"})
+            browser.assert_not_called()
+
     def test_move_and_sort(self):
         a=self.store.create({"title":"A"})
         b=self.store.create({"title":"B"})
@@ -136,7 +191,7 @@ class StoreTests(unittest.TestCase):
         migrated.update(1,{"title":"仍可改名"})
         with self.assertRaises(app.UserError):migrated.update(1,{"folder_path":r"D:\New"})
         backup=migrated.export()
-        self.assertEqual(backup["version"],4)
+        self.assertEqual(backup["version"],5)
         migrated.import_backup(backup)
         self.assertEqual([(n["id"],n["parent_id"],n["folder_path"],n["node_type"]) for n in migrated.all()],[(n["id"],n["parent_id"],n["folder_path"],n["node_type"]) for n in backup["nodes"]])
         legacy={"format":"FolderHub","version":1,"nodes":[{k:v for k,v in n.items() if k!="node_type"} for n in backup["nodes"]]}
@@ -183,7 +238,7 @@ class ImageStoreTests(unittest.TestCase):
     def test_backup_includes_images_and_is_atomic(self):
         self.store.save_image(self.root,self.PNG_URL)
         backup=self.store.export()
-        self.assertEqual(backup["version"],4)
+        self.assertEqual(backup["version"],5)
         self.assertIn(str(self.root),backup["images"])
         self.store.delete(self.root)
         self.store.import_backup(backup)
@@ -718,7 +773,7 @@ class TagStoreTests(unittest.TestCase):
         leaf=self.store.create({"title":"A股","node_type":"leaf","parent_id":root,
                                 "folder_path":r"D:\Stocks","tags":["股票","数据"]})
         export=self.store.export()
-        self.assertEqual(export["version"],4)
+        self.assertEqual(export["version"],5)
         self.assertEqual(next(n["tags"] for n in export["nodes"] if n["id"]==leaf),["股票","数据"])
         trash=self.store.delete(root)
         self.assertEqual(self.store.all(),[])
