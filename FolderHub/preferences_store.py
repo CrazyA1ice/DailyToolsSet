@@ -166,7 +166,7 @@ def validate_workspaces(value):
     if not isinstance(value, list) or len(value) > MAX_WORKSPACES:
         raise PreferenceError('项目工作区最多保存 20 个')
     result, used_names = [], set()
-    allowed = {'name', 'description', 'members', 'status', 'links'}
+    allowed = {'name', 'description', 'members', 'status', 'links', 'launch_ids'}
     required = {'name', 'description', 'members'}
     for workspace in value:
         if (not isinstance(workspace, dict) or not required.issubset(workspace)
@@ -197,6 +197,15 @@ def validate_workspaces(value):
             item['status'] = status
         if 'links' in workspace:
             item['links'] = validate_workspace_links(workspace['links'])
+        if 'launch_ids' in workspace:
+            launch_ids = workspace['launch_ids']
+            if (not isinstance(launch_ids, list) or len(launch_ids) > 8
+                    or any(type(node_id) is not int or node_id < 1 for node_id in launch_ids)
+                    or len(set(launch_ids)) != len(launch_ids)
+                    or not set(launch_ids).issubset(members)
+                    or [node_id for node_id in members if node_id in launch_ids] != launch_ids):
+                raise PreferenceError('启动清单必须是工作区成员中的至多8个不重复模块，顺序需与成员一致')
+            item['launch_ids'] = launch_ids[:]
         result.append(item)
     return result
 
