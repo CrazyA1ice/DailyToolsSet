@@ -130,10 +130,13 @@ def build_quick_entries(nodes,recent,workspaces):
     # Prefer a small number of each newer resource kind so an existing
     # collection of dozens of folders cannot hide every saved file/URL.
     reserved=set()
-    for kind in ("file","url"):
-        reserved.update(index for index,(item_kind,_) in enumerate(candidates)
-                        if item_kind==kind and
-                        sum(1 for prior,_ in candidates[:index] if prior==kind)<2)
+    counts={"file":0,"url":0}
+    for index,(kind,_) in enumerate(candidates):
+        if kind in counts and counts[kind]<2:
+            reserved.add(index)
+            counts[kind]+=1
+        if counts["file"]==2 and counts["url"]==2:
+            break
     for index in range(len(candidates)):
         if len(reserved)>=8:
             break
