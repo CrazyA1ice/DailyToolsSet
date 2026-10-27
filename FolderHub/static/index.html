@@ -30,7 +30,7 @@
       <div class="topbar-leading"><button id="sidebarToggle" type="button" class="icon-button sidebar-trigger" title="展开或收起侧边栏" aria-label="展开或收起侧边栏" aria-expanded="true">☰</button><div class="crumb" id="breadcrumb"></div></div>
       <div class="search-wrap topbar-search" role="search"><span class="search-icon">⌕</span><input id="search" type="search" aria-controls="entries" aria-keyshortcuts="Control+K Meta+K" placeholder="全局搜索：模块名、完整分类路径、文件夹路径..." autocomplete="off" aria-label="搜索所有层级模块"><span id="searchHint">Ctrl K</span></div>
       <div class="top-actions">
-        <div class="tool-buttons"><button id="selectModeBtn" type="button" class="outline-btn" aria-pressed="false" title="批量选择模块">☑ 多选</button><button id="layoutBtn" type="button" class="icon-button square" title="切换网格和列表" aria-label="切换网格和列表">▦</button><button id="newBtn" type="button" class="primary-btn">＋ <span id="newBtnText">新建模块</span></button></div>
+        <div class="tool-buttons"><button id="selectModeBtn" type="button" class="outline-btn" aria-pressed="false" title="批量选择模块">☑ 多选</button><button id="layoutBtn" type="button" class="icon-button square" title="切换网格和列表" aria-label="切换网格和列表">▦</button><button id="quickOpenBtn" type="button" class="icon-button square" aria-haspopup="dialog" aria-controls="quickLayer" aria-keyshortcuts="Control+Shift+P" title="快速打开模块（Ctrl+Shift+P）" aria-label="快速打开模块">⚡</button><button id="newBtn" type="button" class="primary-btn">＋ <span id="newBtnText">新建模块</span></button></div>
         <button id="themeBtn" type="button" class="text-btn accent-action" title="主题换肤">◐ <span>换肤</span></button>
         <button id="settingsBtn" type="button" class="text-btn" title="设置开机启动和首页">⚙ <span>设置</span></button>
         <button id="backupBtn" type="button" class="text-btn" title="导出 JSON 配置">⇩ <span>备份</span></button>
@@ -51,6 +51,17 @@
       <section class="entries" id="entries" aria-live="polite"></section>
     </div>
   </main>
+</div>
+<div id="quickLayer" class="quick-layer hidden" role="presentation">
+  <div class="quick-dialog" role="dialog" aria-modal="true" aria-labelledby="quickTitle" aria-describedby="quickHelp">
+    <div class="quick-heading">
+      <div><small>QUICK ACCESS</small><h2 id="quickTitle">快速打开</h2></div>
+      <button type="button" id="quickClose" class="icon-button" aria-label="关闭快速打开">✕</button>
+    </div>
+    <div class="quick-search-box"><span aria-hidden="true">⌕</span><input id="quickInput" type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="quickResults" autocomplete="off" placeholder="搜索模块名称、所在层级或文件夹路径..." aria-label="快速搜索文件夹模块"></div>
+    <div id="quickResults" class="quick-results" role="listbox" aria-label="快速打开结果"></div>
+    <div class="quick-footer" id="quickHelp"><span>↑ ↓ 选择　 Enter 打开　 Esc 退出</span><span>仅检索 FolderHub 已保存的模块</span></div>
+  </div>
 </div>
 <div id="settingsLayer" class="dialog-layer hidden" role="presentation">
   <div class="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">

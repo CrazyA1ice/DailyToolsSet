@@ -226,6 +226,25 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertNotIn('encodeURIComponent(state.search)',self.js)
         self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
 
+    def test_quick_palette_navigation_and_accessibility(self):
+        for item in ("quickOpenBtn","quickLayer","quickInput","quickResults","quickClose","quickHelp"):
+            self.assertIn('id="'+item+'"',self.html)
+            self.assertIn(item,self.js)
+        self.assertIn('aria-keyshortcuts="Control+Shift+P"',self.html)
+        self.assertIn('role="combobox"',self.html)
+        self.assertIn('role="listbox"',self.html)
+        self.assertIn('function quickCandidates(query="")',self.js)
+        self.assertIn('function renderQuickPalette()',self.js)
+        self.assertIn('function quickLaunch(index)',self.js)
+        self.assertIn('function bindQuickPalette()',self.js)
+        self.assertIn('bindQuickPalette();',self.js)
+        self.assertIn('event.key==="ArrowDown"',self.js)
+        self.assertIn('event.key==="Enter"',self.js)
+        self.assertIn('if(quickPalette.open)return;',self.js)
+        self.assertIn('const seen=new Set(),results=[];',self.js)
+        self.assertIn('.quick-result.is-active',self.css)
+        self.assertIn('.quick-dialog',self.css)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)
