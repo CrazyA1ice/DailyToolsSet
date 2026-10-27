@@ -1958,9 +1958,67 @@ function bindQuickPalette(){
   });
 }
 
+
+/* Optional local-only Everything ES search. Results never launch automatically. */
+let everythingItems=[];
+function closeEverything(){
+  $("#everythingLayer").classList.add("hidden");
+}
+async function runEverythingSearch(event){
+  event.preventDefault();
+  const query=$("#everythingQuery").value.trim(),button=$("#everythingSubmit");
+  if(query.length<2||query.length>100){toast("请输入 2—100 字搜索词",true);return}
+  button.disabled=true;
+  $("#everythingStatus").textContent="正在查询本机 Everything 索引…";
+  $("#everythingResults").replaceChildren();
+  try{
+    const result=await api("/api/everything/search?q="+encodeURIComponent(query));
+    everythingItems=result.items||[];
+    $("#everythingStatus").textContent="找到 "+everythingItems.length+" 项；搜索结果不会自动打开。";
+    $("#everythingResults").innerHTML=everythingItems.map((item,index)=>
+      '<div class="everything-result"><span title="'+h(item.path)+'"><strong>'+h(item.name)+'</strong>'
+      +'<small>'+h(item.path)+'</small></span><button type="button" data-everything-add="'+index+'">＋ 加入导航</button></div>').join("");
+  }catch(error){
+    everythingItems=[];
+    $("#everythingStatus").textContent=error.message;
+  }finally{button.disabled=false}
+}
+function chooseEverythingResult(index){
+  const item=everythingItems[index];if(!item)return;
+  const parent=state.nodes.find(node=>node.node_type==="root");
+  if(!parent){toast("请先建立一个根分类，再添加 Everything 搜索结果",true);return}
+  closeEverything();
+  editDialog(null,parent.id);
+  $("#entryType").value="leaf";
+  $("#entryResourceKind").value=item.kind==="folder"?"folder":"file";
+  if(item.kind==="folder")$("#entryPath").value=item.path;
+  else $("#entryResourceTarget").value=item.path;
+  $("#entryName").value=item.name;
+  updateEntryType();
+}
+function bindEverything(){
+  $("#everythingBtn").addEventListener("click",()=>{
+    $("#everythingLayer").classList.remove("hidden");
+    $("#everythingQuery").focus();
+  });
+  $("#everythingClose").addEventListener("click",closeEverything);
+  $("#everythingLayer").addEventListener("click",event=>{
+    if(event.target===$("#everythingLayer"))closeEverything();
+  });
+  $("#everythingLayer").addEventListener("keydown",event=>{
+    if(event.key==="Escape"){event.preventDefault();closeEverything()}
+  });
+  $("#everythingForm").addEventListener("submit",runEverythingSearch);
+  $("#everythingResults").addEventListener("click",event=>{
+    const button=event.target.closest("[data-everything-add]");
+    if(button)chooseEverythingResult(Number(button.dataset.everythingAdd));
+  });
+}
+
 function bind(){
   bindSorting();
   bindQuickPalette();
+  bindEverything();
   window.addEventListener("popstate",restoreBrowserNavigation);
   $("#selectModeBtn").addEventListener("click",()=>{if(state.batchBusy)return;state.selectMode=!state.selectMode;state.selectedIds.clear();closeCardMenu();render(true)});
   $("#bulkCancel").addEventListener("click",()=>{exitSelectMode();render(true)});
