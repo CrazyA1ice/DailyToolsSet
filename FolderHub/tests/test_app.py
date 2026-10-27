@@ -598,3 +598,92 @@ class RecentUsageHttpTests(unittest.TestCase):
         self.assertEqual(self.request("DELETE","/api/recent",{},origin="https://evil.example")[0],403)
         self.assertEqual(self.request("DELETE","/api/recent",{})[1]["cleared"],1)
         self.assertEqual(len(self.srv.store.all()),2)
+
+
+class RecentPinTests(unittest.TestCase):
+    """V2.5: portable pinned folders, including legacy schema migration."""
+    def setUp(self):
+        temporary=tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.store=app.Store(Path(temporary.name)/"data"/"folderhub.db")
+
+    def test_pin_sort_repeat_open_and_unpin(self):
+        root=self.store.create({"title":"根","node_type":"root"})
+        a=self.store.create({"title":"A","node_type":"leaf","parent_id":root,"folder_path":r"D:\A"})
+        b=self.store.create({"title":"B","node_type":"leaf","parent_id":root,"folder_path":r"D:\B"})
+        self.store.record_open(a)
+        self.store.record_open(b)
+        self.assertEqual([v["node_id"] for v in self.store.recent()],[b,a])
+        self.assertEqual(self.store.set_recent_pin(a,True), {"ok":True,"node_id":a,"pinned":True})
+        self.assertEqual([v["node_id"] for v in self.store.recent()],[a,b])
+        self.store.record_open(b)
+        self.assertEqual([v["node_id"] for v in self.store.recent()],[a,b])
+        self.assertEqual(self.store.recent()[0]["pinned"],1)
+        self.assertEqual(self.store.recent()[1]["open_count"],2)
+        self.store.set_recent_pin(a,False)
+        self.assertEqual([v["node_id"] for v in self.store.recent()],[b,a])
+
+    def test_pin_input_validation_is_atomic(self):
+        root=self.store.create({"title":"根","node_type":"root"})
+        a=self.store.create({"title":"A","node_type":"leaf","parent_id":root,"folder_path":r"D:\A"})
+        for identity, pin in [(a,True),(a,False)]:
+            with self.assertRaises(app.UserError):self.store.set_recent_pin(identity,pin)
+        self.store.record_open(a)
+        for identity,pin in [(a,1),(a,"true"),(True,True),(0,True),(99999,True)]:
+            with self.subTest(identity=identity,pin=pin),self.assertRaises(app.UserError):
+                self.store.set_recent_pin(identity,pin)
+        self.assertEqual(self.store.recent()[0]["pinned"],0)
+        self.store.set_recent_pin(a,True)
+        self.assertEqual(self.store.clear_recent()["cleared"],1)
+        self.assertEqual(self.store.recent(),[])
+        self.assertEqual(len(self.store.all()),2)
+
+    def test_pre_v25_visits_schema_migration(self):
+        db_path=self.store.db_path
+        with self.store.connect() as conn:
+            conn.execute("DROP INDEX IF EXISTS idx_node_visits_pin_time")
+            conn.execute("DROP TABLE node_visits")
+            conn.execute("""CREATE TABLE node_visits (node_id INTEGER PRIMARY KEY
+                         REFERENCES nodes(id) ON DELETE CASCADE,
+                         open_count INTEGER NOT NULL DEFAULT 0,last_opened_at TEXT NOT NULL)""")
+        migrated=app.Store(db_path)
+        with migrated.connect() as conn:
+            columns={r["name"] for r in conn.execute("PRAGMA table_info(node_visits)")}
+        self.assertIn("pinned",columns)
+        self.assertEqual(migrated.recent(),[])
+
+    def test_pins_survive_zip_and_are_removed_with_node(self):
+        import zipfile
+        root=self.store.create({"title":"根","node_type":"root"})
+        a=self.store.create({"title":"A","node_type":"leaf","parent_id":root,"folder_path":r"D:\A"})
+        self.store.record_open(a);self.store.set_recent_pin(a,True)
+        backup=self.store.make_portable_backup()
+        try:
+            with zipfile.ZipFile(backup) as archive:
+                payload=archive.read("data/folderhub.db")
+            other=Path(self.store.db_path.parent)/"from-zip.db"
+            other.write_bytes(payload)
+            moved=app.Store(other)
+            self.assertEqual(moved.recent()[0]["pinned"],1)
+        finally:
+            backup.unlink(missing_ok=True)
+        self.store.delete(a)
+        self.assertEqual(self.store.recent(),[])
+
+
+class RecentPinHttpTests(unittest.TestCase):
+    setUp=HttpTests.setUp
+    request=HttpTests.request
+
+    def test_pin_endpoint_auth_and_validation(self):
+        root=self.srv.store.create({"title":"根","node_type":"root"})
+        leaf=self.srv.store.create({"title":"叶","node_type":"leaf","parent_id":root,"folder_path":r"D:\A"})
+        self.srv.store.record_open(leaf)
+        url="/api/recent/pin";params={"node_id":leaf,"pinned":True}
+        self.assertEqual(self.request("POST",url,params,token=False)[0],403)
+        self.assertEqual(self.request("POST",url,params,origin="https://evil.example")[0],403)
+        self.assertEqual(self.request("POST",url,{"node_id":leaf,"pinned":1})[0],400)
+        self.assertEqual(self.request("POST",url,params)[0],200)
+        self.assertEqual(self.request("GET","/api/recent")[1]["items"][0]["pinned"],1)
+        self.assertEqual(self.request("POST",url,{"node_id":leaf,"pinned":False})[1]["pinned"],False)
+        self.assertEqual(self.request("DELETE","/api/recent",{})[0],200)

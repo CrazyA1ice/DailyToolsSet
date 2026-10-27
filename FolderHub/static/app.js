@@ -61,7 +61,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {openingIds:new Set(),nodes:[],trash:[],recent:[], token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+const state = {openingIds:new Set(),nodes:[],trash:[],recent:[], searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
 // The server is authoritative. localStorage is read ONLY to migrate a legacy browser once.
 let initialExpanded=null;
 let projectSettingsReady=false;
@@ -183,7 +183,7 @@ function ancestors(id) {
 function setView(view,id=null){
   closeCardMenu();exitSelectMode();
   state.view=view;state.selected=id;
-  state.search="";$("#search").value="";
+  state.search="";state.searchKeyboardIndex=-1;$("#search").value="";
   if(view==="node"&&id!==null)expandLineage(id);
   render();
 }
@@ -232,22 +232,23 @@ function renderCrumb(){
   }
   $("#breadcrumb").innerHTML=bits.join("");
 }
-function card(n,reorderable=false){
+function card(n,reorderable=false,keyboardActive=false){
   const childCount=children(n.id).length;
   const linked=!!n.folder_path;
   const leaf=n.node_type==="leaf";
   const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
   const usage=state.view==="recent" && !state.search ? state.recent.find(item=>item.node_id===n.id) : null;
   const lastUsed=usage?new Date(usage.last_opened_at):null;
-  const recentCaption=usage?`<div class="entry-lineage">最近打开：${h(lastUsed && !Number.isNaN(lastUsed.getTime()) ? lastUsed.toLocaleString("zh-CN") : "未知时间")} · 累计 ${Number(usage.open_count)||0} 次</div>`:"";
+  const recentCaption=usage?`<div class="entry-lineage">${usage.pinned?"📌 已置顶 · ":""}最近打开：${h(lastUsed && !Number.isNaN(lastUsed.getTime()) ? lastUsed.toLocaleString("zh-CN") : "未知时间")} · 累计 ${Number(usage.open_count)||0} 次</div>`:"";
   const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
-  return `<article class="entry-card ${leaf?"is-leaf":"is-container"} ${state.openingIds.has(n.id)?"is-opening":""} ${state.selectedIds.has(n.id)?"is-selected":""}" data-id="${n.id}" tabindex="0" aria-label="${h(n.title)}，右键打开快捷菜单">
+  return `<article class="entry-card ${leaf?"is-leaf":"is-container"} ${state.openingIds.has(n.id)?"is-opening":""} ${state.selectedIds.has(n.id)?"is-selected":""} ${keyboardActive?"keyboard-active":""}" id="folderhub-entry-${n.id}" data-id="${n.id}" tabindex="0" aria-label="${h(n.title)}，右键打开快捷菜单">
     <div class="card-cover tone-${n.id%6} ${n.has_image?'with-image':'with-icon'}" aria-hidden="true">
       ${n.has_image?`<img class="cover-image" src="${coverUrl(n)}" loading="lazy" alt="">`:`<span class="cover-emoji">${h(iconFor(n))}</span><span class="cover-decoration"></span>`}
       <span class="cover-type">${TYPE_LABEL[n.node_type]||"模块"}</span>
     </div>
     <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${h(iconFor(n))}</span>
       <div class="card-actions">
+        ${usage && !state.selectMode?`<button type="button" class="small-action recent-pin ${usage.pinned?"on":""}" title="${usage.pinned?"取消置顶":"置顶到最近使用顶部"}" aria-label="${usage.pinned?"取消置顶":"置顶"} ${h(n.title)}" data-action="pin" data-id="${n.id}">${usage.pinned?"📌":"📍"}</button>`:""}
         ${state.selectMode?`<button type="button" class="card-select" data-action="select" data-id="${n.id}" aria-pressed="${state.selectedIds.has(n.id)}" aria-label="${state.selectedIds.has(n.id)?'取消选择':'选择'} ${h(n.title)}">${state.selectedIds.has(n.id)?'✓':'○'}</button>`:''}
         ${reorderable && !state.selectMode?`<button type="button" class="small-action sort-grip" draggable="true" data-drag="${n.id}" title="拖动调整同级顺序，也可使用上下箭头键" aria-label="移动 ${h(n.title)}：拖动排序或按上下箭头键">⠿</button>`:""}
         ${!state.selectMode?`<button type="button" class="small-action card-more" title="更多操作" aria-label="更多操作：${h(n.title)}" data-action="menu" data-id="${n.id}">⋯</button>`:''}
@@ -332,7 +333,7 @@ function render(){
   $("#sectionHeading").hidden=state.view==="all"&&!searching;
   $("#sectionTitle").textContent=sectionTitle;
   $("#sectionMeta").textContent=state.view==="recent"&&!searching?
-    "按最近打开时间排列 · 只记录通过 FolderHub 成功打开的文件夹":
+    "置顶项目优先显示，其余按最近打开时间排列 · 只记录通过 FolderHub 打开的文件夹":
     `共 ${display.length} 个项目 · ${searching?'搜索覆盖整个目录树，结果显示完整所属层级':'叶子模块直接打开文件资源管理器'}`;
   const canAddChild=state.view==="node"&&!searching&&byId(state.selected)?.node_type!=="leaf";
   $("#newBtnText").textContent=canAddChild?"新建子模块":"新建根模块";
@@ -344,8 +345,9 @@ function render(){
   $("#entries").className="entries"+(state.layout==="list"?" list":"");
   const reorderable=!state.selectMode && !searching && (state.view==="all" || (state.view==="node" && byId(state.selected)?.node_type!=="leaf"));
   state.visibleIds=display.map(n=>n.id);
+  if(!searching || state.searchKeyboardIndex >= display.length)state.searchKeyboardIndex=-1;
   $("#entries").classList.toggle("selection-mode",state.selectMode);
-  $("#entries").innerHTML=display.length?display.map(n=>card(n,reorderable)).join(""):
+  $("#entries").innerHTML=display.length?display.map((n,index)=>card(n,reorderable,Boolean(searching)&&index===state.searchKeyboardIndex)).join(""):
     state.view==="recent"&&!searching?
       '<div class="empty-state"><div class="empty-art">◷</div><h3>还没有最近访问记录</h3><p>通过 FolderHub 打开文件夹后，会自动显示在这里。</p></div>':
       emptyView();
@@ -547,6 +549,15 @@ async function favoriteNode(id){
   try{await mutate("PATCH",`/api/nodes/${id}`,{favorite:!n.favorite});await refresh()}
   catch(e){toast(e.message,true)}
 }
+async function toggleRecentPin(id){
+  const visit=state.recent.find(row=>row.node_id===id);
+  if(!visit)return;
+  try{
+    await mutate("POST","/api/recent/pin",{node_id:id,pinned:!Boolean(visit.pinned)});
+    state.recent=(await api("/api/recent")).items;
+    render();toast(visit.pinned?"已取消置顶":"已置顶到最近使用顶部");
+  }catch(e){toast("修改置顶失败："+e.message,true)}
+}
 async function clearRecentHistory(){
   if(!confirm("确定清空最近使用记录吗？\\n\\n只清除访问时间和次数，不会删除任何模块或电脑中的文件夹。"))return;
   try{
@@ -568,6 +579,7 @@ async function act(action,id){
     case "empty-create":editDialog();break;
     case "edit-current":editDialog(state.selected);break;
     case "clear-recent":await clearRecentHistory();break;
+    case "pin":await toggleRecentPin(id);break;
   }
 }
 // Bulk selection is limited to the current visible list, including search results.
@@ -862,7 +874,28 @@ function bind(){
   $("#sectionOperations").addEventListener("click",e=>{const btn=e.target.closest("[data-action]");if(btn)act(btn.dataset.action,state.selected)});
   $("#addRoot").addEventListener("click",()=>editDialog(null,null));
   $("#newBtn").addEventListener("click",()=>editDialog());
-  $("#search").addEventListener("input",e=>{closeCardMenu();state.selectedIds.clear();state.search=e.target.value;render()});
+  $("#search").addEventListener("input",e=>{closeCardMenu();state.selectedIds.clear();state.search=e.target.value;state.searchKeyboardIndex=-1;render()});
+  $("#search").addEventListener("keydown",async e=>{
+    if(!state.search.trim())return;
+    if(e.key==="Escape"){
+      e.preventDefault();e.stopPropagation();state.search="";state.searchKeyboardIndex=-1;
+      $("#search").value="";render();return;
+    }
+    if(!["ArrowDown","ArrowUp","Enter"].includes(e.key))return;
+    const results=searchAll(state.search);
+    if(!results.length)return;
+    if(state.selectMode && e.key==="Enter")return;
+    e.preventDefault();e.stopPropagation();
+    if(e.key==="Enter"){
+      const index=state.searchKeyboardIndex<0?0:Math.min(state.searchKeyboardIndex,results.length-1);
+      await act("primary",results[index].id);return;
+    }
+    const old=state.searchKeyboardIndex;
+    state.searchKeyboardIndex=e.key==="ArrowDown"?(old+1)%results.length:
+      old<0?results.length-1:(old-1+results.length)%results.length;
+    render();
+    document.getElementById(`folderhub-entry-${results[state.searchKeyboardIndex].id}`)?.scrollIntoView({block:"nearest"});
+  });
   $("#layoutBtn").addEventListener("click",()=>{state.layout=state.layout==="grid"?"list":"grid";$("#layoutBtn").textContent=state.layout==="grid"?"▦":"☷";render();persistProjectSettings()});
   $("#backupBtn").addEventListener("click",exportBackup);
   $("#restoreBtn").addEventListener("click",()=>$("#importFile").click());

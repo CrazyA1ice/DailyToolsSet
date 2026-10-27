@@ -176,7 +176,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS node_visits (
                     node_id INTEGER PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
                     open_count INTEGER NOT NULL DEFAULT 0,
-                    last_opened_at TEXT NOT NULL
+                    last_opened_at TEXT NOT NULL,
+                    pinned INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS idx_node_visits_time ON node_visits(last_opened_at DESC);
                 CREATE TABLE IF NOT EXISTS node_images (
@@ -211,6 +212,11 @@ class Store:
             """)
             # Schema changes are transactional, including old node-type migration.
             db.execute("BEGIN IMMEDIATE")
+            visit_cols = {row["name"] for row in db.execute("PRAGMA table_info(node_visits)")}
+            if "pinned" not in visit_cols:
+                db.execute("ALTER TABLE node_visits ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_node_visits_pin_time "
+                       "ON node_visits(pinned DESC, last_opened_at DESC)")
             cols = {row["name"] for row in db.execute("PRAGMA table_info(nodes)")}
             if "icon" not in cols:
                 db.execute("ALTER TABLE nodes ADD COLUMN icon TEXT NOT NULL DEFAULT 'folder'")
@@ -398,11 +404,11 @@ class Store:
             raise UserError("最近使用记录数量无效")
         with self.connect() as db:
             return [dict(row) for row in db.execute("""
-                SELECT v.node_id, v.open_count, v.last_opened_at
+                SELECT v.node_id, v.open_count, v.last_opened_at, v.pinned
                 FROM node_visits AS v
                 JOIN nodes AS n ON n.id = v.node_id
                 WHERE n.folder_path IS NOT NULL AND n.folder_path != ''
-                ORDER BY v.last_opened_at DESC, v.node_id DESC
+                ORDER BY v.pinned DESC, v.last_opened_at DESC, v.node_id DESC
                 LIMIT ?""", (limit,))]
 
     def record_open(self, node_id):
@@ -420,8 +426,19 @@ class Store:
             db.execute("""
                 DELETE FROM node_visits WHERE node_id IN (
                     SELECT node_id FROM node_visits
-                    ORDER BY last_opened_at DESC, node_id DESC LIMIT -1 OFFSET 200
+                    ORDER BY pinned DESC, last_opened_at DESC, node_id DESC LIMIT -1 OFFSET 200
                 )""")
+
+    def set_recent_pin(self, node_id, pinned):
+        """Pin a previously opened folder without altering its access timestamp."""
+        if type(node_id) is not int or node_id < 1 or type(pinned) is not bool:
+            raise UserError("置顶参数无效")
+        with self.connect() as db:
+            result = db.execute("UPDATE node_visits SET pinned=? WHERE node_id=?",
+                                (int(pinned), node_id))
+            if result.rowcount != 1:
+                raise UserError("该文件夹不在最近使用中，请先通过 FolderHub 打开")
+        return {"ok": True, "node_id": node_id, "pinned": pinned}
 
     def clear_recent(self):
         """Clear usage history only; never alter modules or real folders."""
@@ -910,6 +927,12 @@ class Handler(BaseHTTPRequestHandler):
                     filename.unlink(missing_ok=True)
             if method=="GET" and path=="/api/nodes":
                 return self.reply(200,{"nodes":self.server.store.all()})
+            if path=="/api/recent/pin":
+                if method=="POST":
+                    data=self.request_json()
+                    return self.reply(200,self.server.store.set_recent_pin(
+                        data.get("node_id"), data.get("pinned")))
+                return self.reply(405,{"error":"不支持的请求方法"})
             if path=="/api/recent":
                 if method=="GET":
                     return self.reply(200,{"items":self.server.store.recent()})

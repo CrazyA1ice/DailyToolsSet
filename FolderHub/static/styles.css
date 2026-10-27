@@ -481,3 +481,9 @@ html[data-cover-fit="contain"] .cover-preview img{object-fit:contain}
 .path-warning{font-size:.8rem;color:#cb4e37;font-weight:700}
 .path-success{color:var(--good);font-size:.92rem}
 @media(max-width:700px){.path-prefix-grid{grid-template-columns:1fr}.settings-tabs button{flex:1 1 42%}}
+
+/* V2.5 — keyboard-search focus and recent-folder pin affordances. */
+.entries .entry-card.keyboard-active{outline:3px solid var(--accent);outline-offset:2px;border-color:var(--accent)}
+.recent-pin{font-size:1rem;min-width:35px;height:35px}
+.recent-pin.on{color:var(--accent);background:var(--accent-faint)}
+@media(prefers-reduced-motion:reduce){.entries .entry-card.keyboard-active{scroll-behavior:auto}}

@@ -126,6 +126,18 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('state.recent.map(item=>byId(item.node_id)).filter(Boolean)',self.js)
         self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
 
+    def test_search_keyboard_and_recent_pin_contracts(self):
+        self.assertIn('aria-keyshortcuts="Control+K Meta+K"', self.html)
+        self.assertIn('state.searchKeyboardIndex',self.js)
+        self.assertIn('e.key==="ArrowDown"',self.js)
+        self.assertIn('"ArrowUp"',self.js)
+        self.assertIn('e.key==="Enter"',self.js)
+        self.assertIn('function toggleRecentPin(id)',self.js)
+        self.assertIn('/api/recent/pin',self.js)
+        self.assertIn('keyboard-active',self.css)
+        self.assertIn('data-action="pin"',self.js)
+        self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)
