@@ -164,7 +164,7 @@ def validate_tags(value):
             raise UserError("标签必须是文字")
         name = item.strip()
         if (not name or len(name) > MAX_TAG_LENGTH
-                or any(ch in name for ch in ",，;；\\r\\n\\t")
+                or any(ch in name for ch in ",，;；")
                 or any(ord(ch) < 32 or ord(ch) == 127 for ch in name)):
             raise UserError("标签长度须为 1—24 字，不能包含逗号、分号或控制字符")
         lowered = name.casefold()
