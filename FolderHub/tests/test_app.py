@@ -135,7 +135,7 @@ class StoreTests(unittest.TestCase):
         migrated.update(1,{"title":"仍可改名"})
         with self.assertRaises(app.UserError):migrated.update(1,{"folder_path":r"D:\New"})
         backup=migrated.export()
-        self.assertEqual(backup["version"],3)
+        self.assertEqual(backup["version"],4)
         migrated.import_backup(backup)
         self.assertEqual([(n["id"],n["parent_id"],n["folder_path"],n["node_type"]) for n in migrated.all()],[(n["id"],n["parent_id"],n["folder_path"],n["node_type"]) for n in backup["nodes"]])
         legacy={"format":"FolderHub","version":1,"nodes":[{k:v for k,v in n.items() if k!="node_type"} for n in backup["nodes"]]}
@@ -182,7 +182,7 @@ class ImageStoreTests(unittest.TestCase):
     def test_backup_includes_images_and_is_atomic(self):
         self.store.save_image(self.root,self.PNG_URL)
         backup=self.store.export()
-        self.assertEqual(backup["version"],3)
+        self.assertEqual(backup["version"],4)
         self.assertIn(str(self.root),backup["images"])
         self.store.delete(self.root)
         self.store.import_backup(backup)
@@ -687,3 +687,75 @@ class RecentPinHttpTests(unittest.TestCase):
         self.assertEqual(self.request("GET","/api/recent")[1]["items"][0]["pinned"],1)
         self.assertEqual(self.request("POST",url,{"node_id":leaf,"pinned":False})[1]["pinned"],False)
         self.assertEqual(self.request("DELETE","/api/recent",{})[0],200)
+
+
+class TagStoreTests(unittest.TestCase):
+    """V3.2: labels are data, not operations on real folders."""
+    def setUp(self):
+        temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
+        self.store=app.Store(Path(temp.name)/"data"/"folderhub.db")
+
+    def test_create_patch_and_reject_invalid_tags_atomically(self):
+        root=self.store.create({"title":"研究","node_type":"root","tags":["论文","A股"]})
+        self.assertEqual(self.store.all()[0]["tags"],["论文","A股"])
+        self.store.update(root,{"title":"研究室"})
+        self.assertEqual(self.store.all()[0]["tags"],["论文","A股"])
+        self.store.update(root,{"tags":["教学","Python"]})
+        baseline=self.store.export()["nodes"]
+        for invalid in ("股票",["重复","重复"],["a","A"],[""],["x"*25],
+                        ["a,b"],["a\n"],[5],[True],list(map(str,range(13))),{"金融":True}):
+            with self.subTest(value=str(invalid)[:50]),self.assertRaises(app.UserError):
+                self.store.update(root,{"tags":invalid})
+            self.assertEqual(self.store.export()["nodes"],baseline)
+
+    def test_tags_survive_trash_json_backup_and_full_zip(self):
+        root=self.store.create({"title":"科研","node_type":"root","tags":["工作"]})
+        leaf=self.store.create({"title":"A股","node_type":"leaf","parent_id":root,
+                                "folder_path":r"D:\Stocks","tags":["股票","数据"]})
+        export=self.store.export()
+        self.assertEqual(export["version"],4)
+        self.assertEqual(next(n["tags"] for n in export["nodes"] if n["id"]==leaf),["股票","数据"])
+        trash=self.store.delete(root)
+        self.assertEqual(self.store.all(),[])
+        self.store.restore_trash(trash["trash_id"])
+        self.assertEqual(next(n["tags"] for n in self.store.all() if n["id"]==leaf),["股票","数据"])
+        self.store.import_backup(export)
+        self.assertEqual(next(n["tags"] for n in self.store.all() if n["id"]==leaf),["股票","数据"])
+        archive=self.store.make_portable_backup()
+        try:
+            import zipfile
+            with zipfile.ZipFile(archive) as z:
+                contents=z.read("data/folderhub.db")
+            copy=Path(self.store.db_path.parent)/"copied.db"
+            copy.write_bytes(contents)
+            restored=app.Store(copy)
+            self.assertEqual(next(n["tags"] for n in restored.all() if n["id"]==leaf),["股票","数据"])
+        finally:
+            archive.unlink(missing_ok=True)
+
+    def test_legacy_backup_v3_omits_tags_and_imports_cleanly(self):
+        self.store.create({"title":"研究","node_type":"root","tags":["新版"]})
+        v3=self.store.export();v3["version"]=3
+        for n in v3["nodes"]:n.pop("tags",None)
+        self.store.import_backup(v3)
+        self.assertEqual(self.store.all()[0]["tags"],[])
+
+    def test_http_tag_validation_and_auth(self):
+        server=app.FolderServer(("127.0.0.1",0),self.store)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        self.addCleanup(server.server_close);self.addCleanup(server.shutdown)
+        def send(method,path,payload=None,auth=True):
+            conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=4)
+            headers={"Host":f"127.0.0.1:{server.server_port}"}
+            if payload is not None:headers["Content-Type"]="application/json"
+            if method!="GET" and auth:headers["X-FolderHub-Token"]=server.token
+            conn.request(method,path,body=json.dumps(payload) if payload is not None else None,headers=headers)
+            r=conn.getresponse();status=r.status;data=json.loads(r.read());conn.close()
+            return status,data
+        status,res=send("POST","/api/nodes",{"title":"研究","node_type":"root","tags":["金融","论文"]})
+        self.assertEqual(status,201);node_id=res["id"]
+        self.assertEqual(send("PATCH",f"/api/nodes/{node_id}",{"tags":["新"]},auth=False)[0],403)
+        self.assertEqual(send("PATCH",f"/api/nodes/{node_id}",{"tags":["重复","重复"]})[0],400)
+        self.assertEqual(send("GET","/api/nodes")[1]["nodes"][0]["tags"],["金融","论文"])
+        self.assertEqual(send("PATCH",f"/api/nodes/{node_id}",{"tags":["金融","量化"]})[0],200)
+        self.assertEqual(send("GET","/api/nodes")[1]["nodes"][0]["tags"],["金融","量化"])

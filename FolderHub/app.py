@@ -150,6 +150,31 @@ def validate_parent(value):
     return value
 
 
+MAX_NODE_TAGS = 12
+MAX_TAG_LENGTH = 24
+
+
+def validate_tags(value):
+    """Normalize short labels; reject invalid or ambiguous separators."""
+    if not isinstance(value, list) or len(value) > MAX_NODE_TAGS:
+        raise UserError("每个模块最多设置 12 个标签，标签必须是列表")
+    result, seen = [], set()
+    for item in value:
+        if not isinstance(item, str):
+            raise UserError("标签必须是文字")
+        name = item.strip()
+        if (not name or len(name) > MAX_TAG_LENGTH
+                or any(ch in name for ch in ",，;；\\r\\n\\t")
+                or any(ord(ch) < 32 or ord(ch) == 127 for ch in name)):
+            raise UserError("标签长度须为 1—24 字，不能包含逗号、分号或控制字符")
+        lowered = name.casefold()
+        if lowered in seen:
+            raise UserError("不能添加重复标签")
+        seen.add(lowered)
+        result.append(name)
+    return result
+
+
 class Store:
     def __init__(self, db_path: Path, uploads_dir: Path | None = None):
         self.db_path = Path(db_path)
@@ -168,6 +193,7 @@ class Store:
                     node_type TEXT NOT NULL DEFAULT 'group',
                     icon TEXT NOT NULL DEFAULT 'folder',
                     favorite INTEGER NOT NULL DEFAULT 0,
+                    tags TEXT NOT NULL DEFAULT '[]',
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -202,6 +228,7 @@ class Store:
                     node_type TEXT NOT NULL,
                     icon TEXT NOT NULL,
                     favorite INTEGER NOT NULL,
+                    tags TEXT NOT NULL DEFAULT '[]',
                     sort_order INTEGER NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -218,6 +245,11 @@ class Store:
             db.execute("CREATE INDEX IF NOT EXISTS idx_node_visits_pin_time "
                        "ON node_visits(pinned DESC, last_opened_at DESC)")
             cols = {row["name"] for row in db.execute("PRAGMA table_info(nodes)")}
+            if "tags" not in cols:
+                db.execute("ALTER TABLE nodes ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
+            trash_cols = {row["name"] for row in db.execute("PRAGMA table_info(trash_nodes)")}
+            if "tags" not in trash_cols:
+                db.execute("ALTER TABLE trash_nodes ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
             if "icon" not in cols:
                 db.execute("ALTER TABLE nodes ADD COLUMN icon TEXT NOT NULL DEFAULT 'folder'")
             if "node_type" not in cols:
@@ -451,7 +483,8 @@ class Store:
             rows = db.execute("""SELECT n.*, (i.node_id IS NOT NULL) AS has_image
                 FROM nodes n LEFT JOIN node_images i ON i.node_id = n.id
                 ORDER BY n.sort_order,n.id""").fetchall()
-            return [dict(r) | {"favorite": bool(r["favorite"]), "has_image": bool(r["has_image"])} for r in rows]
+            return [dict(r) | {"favorite": bool(r["favorite"]),
+                "has_image": bool(r["has_image"]), "tags": json.loads(r["tags"])} for r in rows]
 
     @staticmethod
     def require(db, node_id):
@@ -484,14 +517,16 @@ class Store:
         parent = validate_parent(data.get("parent_id"))
         node_type = validate_node_type(data.get("node_type", inferred_type(parent, path)))
         icon = validate_icon(data.get("icon", "folder"))
+        tags = validate_tags(data.get("tags", []))
         validate_structure(node_type, parent, path)
         stamp = now()
         with self.connect() as db:
             self.check_parent(db, None, parent)
             result = db.execute("""INSERT INTO nodes
-                (parent_id,title,folder_path,node_type,icon,favorite,sort_order,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?)""", (parent,title,path,node_type,icon,
-                int(bool(data.get("favorite",False))),self.next_order(db,parent),stamp,stamp))
+                (parent_id,title,folder_path,node_type,icon,favorite,tags,sort_order,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""", (parent,title,path,node_type,icon,
+                int(bool(data.get("favorite",False))),json.dumps(tags,ensure_ascii=False),
+                self.next_order(db,parent),stamp,stamp))
             return result.lastrowid
 
     def update(self, node_id, data):
@@ -502,6 +537,7 @@ class Store:
             parent = validate_parent(data.get("parent_id", original["parent_id"]))
             node_type = validate_node_type(data.get("node_type", original["node_type"]))
             icon = validate_icon(data.get("icon", original["icon"]))
+            tags = validate_tags(data.get("tags", json.loads(original["tags"])))
             validate_structure(node_type, parent, path, existing=original)
             self.check_parent(db, node_id, parent)
             if node_type == "leaf" and db.execute(
@@ -510,8 +546,9 @@ class Store:
             favorite = bool(data.get("favorite", original["favorite"]))
             order = original["sort_order"] if parent == original["parent_id"] else self.next_order(db,parent)
             db.execute("""UPDATE nodes SET parent_id=?,title=?,folder_path=?,node_type=?,
-                icon=?,favorite=?,sort_order=?,updated_at=? WHERE id=?""",
-                (parent,title,path,node_type,icon,int(favorite),order,now(),node_id))
+                icon=?,favorite=?,tags=?,sort_order=?,updated_at=? WHERE id=?""",
+                (parent,title,path,node_type,icon,int(favorite),
+                 json.dumps(tags,ensure_ascii=False),order,now(),node_id))
 
     @staticmethod
     def _trash_delete(db, ids):
@@ -550,10 +587,10 @@ class Store:
                 LEFT JOIN node_images i ON i.node_id=n.id
                 WHERE n.id IN ({placeholder})""", chunk).fetchall()
             db.executemany("""INSERT INTO trash_nodes(batch_id,node_id,parent_id,title,folder_path,
-                node_type,icon,favorite,sort_order,created_at,updated_at,image_mime,image_path)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", [
+                node_type,icon,favorite,tags,sort_order,created_at,updated_at,image_mime,image_path)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", [
                 (batch_id,r["id"],r["parent_id"],r["title"],r["folder_path"],r["node_type"],
-                 r["icon"],r["favorite"],r["sort_order"],r["created_at"],r["updated_at"],
+                 r["icon"],r["favorite"],r["tags"],r["sort_order"],r["created_at"],r["updated_at"],
                  r["image_mime"],r["image_path"]) for r in backups])
         # Only delete the selected roots: SQLite cascades to descendants/images.
         # Existing children have already been captured in trash_nodes above.
@@ -601,9 +638,9 @@ class Store:
                 for node_id in ready:
                     row = pending.pop(node_id)
                     db.execute("""INSERT INTO nodes(id,parent_id,title,folder_path,node_type,icon,
-                        favorite,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                        favorite,tags,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                         (row["node_id"],row["parent_id"],row["title"],row["folder_path"],
-                         row["node_type"],row["icon"],row["favorite"],row["sort_order"],
+                         row["node_type"],row["icon"],row["favorite"],row["tags"],row["sort_order"],
                          row["created_at"],row["updated_at"]))
                     if row["image_mime"] is not None:
                         self._read_image(row["image_path"])  # Refuse to restore a broken cover.
@@ -688,11 +725,11 @@ class Store:
             with self.connect() as db:
                 images={str(row["node_id"]):encode_image(row["mime_type"],self._read_image(row["image_path"]))
                     for row in db.execute("SELECT node_id,mime_type,image_path FROM node_images")}
-            return {"format":"FolderHub","version":3,"exported_at":now(),"nodes":self.all(),"images":images}
+            return {"format":"FolderHub","version":4,"exported_at":now(),"nodes":self.all(),"images":images}
 
     def import_backup(self, payload):
         if (not isinstance(payload,dict) or payload.get("format")!="FolderHub"
-            or payload.get("version") not in (1,2,3) or not isinstance(payload.get("nodes"),list)):
+            or payload.get("version") not in (1,2,3,4) or not isinstance(payload.get("nodes"),list)):
             raise UserError("不是兼容的 FolderHub 备份文件")
         raw = payload["nodes"]
         if len(raw)>20000:
@@ -709,8 +746,9 @@ class Store:
                 "parent": parent, "title": validate_title(n.get("title")),
                 "path": validate_path(n.get("folder_path")),
                 "favorite": int(bool(n.get("favorite",False))), "order": order,
-                "type": n.get("node_type") if payload["version"] in (2,3) else None,
-                "icon": validate_icon(n.get("icon", "folder"))
+                "type": n.get("node_type") if payload["version"] in (2,3,4) else None,
+                "icon": validate_icon(n.get("icon", "folder")),
+                "tags": validate_tags(n.get("tags", []) if payload["version"] == 4 else [])
             }
         child_parents = {n["parent"] for n in prepared.values() if n["parent"] is not None}
         for node_id, n in prepared.items():
@@ -735,7 +773,7 @@ class Store:
             if n["parent"] is not None and prepared[n["parent"]]["type"]=="leaf":
                 raise UserError("备份中叶子模块不能作为上级")
         backup_images={}
-        if payload["version"] == 3:
+        if payload["version"] in (3,4):
             incoming=payload.get("images",{})
             if not isinstance(incoming,dict) or len(incoming)>len(prepared):
                 raise UserError("备份图片列表无效")
@@ -759,9 +797,10 @@ class Store:
                 for node_id, n in list(pending.items()):
                     if n["parent"] is None or n["parent"] not in pending:
                         db.execute("""INSERT INTO nodes
-                            (id,parent_id,title,folder_path,node_type,icon,favorite,sort_order,created_at,updated_at)
-                            VALUES (?,?,?,?,?,?,?,?,?,?)""", (node_id,n["parent"],n["title"],
-                            n["path"],n["type"],n["icon"],n["favorite"],n["order"],now(),now()))
+                            (id,parent_id,title,folder_path,node_type,icon,favorite,tags,sort_order,created_at,updated_at)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?)""", (node_id,n["parent"],n["title"],
+                            n["path"],n["type"],n["icon"],n["favorite"],
+                            json.dumps(n["tags"],ensure_ascii=False),n["order"],now(),now()))
                         del pending[node_id]
                         progressed = True
                 if not progressed:
