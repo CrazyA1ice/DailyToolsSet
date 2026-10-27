@@ -60,6 +60,16 @@ class PortablePreferencesTests(unittest.TestCase):
             self.prefs.save({'workspaces':[updated]},expected_revision=saved['revision'])['revision'],
             saved['revision'])
 
+    def test_revision_null_only_initializes_missing_preferences_once(self):
+        self.assertIsNone(self.prefs.get()['revision'])
+        first=self.prefs.save({'theme':'forest'},expected_revision=None)
+        self.assertIsInstance(first['revision'],str)
+        baseline=(self.root/'data'/'preferences.json').read_bytes()
+        with self.assertRaises(PreferenceConflict):
+            self.prefs.save({'theme':'sand'},expected_revision=None)
+        self.assertEqual((self.root/'data'/'preferences.json').read_bytes(),baseline)
+        self.assertEqual(self.prefs.get()['settings']['theme'],'forest')
+
     def test_preference_revisions_survive_restart_and_reject_malformed_tokens(self):
         created=self.prefs.save({'theme':'forest','expanded':[1,2]})
         reopened=PreferencesStore(self.root/'data'/'preferences.json')
