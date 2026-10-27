@@ -1216,8 +1216,8 @@ async function launchActiveWorkspace(){
   const ids=item.launch_ids||[];
   if(!ids.length){toast("请先编辑工作区，在「一键启动清单」勾选需要打开的资源",true);return}
   const names=ids.map(id=>byId(id)?.title||"已删除模块 #"+id);
-  if(!confirm("即将依次打开 "+ids.length+" 项资源：\\n"+names.join("\\n")
-      +"\\n\\n只启动已选择的资源，不修改文件。是否继续？"))return;
+  if(!confirm("即将依次打开 "+ids.length+" 项资源：\n"+names.join("\n")
+      +"\n\n只启动已选择的资源，不修改文件。是否继续？"))return;
   workspaceLaunchBusy=true;
   render(true);
   try{
