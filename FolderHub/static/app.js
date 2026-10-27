@@ -1090,7 +1090,7 @@ let workspaceDraftMembers=new Set();
 let workspaceSaving=false;
 function validateWorkspaceName(value){
   const name=String(value??"").trim();
-  if(!name||name.length>40||/[\x00-\x1f\x7f]/.test(name))
+  if(!name||Array.from(name).length>40||/[\x00-\x1f\x7f]/.test(name))
     throw new Error("工作区名称必须是 1—40 字，不能包含控制字符");
   return name;
 }
