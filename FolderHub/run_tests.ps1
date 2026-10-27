@@ -36,7 +36,15 @@ try {
     $env:TMPDIR = $Scratch
     # Ensure unicode test messages survive Windows console code pages.
     $env:PYTHONIOENCODING = "utf-8"
-    $Python = (Get-Command python -CommandType Application -ErrorAction Stop).Source
+    # Multiple Python installations may match PATH. In Windows PowerShell 5.1
+    # (Get-Command ...).Source becomes an Object[] in that case; Start-Process
+    # needs one executable path string, not the list of all matches.
+    $PythonCommand = Get-Command python -CommandType Application -ErrorAction Stop |
+        Select-Object -First 1
+    $Python = [string]$PythonCommand.Source
+    if ([string]::IsNullOrWhiteSpace($Python)) {
+        throw "未找到可用于运行测试的 Python 可执行文件"
+    }
     $Process = Start-Process -FilePath $Python `
         -ArgumentList @("-m", "unittest", "discover", "-s", "tests", "-t", ".", "-v") `
         -WorkingDirectory $Project -NoNewWindow -Wait -PassThru `
