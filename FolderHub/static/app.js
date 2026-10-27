@@ -1889,13 +1889,30 @@ function fallbackCopy(url){const input=document.createElement("textarea");input.
 const quickPalette={open:false,items:[],selected:0,returnFocus:null};
 function quickCandidates(query=""){
   const term=String(query).trim();
-  const candidates=term?searchAll(term):
-    [...children(null),...state.nodes.filter(node=>Boolean(node.folder_path||node.resource_target))];
-  const seen=new Set();
-  return candidates.filter(node=>{
-    if(seen.has(node.id))return false;
-    seen.add(node.id);return true;
-  }).slice(0,12).map(node=>({node}));
+  const result=[],seen=new Set();
+  const collect=node=>{
+    if(result.length>=12||seen.has(node.id))return;
+    seen.add(node.id);
+    result.push({node});
+  };
+  if(term){
+    for(const node of searchAll(term)){
+      collect(node);
+      if(result.length>=12)break;
+    }
+  }else{
+    for(const node of children(null)){
+      collect(node);
+      if(result.length>=12)break;
+    }
+    if(result.length<12){
+      for(const node of state.nodes){
+        if(node.folder_path||node.resource_target)collect(node);
+        if(result.length>=12)break;
+      }
+    }
+  }
+  return result;
 }
 function renderQuickPalette(){
   const term=$("#quickInput").value;
