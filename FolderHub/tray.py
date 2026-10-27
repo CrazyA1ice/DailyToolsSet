@@ -111,37 +111,30 @@ def build_quick_entries(nodes,recent,workspaces):
     The existing authenticated /api/nodes/<id>/open route makes the final
     decision whether a folder, document or website can be opened.
     """
-    candidates=[]
-    for item in nodes:
+    # Keep at most eight candidates per type even with a 20,000-node
+    # library: bounded memory, one scan, and only eight Win32 menu entries.
+    buckets={"folder":[],"file":[],"url":[]}
+    for position,item in enumerate(nodes):
         if type(item) is not dict or type(item.get("id")) is not int:
             continue
         kind=item.get("resource_kind","folder")
-        if kind == "folder":
+        bucket=buckets.get(kind)
+        if bucket is None or len(bucket)>=8:
+            continue
+        if kind=="folder":
             if not item.get("folder_path"):
                 continue
             label=safe_menu_title(item.get("title"))
-        elif kind in ("file","url") and item.get("node_type") == "leaf":
-            if not item.get("resource_target"):
-                continue
+        elif item.get("node_type")=="leaf" and item.get("resource_target"):
             label=("📄 " if kind=="file" else "🌐 ")+safe_menu_title(item.get("title"),42)
         else:
             continue
-        candidates.append((kind,{"kind":"folder","target":item["id"],"label":label}))
-    # Prefer a small number of each newer resource kind so an existing
-    # collection of dozens of folders cannot hide every saved file/URL.
-    reserved=set()
-    counts={"file":0,"url":0}
-    for index,(kind,_) in enumerate(candidates):
-        if kind in counts and counts[kind]<2:
-            reserved.add(index)
-            counts[kind]+=1
-        if counts["file"]==2 and counts["url"]==2:
-            break
-    for index in range(len(candidates)):
-        if len(reserved)>=8:
-            break
-        reserved.add(index)
-    resources=[entry for index,(_,entry) in enumerate(candidates) if index in reserved]
+        bucket.append((position,{"kind":"folder","target":item["id"],"label":label}))
+    featured=buckets["file"][:2]+buckets["url"][:2]
+    remainder=sorted(buckets["folder"]+buckets["file"][2:]+buckets["url"][2:],
+                     key=lambda pair:pair[0])
+    selected=sorted(featured+remainder[:8-len(featured)],key=lambda pair:pair[0])
+    resources=[item for _,item in selected]
     entries=([{"kind":"heading","label":"快速打开资源"}]+resources) if resources else []
     groups=[{"kind":"workspace","target":item["name"],
              "label":safe_menu_title(item["name"])}
