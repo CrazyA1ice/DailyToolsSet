@@ -440,3 +440,11 @@ FolderHub/
 - 更新 `start_windows.bat` 错误信息：只有真正找不到 Python 时才提示安装；Python 运行时异常则提示查看具体 traceback。
 - 增加数据库连接必须在替换前关闭、迁移失败保留原始错误的回归测试。旧 AppData 数据保留，不覆盖已有的便携数据库。
 - 如果先前失败留下 `data/.migrate-*.db`，先停止所有 FolderHub 实例，备份 `data/` 后再检查清理；**不要删除 `data/folderhub.db` 或 `%LOCALAPPDATA%/DailyToolsSet/FolderHub/folderhub.db`**。
+
+
+## V3.7：常用文件夹自动排序
+
+- 参考 Directory Opus SmartFavorites 与 Quick Access Popup Frequent Folders，左侧快捷导航新增「▥ 常用文件夹」，按通过 FolderHub 成功打开的次数由高到低排序；次数相同按最近使用时间和模块 ID 排序。与人工「我的收藏」及按时间的「最近使用」相互独立。
+- ⚡ 快速打开面板推荐顺序调整为：置顶、人工收藏、常用文件夹、最近使用、根模块；搜索仍优先考虑关键词匹配，并对经常打开的目录提供轻微加权。访问次数与最近打开时间在常用视图的卡片中可见。
+- 新增只读 `GET /api/frequent`，复用 SQLite `node_visits`，不需要迁移数据库、不扫描磁盘，也不收集第三方应用使用历史。访问记录最多保留 200 个不同文件夹，本榜单只统计这些保留记录，页面最多显示其中前 30 项。
+- 清空最近使用会一并清除打开次数，因此常用视图也将重置；删除模块时访问记录随外键删除。用户原有的收藏、标签、智能收藏夹和全部数据路径保持不变。

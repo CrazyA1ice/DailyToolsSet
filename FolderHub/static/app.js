@@ -62,7 +62,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {savedViews:[],activeSmartView:null,openingIds:new Set(),nodes:[],trash:[],recent:[], activeTag:null, tagSelection:[], tagExcluded:[], tagMatchMode:"any", tagPickMode:"include", renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+const state = {savedViews:[],activeSmartView:null,openingIds:new Set(),nodes:[],trash:[],recent:[],frequent:[], activeTag:null, tagSelection:[], tagExcluded:[], tagMatchMode:"any", tagPickMode:"include", renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
 
 /* V3.0 — Native browser history for modules and special views.
    Search text is stored in the current tab's history.state, never in the URL. */
@@ -76,7 +76,7 @@ function routeFromLocation(){
     return Number.isSafeInteger(id)?{view:"node",id}:{view:"all",id:null};
   }
   const view=hash.slice(1);
-  return ["favorites","recent","trash","tags"].includes(view)?
+  return ["favorites","recent","frequent","trash","tags"].includes(view)?
     {view,id:null}:{view:"all",id:null};
 }
 function routeUrl(view,id=null){
@@ -276,8 +276,9 @@ function expandLineage(id){
   saveTreeState();
 }
 async function refresh(){
-  const [data,bin,usage]=await Promise.all([api("/api/nodes"),api("/api/trash"),api("/api/recent")]);
-  state.nodes=data.nodes;state.trash=bin.items;state.recent=usage.items;
+  const [data,bin,usage,frequent]=await Promise.all([
+    api("/api/nodes"),api("/api/trash"),api("/api/recent"),api("/api/frequent")]);
+  state.nodes=data.nodes;state.trash=bin.items;state.recent=usage.items;state.frequent=frequent.items;
   rebuildNodeIndex();
   if(!state.treeInitialized){
     const saved=initialExpanded;
@@ -374,6 +375,7 @@ function renderNav(){
   $("#trashCount").textContent=state.trash.length;
   $("#tagCount").textContent=new Set(state.nodes.flatMap(n=>n.tags||[])).size;
   $("#recentCount").textContent=state.recent.length;
+  $("#frequentCount").textContent=state.frequent.length;
   document.querySelectorAll("#specialNav [data-view]").forEach(el=>el.classList.toggle("active",state.view===el.dataset.view));
   const walk=(nodes) => nodes.map(n=>{
     const sub=children(n.id), expand=sub.length>0 && state.expanded.has(n.id), isLeaf=n.node_type==="leaf";
@@ -408,6 +410,7 @@ function renderCrumb(){
   }
   if(state.view==="favorites") bits.push(`<span>›</span><strong>我的收藏</strong>`);
   if(state.view==="recent") bits.push(`<span>›</span><strong>最近使用</strong>`);
+  if(state.view==="frequent") bits.push(`<span>›</span><strong>常用文件夹</strong>`);
   if(state.view==="tags") bits.push(`<span>›</span><strong>标签筛选${state.activeTag?" · "+h(state.activeTag):""}</strong>`);
   if(state.view==="trash") bits.push(`<span>›</span><strong>回收站</strong>`);
   if(state.view==="node"){
@@ -582,9 +585,14 @@ function card(n,reorderable=false,keyboardActive=false){
   const linked=!!n.folder_path;
   const leaf=n.node_type==="leaf";
   const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
-  const usage=state.view==="recent" && !state.search ? state.recent.find(item=>item.node_id===n.id) : null;
+  const usage=!state.search && state.view==="recent"?
+    state.recent.find(item=>item.node_id===n.id):
+    !state.search && state.view==="frequent"?
+      state.frequent.find(item=>item.node_id===n.id):null;
   const lastUsed=usage?new Date(usage.last_opened_at):null;
-  const recentText=usage?`${usage.pinned?"📌 已置顶 · ":""}最近打开：${lastUsed && !Number.isNaN(lastUsed.getTime()) ? lastUsed.toLocaleString("zh-CN") : "未知时间"} · 累计 ${Number(usage.open_count)||0} 次`:"";
+  const recentText=usage?(state.view==="frequent"?
+    `▥ 累计打开 ${Number(usage.open_count)||0} 次 · 最近使用：${lastUsed && !Number.isNaN(lastUsed.getTime())?lastUsed.toLocaleString("zh-CN"):"未知"}`:
+    `${usage.pinned?"📌 已置顶 · ":""}最近打开：${lastUsed && !Number.isNaN(lastUsed.getTime()) ? lastUsed.toLocaleString("zh-CN") : "未知时间"} · 累计 ${Number(usage.open_count)||0} 次`):"";
   const contextText=state.search?`所属：${lineage}`:recentText;
   // List metadata belongs in the primary information column, not the grid's
   // auxiliary sibling row (which was deliberately hidden in list mode).
@@ -602,7 +610,7 @@ function card(n,reorderable=false,keyboardActive=false){
     </div>
     <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${h(iconFor(n))}</span>
       <div class="card-actions">
-        ${usage && !state.selectMode?`<button type="button" class="small-action recent-pin ${usage.pinned?"on":""}" title="${usage.pinned?"取消置顶":"置顶到最近使用顶部"}" aria-label="${usage.pinned?"取消置顶":"置顶"} ${h(n.title)}" data-action="pin" data-id="${n.id}">${usage.pinned?"📌":"📍"}</button>`:""}
+        ${usage && state.view==="recent" && !state.selectMode?`<button type="button" class="small-action recent-pin ${usage.pinned?"on":""}" title="${usage.pinned?"取消置顶":"置顶到最近使用顶部"}" aria-label="${usage.pinned?"取消置顶":"置顶"} ${h(n.title)}" data-action="pin" data-id="${n.id}">${usage.pinned?"📌":"📍"}</button>`:""}
         ${state.selectMode?`<button type="button" class="card-select" data-action="select" data-id="${n.id}" aria-pressed="${state.selectedIds.has(n.id)}" aria-label="${state.selectedIds.has(n.id)?'取消选择':'选择'} ${h(n.title)}">${state.selectedIds.has(n.id)?'✓':'○'}</button>`:''}
         ${reorderable && !state.selectMode?`<button type="button" class="small-action sort-grip" draggable="true" data-drag="${n.id}" title="拖动调整同级顺序，也可使用上下箭头键" aria-label="移动 ${h(n.title)}：拖动排序或按上下箭头键">⠿</button>`:""}
         ${!state.selectMode?`<button type="button" class="small-action card-more" title="更多操作" aria-label="更多操作：${h(n.title)}" data-action="menu" data-id="${n.id}">⋯</button>`:''}
@@ -664,7 +672,8 @@ function render(skipNav=false){
   renderCrumb();
   renderTagFilters();
   const trashView=state.view==="trash"&&!state.search.trim();
-  $("#newBtn").hidden=trashView || (state.view==="recent"&&!state.search.trim());
+  $("#newBtn").hidden=trashView ||
+    (["recent","frequent"].includes(state.view)&&!state.search.trim());
   $("#selectModeBtn").hidden=trashView;
   if(trashView){
     state.visibleIds=[];
@@ -686,6 +695,10 @@ function render(skipNav=false){
     display=state.recent.map(item=>byId(item.node_id)).filter(Boolean);
     sectionTitle="最近打开的文件夹";
   }
+  else if(state.view==="frequent"){
+    display=state.frequent.map(item=>byId(item.node_id)).filter(Boolean);
+    sectionTitle="常用文件夹 · 按累计打开次数排序";
+  }
   else if(state.view==="tags"){
     display=sorted(filterTaggedNodes(state.nodes,state.tagSelection,state.tagExcluded,state.tagMatchMode));
     sectionTitle=state.tagSelection.length||state.tagExcluded.length?"组合标签筛选":"全部已标记模块";
@@ -701,6 +714,8 @@ function render(skipNav=false){
     `跨目录匹配 ${display.length} 个模块 · 包含 ${state.tagSelection.length} 个，排除 ${state.tagExcluded.length} 个标签（${state.tagMatchMode==="all"?"AND":"OR"}）` :
     state.view==="recent"&&!searching?
     "置顶项目优先显示，其余按最近打开时间排列 · 只记录通过 FolderHub 打开的文件夹":
+    state.view==="frequent"&&!searching?
+    "累计打开次数降序排列，同次数按最近使用时间排序 · 最多统计当前保留的 200 条访问记录":
     `共 ${display.length} 个项目 · ${searching?'搜索覆盖整个目录树，结果显示完整所属层级':'叶子模块直接打开文件资源管理器'}`;
   const canAddChild=state.view==="node"&&!searching&&byId(state.selected)?.node_type!=="leaf";
   $("#newBtnText").textContent=canAddChild?"新建子模块":"新建根模块";
@@ -719,6 +734,8 @@ function render(skipNav=false){
     (display.length>page.length?`<div class="load-more"><span>已显示 ${page.length} / ${display.length} 项</span><button type="button" class="outline-btn" data-action="load-more">加载更多模块 ↓</button></div>`:""):
     state.view==="recent"&&!searching?
       '<div class="empty-state"><div class="empty-art">◷</div><h3>还没有最近访问记录</h3><p>通过 FolderHub 打开文件夹后，会自动显示在这里。</p></div>':
+    state.view==="frequent"&&!searching?
+      '<div class="empty-state"><div class="empty-art">▥</div><h3>还没有常用文件夹</h3><p>通过 FolderHub 打开文件夹后，会按使用次数自动排列。</p></div>':
       emptyView();
   updateBatchBar();
 }
@@ -906,9 +923,11 @@ async function openFolder(id){
     await mutate("POST",`/api/nodes/${id}/open`);
     toast("已向 Windows 资源管理器发送打开指令，并尝试将窗口置前");
     try{
-      state.recent=(await api("/api/recent")).items;
+      const [recent,frequent]=await Promise.all([api("/api/recent"),api("/api/frequent")]);
+      state.recent=recent.items;state.frequent=frequent.items;
       $("#recentCount").textContent=state.recent.length;
-      if(state.view==="recent"&&!state.search.trim())render(true);
+      $("#frequentCount").textContent=state.frequent.length;
+      if(["recent","frequent"].includes(state.view)&&!state.search.trim())render(true);
     }catch(_){/* opening succeeded even if history refresh fails */}
   }catch(e){toast(e.message,true)}
   finally{
@@ -950,7 +969,7 @@ async function clearRecentHistory(){
   if(!confirm("确定清空最近使用记录吗？\\n\\n只清除访问时间和次数，不会删除任何模块或电脑中的文件夹。"))return;
   try{
     const result=await mutate("DELETE","/api/recent",{});
-    state.recent=[];render();toast(`已清空 ${result.cleared} 条访问记录`);
+    state.recent=[];state.frequent=[];render();toast(`已清空 ${result.cleared} 条访问记录`);
   }catch(e){toast("清空失败："+e.message,true)}
 }
 async function act(action,id){
@@ -1328,26 +1347,31 @@ const quickPalette={open:false,items:[],selected:0,returnFocus:null};
 function quickCandidates(query=""){
   const term=String(query).trim();
   const knownRecent=new Map(state.recent.map((row,index)=>[row.node_id,{...row,index}]));
+  const knownFrequent=new Map(state.frequent.map(row=>[row.node_id,row]));
   if(term){
     const lower=term.toLocaleLowerCase();
     const matches=searchAll(term);
     return matches.map(node=>{
-      const visit=knownRecent.get(node.id),title=node.title.toLocaleLowerCase();
+      const visit=knownRecent.get(node.id)||knownFrequent.get(node.id);
+      const title=node.title.toLocaleLowerCase();
       let score=title===lower?0:title.startsWith(lower)?1:2;
       if(node.favorite)score-=.35;
       if(visit?.pinned)score-=.45;
       else if(visit)score-=.12;
+      if(knownFrequent.has(node.id))
+        score-=Math.min(.25,Math.log2(1+Number(knownFrequent.get(node.id).open_count||0))*.045);
       return {node,visit,score};
     }).sort((a,b)=>a.score-b.score||a.node.title.localeCompare(b.node.title,"zh-CN")).slice(0,12);
   }
   const seen=new Set(),results=[];
   const add=node=>{
     if(!node||seen.has(node.id))return;
-    seen.add(node.id);results.push({node,visit:knownRecent.get(node.id)||null});
+    seen.add(node.id);results.push({node,visit:knownRecent.get(node.id)||knownFrequent.get(node.id)||null});
   };
-  // Pin first; then favorites; then recent folders; finally root modules.
+  // Pinned and explicit favorites first; frequently used, then recent items.
   for(const visit of state.recent)if(visit.pinned)add(byId(visit.node_id));
   for(const node of sorted(state.nodes.filter(n=>n.favorite)))add(node);
+  for(const visit of state.frequent)add(byId(visit.node_id));
   for(const visit of state.recent)add(byId(visit.node_id));
   for(const node of children(null))add(node);
   return results.slice(0,12);
@@ -1366,7 +1390,9 @@ function renderQuickPalette(){
   results.innerHTML=quickPalette.items.map(({node,visit},index)=>{
     const path=node.folder_path||ancestors(node.id).map(n=>n.title).join(" / ");
     const label=(node.tags||[]).length?path+" · 标签："+node.tags.join("、"):path;
-    const kinds=[visit?.pinned?"置顶":null,node.favorite?"收藏":null,visit&&!visit.pinned?"最近使用":null].filter(Boolean);
+    const kinds=[visit?.pinned?"置顶":null,node.favorite?"收藏":null,
+      knownFrequent.has(node.id)?`常用 ${knownFrequent.get(node.id).open_count} 次`:null,
+      visit&&!visit.pinned&&!knownFrequent.has(node.id)?"最近使用":null].filter(Boolean);
     const suffix=kinds.length?kinds.join(" · "):node.node_type==="leaf"?"文件夹":"模块";
     return `<button type="button" class="quick-result" id="quick-option-${index}" role="option" aria-selected="false" data-quick-index="${index}">
       <span class="quick-icon" aria-hidden="true">${h(iconFor(node))}</span>

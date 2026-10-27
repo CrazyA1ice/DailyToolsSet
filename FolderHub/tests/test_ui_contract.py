@@ -313,6 +313,17 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('const previouslySelected=state.tagSelection.includes(tag)',self.js)
         self.assertIn('subset.push(row||[tag,0]);',self.js)
 
+    def test_frequent_access_is_distinct_from_recent(self):
+        self.assertIn('data-view="frequent"',self.html)
+        self.assertIn('id="frequentCount"',self.html)
+        self.assertIn('"/api/frequent"',self.js)
+        self.assertIn('state.frequent=frequent.items',self.js)
+        self.assertIn('state.frequent.map(item=>byId(item.node_id)).filter(Boolean)',self.js)
+        self.assertIn('sectionTitle="常用文件夹 · 按累计打开次数排序"',self.js)
+        self.assertIn('for(const visit of state.frequent)add(byId(visit.node_id))',self.js)
+        self.assertIn('state.recent=[];state.frequent=[];',self.js)
+        self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)

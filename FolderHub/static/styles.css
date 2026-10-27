@@ -903,3 +903,7 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
 .tag-filter-toolbar .smart-view-actions .tag-mode.smart-save{font-weight:750;color:var(--accent)}
 .smart-active{font-size:.81rem;max-width:230px;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap;color:var(--muted)}
+
+/* V3.7 — frequency ranking, distinctly separate from recency and manual favorites. */
+#specialNav [data-view="frequent"].active .nav-count{color:var(--accent);font-weight:750}
+.entries.list .entry-card .list-card-context{font-variant-numeric:tabular-nums}

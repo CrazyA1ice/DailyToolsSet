@@ -444,6 +444,19 @@ class Store:
                 ORDER BY v.pinned DESC, v.last_opened_at DESC, v.node_id DESC
                 LIMIT ?""", (limit,))]
 
+    def frequent(self, limit=30):
+        """Frequency-ranked linked folders from existing bounded visit records."""
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise UserError("常用文件夹数量无效")
+        with self.connect() as db:
+            return [dict(row) for row in db.execute("""
+                SELECT v.node_id, v.open_count, v.last_opened_at, v.pinned
+                FROM node_visits AS v JOIN nodes AS n ON n.id = v.node_id
+                WHERE n.folder_path IS NOT NULL AND n.folder_path != ''
+                  AND v.open_count > 0
+                ORDER BY v.open_count DESC, v.last_opened_at DESC, v.node_id DESC
+                LIMIT ?""", (limit,))]
+
     def record_open(self, node_id):
         """Record only successful Explorer launches; deleted nodes cascade automatically."""
         with self.connect() as db:
@@ -1039,6 +1052,10 @@ class Handler(BaseHTTPRequestHandler):
                     data=self.request_json()
                     return self.reply(200,self.server.store.set_recent_pin(
                         data.get("node_id"), data.get("pinned")))
+                return self.reply(405,{"error":"不支持的请求方法"})
+            if path=="/api/frequent":
+                if method=="GET":
+                    return self.reply(200,{"items":self.server.store.frequent()})
                 return self.reply(405,{"error":"不支持的请求方法"})
             if path=="/api/recent":
                 if method=="GET":
