@@ -1358,7 +1358,9 @@ class Handler(BaseHTTPRequestHandler):
                     except UserError:
                         entry["supported"] = False
                 return self.reply(200,result)
-            if method=="GET" and path=="/api/quick-menu":
+            if path=="/api/quick-menu":
+                if method!="GET":
+                    return self.reply(405,{"error":"不支持的请求方法"})
                 # Minimal read-only snapshot for the native global hotkey.
                 # Maximum 24 linked resources + eight named workspaces.
                 names = self.server.store.preferences.get()["settings"]["workspaces"][:8]
