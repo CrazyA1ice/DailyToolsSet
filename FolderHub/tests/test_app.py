@@ -596,7 +596,10 @@ class RecentUsageHttpTests(unittest.TestCase):
         with patch.object(app,"open_in_explorer",return_value=None):
             self.assertEqual(self.request("POST",url,{})[0],200)
         self.assertEqual(self.request("GET","/api/recent")[1]["items"][0]["node_id"],leaf)
-        self.assertEqual(self.request("DELETE","/api/recent",{},token=False)[0],403)
+        # Windows may reset the socket when an unauthenticated request body
+        # remains unread before the HTTP/1.0 handler closes the connection.
+        for _ in range(4):
+            self.assertEqual(self.request("DELETE","/api/recent",{},token=False)[0],403)
         self.assertEqual(self.request("DELETE","/api/recent",{},origin="https://evil.example")[0],403)
         self.assertEqual(self.request("DELETE","/api/recent",{})[1]["cleared"],1)
         self.assertEqual(len(self.srv.store.all()),2)

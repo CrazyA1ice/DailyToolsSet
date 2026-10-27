@@ -485,3 +485,6 @@ FolderHub/
 - 修复标签重命名使用 `rowid` 在 `INTEGER PRIMARY KEY` 表里被 SQLite 列别名覆盖导致 `IndexError`：现在为内部行标识使用明确的 `_tag_rowid` 别名。
 - 修正 Windows 测试夹具的临时数据库连接未关闭和缺少事务提交问题，并使 5 项前端静态契约断言与实际最新功能保持一致。新增回收站重建后的标签列验证。
 - 本仓库修复已提交，但完整 Windows 测试仍需在本机通过 `python -m unittest discover -s FolderHub/tests -t FolderHub -v` 执行；如果测试出现新的失败，请保留末尾 `FAIL/ERROR` 段落，不要删除正式 `data/folderhub.db`。
+
+
+- 对拒绝的本地 HTTP 写入请求，服务端会限量（最多 16 KiB、最多等待 0.4 秒）消费已发送的请求体，再返回 403，避免 Windows 端因短请求体未读而将正常鉴权拒绝误报为 `WinError 10054`；不改变 Host、Origin、Token 安全边界。

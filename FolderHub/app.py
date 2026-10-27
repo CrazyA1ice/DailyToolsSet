@@ -1057,12 +1057,35 @@ class Handler(BaseHTTPRequestHandler):
             raise UserError("JSON 请求必须是对象")
         return payload
 
+    def reject_unauthorized(self, message):
+        """Finish small local request bodies before closing an HTTP/1.0 connection.
+
+        On Windows an early close with unread POST/DELETE bytes can make the
+        client see WinError 10054 instead of our 403 JSON response. Never drain
+        unbounded, malformed or slow bodies from an unauthenticated client.
+        """
+        self.close_connection = True
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError):
+            size = 0
+        if 0 < size <= 16 * 1024:
+            old_timeout = self.connection.gettimeout()
+            try:
+                self.connection.settimeout(0.4)
+                self.rfile.read(size)
+            except (OSError, ValueError):
+                pass
+            finally:
+                self.connection.settimeout(old_timeout)
+        return self.reply(403, {"error": message})
+
     def serve(self, method):
         if not self.check_host():
-            return self.reply(403,{"error":"访问地址不被允许"})
+            return self.reject_unauthorized("访问地址不被允许")
         path = urlparse(self.path).path
         if method!="GET" and not self.authorized():
-            return self.reply(403,{"error":"安全验证失败，请刷新页面"})
+            return self.reject_unauthorized("安全验证失败，请刷新页面")
         try:
             if method=="GET" and path=="/api/config":
                 return self.reply(200,{"token":self.server.token,"platform":sys.platform})
