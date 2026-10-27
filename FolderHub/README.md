@@ -703,3 +703,11 @@ powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1
 - Windows PowerShell 5.1 中，`Get-Command python -CommandType Application` 在环境变量 `PATH` 存在多个 Python 安装时可能返回多个可执行文件。直接访问 `(Get-Command ...).Source` 会得到 `System.Object[]`，导致 `Start-Process -FilePath` 报错。
 - `run_tests.ps1` 现在用 `Select-Object -First 1` **明确选出与命令行搜索顺序一致的单个 Python**，再转换为字符串并检查非空。上一轮对正常 `unittest -v` stderr 的独立重定向仍然保留，真实失败退出码不受影响。
 - 更新后在 `DailyToolsSet` 根目录执行 `git pull origin main`，再运行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`。日志保存在 `FolderHub/test-results/`，不会在项目外生成测试文件。此修复已补源码回归检查，仍需本地 Windows PowerShell 5.1 实际运行确认。
+
+## V5.6.3：Windows PowerShell 5.1 测试脚本编码兼容
+
+- **故障原因**：Windows PowerShell 5.1 对没有 UTF-8 BOM 的 `.ps1` 可能采用系统 ANSI 编码读取。旧版 `run_tests.ps1` 内嵌中文错误提示及日志标签，因此在部分中文 Windows 系统上被错误解码，引起字符串引号错位、`UnexpectedToken: -m`、`Try` 或 `finally` 结构解析失败。这是 PowerShell 脚本解析问题，不能说明 Python 单元测试失败。
+- **修复方式**：将 `FolderHub/run_tests.ps1` 的源代码统一为 **ASCII-only**（不含非 ASCII 的注释或字符串），避免脚本语法依赖 BOM/代码页；继续以 UTF-8 保存 Python 测试日志，因此中文测试结果仍能保留。去掉不稳妥的 PowerShell 反引号续行，改用参数哈希表（splatting）启动 Python。
+- **继承已有修复**：仍从 `PATH` 选出唯一的 Python 可执行路径；仍让 `unittest -v` 的 stderr 直接进入 `FolderHub/tmp/` 临时文件，不经过 Windows PowerShell 的错误管道；仍将 stdout/stderr 合并到 `FolderHub/test-results/`，并准确返回 Python 的退出码；运行后恢复环境变量并清理临时捕获文件。
+- **回归保护**：`test_runner_contract.py` 增加源文件字节级 ASCII 检查、禁用反引号换行，以及在 Windows 机器上调用 `powershell.exe` 的 AST 解析器进行**真实脚本语法检查（只解析，不递归执行测试）**。
+- **本机运行**：在仓库根目录先执行 `git pull origin main`，再运行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`，最后执行 `echo $LASTEXITCODE`。预期日志提示改为英文 `Test log:`，避免代码页问题；测试日志内容可保留中文。若后续出现 `FAILED`，再根据该日志处理真正的 Python 测试失败。
