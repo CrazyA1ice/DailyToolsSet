@@ -697,3 +697,9 @@ powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1
 - **保证兼容**：保持 Windows PowerShell 5.1 / PowerShell 7 兼容用法；使用 UTF-8 捕获中文测试输出；测试结束后恢复原有 `TEMP`、`TMP`、`TMPDIR`、`PYTHONIOENCODING`，删除临时捕获文件。未新增第三方 Python 依赖，也不在仓库外生成日志。
 - **运行方式**：更新仓库后在 `DailyToolsSet` 根目录执行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`，完成时应看到测试结果文件路径和 `Ran ... tests` / `OK` 或 `FAILED` 摘要。若测试报告 `FAILED`，请依据同一日志定位 Python 测试本身的问题。
 - **验证范围**：新增跨平台静态回归检查，确保 `unittest` stderr 不再进入 PowerShell 的错误管道、测试结果遵循真实退出码及日志目录边界。Windows PowerShell 5.1 真机完整运行需要在用户设备上验收。
+
+## V5.6.2：修复多 Python 安装时测试启动失败
+
+- Windows PowerShell 5.1 中，`Get-Command python -CommandType Application` 在环境变量 `PATH` 存在多个 Python 安装时可能返回多个可执行文件。直接访问 `(Get-Command ...).Source` 会得到 `System.Object[]`，导致 `Start-Process -FilePath` 报错。
+- `run_tests.ps1` 现在用 `Select-Object -First 1` **明确选出与命令行搜索顺序一致的单个 Python**，再转换为字符串并检查非空。上一轮对正常 `unittest -v` stderr 的独立重定向仍然保留，真实失败退出码不受影响。
+- 更新后在 `DailyToolsSet` 根目录执行 `git pull origin main`，再运行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`。日志保存在 `FolderHub/test-results/`，不会在项目外生成测试文件。此修复已补源码回归检查，仍需本地 Windows PowerShell 5.1 实际运行确认。
