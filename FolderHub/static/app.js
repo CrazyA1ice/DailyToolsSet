@@ -270,23 +270,53 @@ let toastTimer;
 let nodeById = new Map();
 let childrenByParent = new Map();
 let searchRecords = [];
+let indexedTagCount = 0;
+let cachedSearch = null;
 const byId = id => nodeById.get(id);
 const sorted = nodes => [...nodes].sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
 const children = id => childrenByParent.get(id??null) || [];
+
+// Cache each ancestor chain once instead of recomputing its prefix for
+// every descendant in large/deep navigation trees. Cycles are bounded.
+function buildSearchRecords(nodes,lookup){
+  const chainCache=new Map();
+  function lineage(node){
+    if(chainCache.has(node.id))return chainCache.get(node.id);
+    const pending=[],visited=new Set();
+    let cursor=node;
+    while(cursor&&!chainCache.has(cursor.id)&&!visited.has(cursor.id)){
+      pending.push(cursor);
+      visited.add(cursor.id);
+      cursor=lookup.get(cursor.parent_id);
+    }
+    let prefix=cursor&&chainCache.has(cursor.id)?chainCache.get(cursor.id):"";
+    while(pending.length){
+      const part=pending.pop();
+      prefix=prefix?prefix+" /"+part.title:part.title;
+      chainCache.set(part.id,prefix);
+    }
+    return chainCache.get(node.id)||"";
+  }
+  return nodes.map(node=>{
+    const own=(node.title+" "+(node.folder_path||node.resource_target||"")).toLocaleLowerCase();
+    const full=lineage(node).toLocaleLowerCase();
+    return {node,own,body:own+" "+full+" "+(node.tags||[]).join(" ").toLocaleLowerCase()};
+  });
+}
 function rebuildNodeIndex(){
   nodeById = new Map(state.nodes.map(node=>[node.id,node]));
   childrenByParent = new Map();
+  const tagNames=new Set();
   for(const node of state.nodes){
     const parent = node.parent_id??null;
     if(!childrenByParent.has(parent))childrenByParent.set(parent,[]);
     childrenByParent.get(parent).push(node);
+    for(const tag of node.tags||[])tagNames.add(tag);
   }
+  indexedTagCount=tagNames.size;
   for(const nodes of childrenByParent.values())nodes.sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
-  searchRecords=state.nodes.map(node=>{
-    const own=(node.title+" "+(node.folder_path||node.resource_target||"")).toLocaleLowerCase();
-    const full=ancestors(node.id).map(entry=>entry.title).join(" /").toLocaleLowerCase();
-    return {node,own,body:own+" "+full+" "+(node.tags||[]).join(" ").toLocaleLowerCase()};
-  });
+  searchRecords=buildSearchRecords(state.nodes,nodeById);
+  cachedSearch=null;
 }
 
 function toast(message, error=false, action=null) {
@@ -429,7 +459,7 @@ function toggleBranch(id){
 function renderNav(){
   const roots=children(null);
   $("#rootCount").textContent=roots.length;
-  $("#tagCount").textContent=new Set(state.nodes.flatMap(n=>n.tags||[])).size;
+  $("#tagCount").textContent=indexedTagCount;
   document.querySelectorAll("#specialNav [data-view]").forEach(el=>el.classList.toggle("active",state.view===el.dataset.view));
   const walk=(nodes) => nodes.map(n=>{
     const sub=children(n.id), expand=sub.length>0 && state.expanded.has(n.id), isLeaf=n.node_type==="leaf";
@@ -740,15 +770,36 @@ function emptyView(){
     <p>${searching?'换个名称或路径关键词试试':'点击“新建模块”，建立你的第一层文件夹导航。'}</p>
     ${searching?'':`<button class="primary-btn" data-action="empty-create">＋ 创建模块</button>`}</div>`;
 }
+// Coalesce bursts of browser input events into one frame. Keyboard navigation
+// can flush the pending frame synchronously, preserving its focus semantics.
+let searchRenderFrame=null;
+function flushSearchRender(){
+  if(searchRenderFrame!==null){
+    cancelAnimationFrame(searchRenderFrame);
+    searchRenderFrame=null;
+  }
+  render(true);rememberNavigation();
+}
+function queueSearchRender(){
+  if(searchRenderFrame!==null)return;
+  searchRenderFrame=requestAnimationFrame(()=>{
+    searchRenderFrame=null;
+    render(true);rememberNavigation();
+  });
+}
 function searchAll(term){
-  const words=term.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  if(!words.length)return [];
-  return searchRecords.filter(item=>words.every(word=>item.body.includes(word)))
+  const query=String(term).trim().toLocaleLowerCase();
+  if(!query)return [];
+  if(cachedSearch?.query===query)return cachedSearch.result;
+  const words=query.split(/\s+/).filter(Boolean);
+  const result=searchRecords.filter(item=>words.every(word=>item.body.includes(word)))
     .sort((a,b)=>{
       const aOwn=words.every(word=>a.own.includes(word))?0:1;
       const bOwn=words.every(word=>b.own.includes(word))?0:1;
       return aOwn-bOwn || a.node.title.localeCompare(b.node.title,"zh-CN");
     }).map(item=>item.node);
+  cachedSearch={query,result};
+  return result;
 }
 function render(skipNav=false){
   if((state.view==="node" && !byId(state.selected)) ||
@@ -756,8 +807,8 @@ function render(skipNav=false){
     state.view="all";state.selected=null;state.activeWorkspace=null;
     if(navigationReady)window.history.replaceState(navigationSnapshot(),"",routeUrl("all"));
   }
+  // Selection, layout and keystrokes change cards, not side navigation.
   if(!skipNav)renderNav();
-  else {renderSavedViews();renderFolderGroups();renderWorkspaces()}
   renderCrumb();
   renderWorkspaceResources();
   renderTagFilters();
@@ -2182,12 +2233,15 @@ function bind(){
   $("#sectionOperations").addEventListener("click",e=>{const btn=e.target.closest("[data-action]");if(btn)act(btn.dataset.action,state.selected)});
   $("#addRoot").addEventListener("click",()=>editDialog(null,null));
   $("#newBtn").addEventListener("click",()=>editDialog());
-  $("#search").addEventListener("input",e=>{closeCardMenu();state.selectedIds.clear();state.search=e.target.value;state.searchKeyboardIndex=-1;state.renderLimit=100;render(true);rememberNavigation()});
+  $("#search").addEventListener("input",e=>{
+    closeCardMenu();state.selectedIds.clear();state.search=e.target.value;
+    state.searchKeyboardIndex=-1;state.renderLimit=100;queueSearchRender();
+  });
   $("#search").addEventListener("keydown",async e=>{
     if(!state.search.trim())return;
     if(e.key==="Escape"){
       e.preventDefault();e.stopPropagation();state.search="";state.searchKeyboardIndex=-1;
-      $("#search").value="";state.renderLimit=100;render(true);rememberNavigation();return;
+      $("#search").value="";state.renderLimit=100;flushSearchRender();return;
     }
     if(!["ArrowDown","ArrowUp","Enter"].includes(e.key))return;
     const results=searchAll(state.search);
@@ -2203,7 +2257,7 @@ function bind(){
       old<0?results.length-1:(old-1+results.length)%results.length;
     if(state.searchKeyboardIndex>=state.renderLimit)
       state.renderLimit=Math.ceil((state.searchKeyboardIndex+1)/100)*100;
-    render(true);rememberNavigation();
+    flushSearchRender();
     document.getElementById(`folderhub-entry-${results[state.searchKeyboardIndex].id}`)?.scrollIntoView({block:"nearest"});
   });
   $("#layoutBtn").addEventListener("click",()=>{
