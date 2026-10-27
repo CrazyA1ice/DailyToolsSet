@@ -1215,13 +1215,21 @@ async function launchActiveWorkspace(){
   if(!item)return;
   const ids=item.launch_ids||[];
   if(!ids.length){toast("请先编辑工作区，在「一键启动清单」勾选需要打开的资源",true);return}
-  const names=ids.map(id=>byId(id)?.title||"已删除模块 #"+id);
+  // Confirm a frozen snapshot: a second tab may edit names, types, paths or
+  // launch order while this page is open. The backend must match every field.
+  const expectedItems=ids.map(id=>{
+    const node=byId(id);
+    const kind=node?.resource_kind||"folder";
+    return {id,title:node?.title??null,kind:node?kind:null,
+      target:node?(kind==="folder"?node.folder_path??null:node.resource_target??null):null};
+  });
+  const names=expectedItems.map(item=>item.title||"已删除模块 #"+item.id);
   if(!confirm("即将依次打开 "+ids.length+" 项资源：\n"+names.join("\n")
       +"\n\n只启动已选择的资源，不修改文件。是否继续？"))return;
   workspaceLaunchBusy=true;
   render(true);
   try{
-    const result=await mutate("POST","/api/workspaces/launch",{name:item.name});
+    const result=await mutate("POST","/api/workspaces/launch",{name:item.name,expected_items:expectedItems});
     showWorkspaceLaunchResult(result);
   }catch(error){toast("启动工作区失败："+error.message,true)}
   finally{workspaceLaunchBusy=false;render(true)}
