@@ -177,3 +177,16 @@ class TrayServiceTests(TestCase):
                          ['heading','folder','heading','workspace'])
         self.assertEqual(len(calls),3)
         self.assertTrue(all('/api/' in url for url in calls))
+
+    def test_windows_message_handler_routes_global_hotkey(self):
+        window=tray.WindowsTray.__new__(tray.WindowsTray)
+        window.hwnd=123
+        window._show_quick_menu=MagicMock()
+        window.user32=MagicMock()
+        window.taskbar_created=99
+        result=window._window_proc(123,window.WM_HOTKEY,tray.HOTKEY_ID,0)
+        self.assertEqual(result,0)
+        window._show_quick_menu.assert_called_once_with()
+        window._show_quick_menu.reset_mock()
+        window._window_proc(123,window.WM_HOTKEY,tray.HOTKEY_ID+1,0)
+        window._show_quick_menu.assert_not_called()
