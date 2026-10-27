@@ -389,6 +389,12 @@ function ancestors(id) {
   return result;
 }
 function setView(view,id=null,{fromHistory=false,saved=null}={}){
+  // A pending search frame would otherwise redraw a view that was just
+  // replaced by navigation within the same event-loop turn.
+  if(searchRenderFrame!==null){
+    cancelAnimationFrame(searchRenderFrame);
+    searchRenderFrame=null;
+  }
   if(!fromHistory)rememberNavigation();
   closeCardMenu();exitSelectMode();
   if(view==="node"&&!byId(id)){view="all";id=null}
@@ -1926,7 +1932,7 @@ function renderQuickPalette(){
   }
   quickPalette.selected=0;
   results.innerHTML=quickPalette.items.map(({node},index)=>{
-    const path=node.folder_path||ancestors(node.id).map(n=>n.title).join(" / ");
+    const path=node.folder_path||node.resource_target||ancestors(node.id).map(n=>n.title).join(" / ");
     const label=(node.tags||[]).length?path+" · 标签："+node.tags.join("、"):path;
     const suffix=node.node_type==="leaf"?(node.resource_kind==="url"?"网页":node.resource_kind==="file"?"文件":"文件夹"):"模块";
     return `<button type="button" class="quick-result" id="quick-option-${index}" role="option" aria-selected="false" data-quick-index="${index}">
@@ -2266,6 +2272,10 @@ function bind(){
     if(state.selectMode && e.key==="Enter")return;
     e.preventDefault();e.stopPropagation();
     if(e.key==="Enter"){
+      if(searchRenderFrame!==null){
+        cancelAnimationFrame(searchRenderFrame);
+        searchRenderFrame=null;
+      }
       const index=state.searchKeyboardIndex<0?0:Math.min(state.searchKeyboardIndex,results.length-1);
       await act("primary",results[index].id);return;
     }
