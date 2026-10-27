@@ -998,13 +998,15 @@ async function openFolder(id){
   }
 }
 async function removeNode(id){
-  const n=byId(id);if(!n)return;
+  const node=byId(id);if(!node)return;
   const count=descendants(id).size-1;
-  if(!confirm(`确定将「${n.title}」${count?`及其 ${count} 个下级模块`:''}移入导航回收站吗？\n\n真实文件夹不会被移动或删除，可在回收站恢复。`))return;
-  try{const result=await mutate("DELETE",`/api/nodes/${id}`);await refresh();
-    toast(`已移入回收站（共 ${result.deleted} 条导航记录）`,false,
-      {label:"撤销",handler:()=>restoreTrash(result.trash_id)})}
-  catch(e){toast(e.message,true)}
+  if(!confirm("从导航中移除「"+node.title+"」"+(count?"及 "+count+" 个子模块":"")+
+    "？\n\n不会影响磁盘文件夹。建议提前下载完整备份。"))return;
+  try{
+    await mutate("DELETE",`/api/nodes/${id}`);
+    await refresh();
+    toast("导航记录已移除，磁盘文件未受影响");
+  }catch(e){toast(e.message,true)}
 }
 async function act(action,id){
   switch(action){
@@ -1473,20 +1475,18 @@ async function renameCurrentTag(){
   }catch(e){toast("重命名失败："+e.message,true)}
 }
 async function batchAction(action){
-  if(state.batchBusy||!state.selectedIds.size)return;
-  const ids=[...state.selectedIds];
-  if(action==="delete"){
-    const all=new Set();ids.forEach(id=>descendants(id).forEach(x=>all.add(x)));
-    if(!confirm(`确定移除选中的 ${ids.length} 个模块吗？\n其中包含子模块在内，共 ${all.size} 条导航记录。\n\n只删除 FolderHub 的导航记录与封面，不会删除或移动电脑中的真实文件夹。\n建议先备份配置。`))return;
-  }
+  if(action!=="delete"||state.batchBusy||!state.selectedIds.size)return;
+  const ids=[...state.selectedIds],affected=new Set();
+  ids.forEach(id=>descendants(id).forEach(item=>affected.add(item)));
+  if(!confirm("移除 "+ids.length+" 个选中模块及下级共 "+affected.size+
+       " 条导航记录？\n\n磁盘文件不会删除，请提前下载完整备份。"))return;
   state.batchBusy=true;updateBatchBar();
   try{
-    const result=await mutate("POST","/api/batch",{action,ids});
+    await mutate("POST","/api/batch",{action:"delete",ids});
     exitSelectMode();await refresh();
-    if(action==="delete")toast(`已移入回收站（共 ${result.deleted} 条导航记录）`,false,
-      {label:"撤销",handler:()=>restoreTrash(result.trash_id)});
-    else toast(`已更新 ${result.changed} 个模块的收藏状态`);
-  }catch(e){toast(e.message,true)}finally{state.batchBusy=false;updateBatchBar()}
+    toast("已从导航移除选中模块");
+  }catch(e){toast(e.message,true)}
+  finally{state.batchBusy=false;updateBatchBar()}
 }
 function openCardMenu(id,x,y){
   closeCardMenu();
@@ -1825,35 +1825,13 @@ function fallbackCopy(url){const input=document.createElement("textarea");input.
 const quickPalette={open:false,items:[],selected:0,returnFocus:null};
 function quickCandidates(query=""){
   const term=String(query).trim();
-  const knownRecent=new Map(state.recent.map((row,index)=>[row.node_id,{...row,index}]));
-  const knownFrequent=new Map(state.frequent.map(row=>[row.node_id,row]));
-  if(term){
-    const lower=term.toLocaleLowerCase();
-    const matches=searchAll(term);
-    return matches.map(node=>{
-      const visit=knownRecent.get(node.id)||knownFrequent.get(node.id);
-      const title=node.title.toLocaleLowerCase();
-      let score=title===lower?0:title.startsWith(lower)?1:2;
-      if(node.favorite)score-=.35;
-      if(visit?.pinned)score-=.45;
-      else if(visit)score-=.12;
-      if(knownFrequent.has(node.id))
-        score-=Math.min(.25,Math.log2(1+Number(knownFrequent.get(node.id).open_count||0))*.045);
-      return {node,visit,score};
-    }).sort((a,b)=>a.score-b.score||a.node.title.localeCompare(b.node.title,"zh-CN")).slice(0,12);
-  }
-  const seen=new Set(),results=[];
-  const add=node=>{
-    if(!node||seen.has(node.id))return;
-    seen.add(node.id);results.push({node,visit:knownRecent.get(node.id)||knownFrequent.get(node.id)||null});
-  };
-  // Pinned and explicit favorites first; frequently used, then recent items.
-  for(const visit of state.recent)if(visit.pinned)add(byId(visit.node_id));
-  for(const node of sorted(state.nodes.filter(n=>n.favorite)))add(node);
-  for(const visit of state.frequent)add(byId(visit.node_id));
-  for(const visit of state.recent)add(byId(visit.node_id));
-  for(const node of children(null))add(node);
-  return results.slice(0,12);
+  const candidates=term?searchAll(term):
+    [...children(null),...state.nodes.filter(node=>Boolean(node.folder_path))];
+  const seen=new Set();
+  return candidates.filter(node=>{
+    if(seen.has(node.id))return false;
+    seen.add(node.id);return true;
+  }).slice(0,12).map(node=>({node}));
 }
 function renderQuickPalette(){
   const term=$("#quickInput").value;
@@ -1861,18 +1839,15 @@ function renderQuickPalette(){
   const results=$("#quickResults");
   if(!quickPalette.items.length){
     quickPalette.selected=-1;
-    results.innerHTML='<div class="quick-empty">没有匹配的模块。可返回首页新建或修改导航模块。</div>';
+    results.innerHTML='<div class="quick-empty">没有匹配的模块。</div>';
     $("#quickInput").removeAttribute("aria-activedescendant");
     return;
   }
   quickPalette.selected=0;
-  results.innerHTML=quickPalette.items.map(({node,visit},index)=>{
+  results.innerHTML=quickPalette.items.map(({node},index)=>{
     const path=node.folder_path||ancestors(node.id).map(n=>n.title).join(" / ");
     const label=(node.tags||[]).length?path+" · 标签："+node.tags.join("、"):path;
-    const kinds=[visit?.pinned?"置顶":null,node.favorite?"收藏":null,
-      knownFrequent.has(node.id)?`常用 ${knownFrequent.get(node.id).open_count} 次`:null,
-      visit&&!visit.pinned&&!knownFrequent.has(node.id)?"最近使用":null].filter(Boolean);
-    const suffix=kinds.length?kinds.join(" · "):node.node_type==="leaf"?"文件夹":"模块";
+    const suffix=node.node_type==="leaf"?"文件夹":"模块";
     return `<button type="button" class="quick-result" id="quick-option-${index}" role="option" aria-selected="false" data-quick-index="${index}">
       <span class="quick-icon" aria-hidden="true">${h(iconFor(node))}</span>
       <span class="quick-details"><strong>${term?highlightSearch(node.title,term):h(node.title)}</strong>
