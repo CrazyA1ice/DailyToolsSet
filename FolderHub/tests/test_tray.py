@@ -218,6 +218,34 @@ class TrayServiceTests(TestCase):
         self.assertEqual(len(calls),1)
         identity.assert_called_once_with(9876)
 
+    def test_v56_tray_falls_back_only_when_old_service_has_no_menu_api(self):
+        svc=tray.ServiceController(port=9876)
+        svc.external=True
+        calls=[]
+        def fake(url,timeout=None):
+            calls.append(url)
+            if url.endswith('/api/quick-menu'):
+                raise tray.HTTPError(url,404,'Old version',{},BytesIO(b''))
+            if url.endswith('/api/nodes'):
+                return BytesIO(b'{"nodes":[{"id":5,"title":"Folder",'
+                               b'"folder_path":"D:/Folder"}]}')
+            if url.endswith('/api/preferences'):
+                return BytesIO(b'{"settings":{"workspaces":[{"name":"Lab"}]}}')
+            raise AssertionError(url)
+        with patch.object(tray,'server_is_folderhub',return_value=True), \
+             patch.object(tray,'urlopen',side_effect=fake):
+            items=svc.quick_entries()
+        self.assertEqual([item['kind'] for item in items],
+                         ['heading','folder','heading','workspace'])
+        self.assertEqual(len(calls),3)
+        # A non-404 error is not a reason to silently use stale fallback data.
+        def unavailable(url,timeout=None):
+            raise tray.HTTPError(url,503,'Service unavailable',{},BytesIO(b''))
+        with patch.object(tray,'server_is_folderhub',return_value=True), \
+             patch.object(tray,'urlopen',side_effect=unavailable):
+            with self.assertRaises(tray.HTTPError):
+                svc.quick_entries()
+
     def test_v56_bounded_quick_snapshot_equivalent_to_full_tree(self):
         with tempfile.TemporaryDirectory() as directory:
             store=tray.app.Store(Path(directory)/'data'/'folderhub.db')
