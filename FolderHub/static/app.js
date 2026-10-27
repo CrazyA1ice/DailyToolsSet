@@ -1900,6 +1900,17 @@ function bind(){
       workspaceDraftMembers.add(id);
     }else workspaceDraftMembers.delete(id);
     renderWorkspaceMembers();
+    $("#workspaceMemberList").querySelector('[data-workspace-member="'+id+'"]')?.focus();
+  });
+  $("#workspaceLayer").addEventListener("keydown",e=>{
+    if(e.key==="Escape"){e.preventDefault();e.stopPropagation();closeWorkspaceDialog();return}
+    if(e.key!=="Tab")return;
+    const controls=[...$("#workspaceLayer").querySelectorAll("input,textarea,button")]
+      .filter(el=>!el.disabled && el.offsetParent!==null);
+    if(!controls.length)return;
+    const first=controls[0],last=controls.at(-1);
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
   });
   $("#workspaceClose").addEventListener("click",closeWorkspaceDialog);
   $("#workspaceCancel").addEventListener("click",closeWorkspaceDialog);
