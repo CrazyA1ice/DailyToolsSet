@@ -295,6 +295,10 @@ class Store:
                 db.execute("ALTER TABLE nodes ADD COLUMN resource_kind TEXT NOT NULL DEFAULT 'folder'")
             if "resource_target" not in cols:
                 db.execute("ALTER TABLE nodes ADD COLUMN resource_target TEXT")
+            # Only the quick menu needs the first few entries per resource kind.
+            # Indexed top-N reads avoid materializing the full navigation tree.
+            db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_quick_kind_order "
+                       "ON nodes(resource_kind,sort_order,id)")
             if "tags" not in cols:
                 db.execute("ALTER TABLE nodes ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
             trash_cols = {row["name"] for row in db.execute("PRAGMA table_info(trash_nodes)")}
@@ -595,6 +599,28 @@ class Store:
         with self.connect() as db:
             result = db.execute("DELETE FROM node_visits")
         return {"ok": True, "cleared": result.rowcount}
+
+    def quick_menu_nodes(self):
+        """Return at most eight linked records per resource kind, in full-tree order.
+
+        Only minimal menu metadata leaves SQLite. The full target path / URL
+        never needs to be sent to the tray; opening still uses authorized IDs.
+        """
+        entries = []
+        with self.connect() as db:
+            for kind in ("folder", "file", "url"):
+                if kind == "folder":
+                    linked = "folder_path IS NOT NULL AND folder_path != ''"
+                else:
+                    linked = ("node_type='leaf' AND resource_target IS NOT NULL "
+                              "AND resource_target != ''")
+                query = ("""SELECT id,title,node_type,resource_kind,sort_order
+                    FROM nodes WHERE resource_kind=? AND """ + linked +
+                         """ ORDER BY sort_order,id LIMIT 8""")
+                entries.extend(dict(row) | {"has_target": True}
+                               for row in db.execute(query, (kind,)))
+        entries.sort(key=lambda row: (row["sort_order"], row["id"]))
+        return entries
 
     def all(self):
         with self.connect() as db:
@@ -1332,6 +1358,14 @@ class Handler(BaseHTTPRequestHandler):
                     except UserError:
                         entry["supported"] = False
                 return self.reply(200,result)
+            if path=="/api/quick-menu":
+                if method!="GET":
+                    return self.reply(405,{"error":"不支持的请求方法"})
+                # Minimal read-only snapshot for the native global hotkey.
+                # Maximum 24 linked resources + eight named workspaces.
+                names = self.server.store.preferences.get()["settings"]["workspaces"][:8]
+                return self.reply(200,{"nodes":self.server.store.quick_menu_nodes(),
+                                       "workspaces":[{"name": row["name"]} for row in names]})
             if method=="GET" and path=="/api/nodes":
                 return self.reply(200,{"nodes":self.server.store.all()})
             if path=="/api/recent/pin":
