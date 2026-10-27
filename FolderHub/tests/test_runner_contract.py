@@ -39,7 +39,7 @@ class PowerShellRunnerContractTests(unittest.TestCase):
         # machine's ANSI codepage, which corrupts non-ASCII quoted messages.
         self.assertTrue(SCRIPT.read_bytes().isascii(),
                         "Keep this script ASCII-only for legacy PS5.1")
-        self.assertNotIn("`" + "\\n", self.code, "Avoid backtick line continuations")
+        self.assertNotIn("`" + chr(10), self.code, "Avoid backtick line continuations")
         self.assertIn('$RunOptions = @{', self.code)
 
     @unittest.skipUnless(sys.platform == "win32" and shutil.which("powershell.exe"),
