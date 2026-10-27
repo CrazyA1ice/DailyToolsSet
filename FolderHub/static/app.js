@@ -1198,7 +1198,7 @@ function uniqueWorkspaceCopyName(original){
   const names=new Set(state.workspaces.map(item=>item.name.toLocaleLowerCase()));
   for(let i=1;i<=100;i++){
     const suffix=i===1?"（副本）":"（副本 "+i+"）";
-    const name=original.slice(0,40-suffix.length)+suffix;
+    const name=Array.from(original).slice(0,40-Array.from(suffix).length).join("")+suffix;
     if(!names.has(name.toLocaleLowerCase()))return name;
   }
   throw new Error("找不到可用的副本名称，请先清理同名工作区");
@@ -1252,8 +1252,8 @@ function openWorkspacePicker(nodeId){
       +'<span>'+h(item.name)+'</span><small>'+h(status)+'</small></button>';
   }).join("");
   $("#workspacePickerLayer").classList.remove("hidden");
-  $("#workspacePickerList").querySelector("button:not(:disabled)")?.focus()
-    ||$("#workspacePickerClose").focus();
+  const initial=$("#workspacePickerList").querySelector("button:not(:disabled)");
+  (initial||$("#workspacePickerClose")).focus();
 }
 async function addNodeToWorkspace(index){
   const nodeId=workspacePickerNodeId,item=state.workspaces[index];
