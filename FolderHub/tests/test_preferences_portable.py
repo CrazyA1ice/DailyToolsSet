@@ -139,6 +139,67 @@ class PortablePreferencesTests(unittest.TestCase):
                 self.prefs.save(case)
             self.assertEqual((self.root / 'data' / 'preferences.json').read_bytes(), unchanged)
 
+    def test_workspace_status_and_web_resources_survive_zip(self):
+        original = [{
+            'name': '论文研发', 'description': '项目资源汇总', 'members': [3, 2],
+            'status': 'active',
+            'links': [
+                {'name': '论文记录', 'url': 'https://example.org/paper?version=2#results'},
+                {'name': '本地调试页', 'url': 'http://localhost:8080/docs'},
+            ],
+        }]
+        self.prefs.save({'workspaces': original, 'theme': 'forest'})
+        reopened = PreferencesStore(self.root / 'data' / 'preferences.json')
+        self.assertEqual(reopened.get()['settings']['workspaces'], original)
+        archive = self.store.make_portable_backup()
+        try:
+            with zipfile.ZipFile(archive) as zipped:
+                restored = json.loads(zipped.read('data/preferences.json'))
+                self.assertEqual(restored['settings']['workspaces'], original)
+        finally:
+            archive.unlink(missing_ok=True)
+
+    def test_legacy_workspace_shape_stays_valid_and_untouched(self):
+        legacy = [{'name': '旧科研', 'description': '不用手工升级', 'members': [6]}]
+        self.prefs.save({'workspaces': legacy})
+        self.assertEqual(self.prefs.get()['settings']['workspaces'], legacy)
+        reopened = PreferencesStore(self.root / 'data' / 'preferences.json')
+        self.assertEqual(reopened.get()['settings']['workspaces'], legacy)
+
+    def test_workspace_resources_reject_unsafe_links_and_bad_status_atomically(self):
+        good = {'name': '开发项目', 'description': '', 'members': [1],
+                'status': 'planning', 'links': [{'name': '首页', 'url': 'https://example.org/'}]}
+        self.prefs.save({'workspaces': [good]})
+        before = (self.root / 'data' / 'preferences.json').read_bytes()
+        bad_urls = [
+            'javascript:alert(1)', 'file:///C:/private', 'data:text/html,hi',
+            'https://user:pass@example.com/', 'https://example.com\\evil.org/',
+            'https://example.com/space here', 'https://example.com/\npath',
+            'https://', 'http:relative.example.com', 'https://example.com:abc/',
+            'http://example.com:99999/', 'https://example.com\t',
+            'https://example.com/' + ('x' * 2048),
+        ]
+        cases = [
+            dict(good, status='invalid'),
+            dict(good, status=None),
+            dict(good, links=None),
+            dict(good, links=[{'name': '缺失链接'}]),
+            dict(good, links=[{'name': 'A', 'url': 'https://example.org/', 'extra': 1}]),
+            dict(good, links=[{'name': '', 'url': 'https://example.org/'}]),
+            dict(good, links=[{'name': ' A ', 'url': 'https://example.org/'}]),
+            dict(good, links=[{'name': 'A' * 61, 'url': 'https://example.org/'}]),
+            dict(good, links=[{'name': 'A', 'url': 'https://example.org/'}] * 9),
+            dict(good, links=[{'name': 'A', 'url': 'https://example.org/'},
+                              {'name': 'B', 'url': 'https://example.org/'}]),
+            dict(good, extra=True),
+        ]
+        cases.extend(dict(good, links=[{'name': '测试', 'url': url}])
+                     for url in bad_urls)
+        for entry in cases:
+            with self.subTest(case=str(entry)[:120]), self.assertRaises(PreferenceError):
+                self.prefs.save({'workspaces': [entry]})
+            self.assertEqual((self.root / 'data' / 'preferences.json').read_bytes(), before)
+
     def test_workspace_member_order_survives_reopen_and_backup(self):
         original = [{'name': '排序验证', 'description': '',
                      'members': [7, 3, 11, 2]}]
