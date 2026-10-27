@@ -1184,6 +1184,9 @@ class Handler(BaseHTTPRequestHandler):
             if method=="POST" and path=="/api/paths/check":
                 self.request_json()
                 return self.reply(200,path_management.check_health(self.server.store))
+            if method=="POST" and path=="/api/paths/suggest":
+                data=self.request_json()
+                return self.reply(200,path_management.suggest_migrations(self.server.store,data.get("target")))
             if method=="POST" and path=="/api/paths/preview":
                 data=self.request_json()
                 return self.reply(200,path_management.preview(self.server.store,data.get("source"),data.get("target")))

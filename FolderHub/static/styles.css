@@ -935,3 +935,9 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
 .path-row-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:3px}
 .path-row-actions .outline-btn{padding:6px 10px;font-size:.82rem}
 .path-results .path-load-more{justify-self:start;margin:5px 0}
+
+/* V4.0 migration suggestions are advisory and never bypass preview/apply. */
+.path-suggestion .path-arrow{font-size:.95rem}
+.path-suggestion small{font-size:.83rem;color:var(--muted)}
+.path-suggestion strong code{font-weight:550}
+.path-prefix-grid label[for="pathSuggestedRoot"]{grid-column:1/-1}

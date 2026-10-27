@@ -13,6 +13,10 @@ from datetime import datetime, timezone
 
 MAX_PATH_CHECK = 1000
 MAX_REMAP = 1000
+MAX_SUGGEST_CANDIDATES = 12
+MAX_SUGGEST_PROBES = 24
+MAX_SUGGEST_RESULTS = 5
+MAX_SUGGEST_DEPTH = 6
 
 
 class PathRuleError(ValueError):
@@ -106,6 +110,91 @@ def apply(store, source, target, fingerprint):
                 raise PathRuleError("模块路径同时被修改，请重新生成预览")
     return {'ok': True, 'changed': plan['count']}
 
+
+
+def suggest_migrations(store, target, exists_fn=None):
+    """Infer plausible old directory prefixes for an explicitly chosen new root.
+
+    This is an opt-in *read-only* diagnostic, not a filesystem crawler.
+    It visits at most 1000 saved folder records and performs at most
+    12 x 24 bounded directory checks (plus a single new-root check).
+    No results are persisted. All suggested rewrites must go through the
+    existing fingerprinted preview/apply workflow.
+    """
+    target = normalize_prefix(target)
+    if exists_fn is None:
+        if os.name != 'nt':
+            raise PathRuleError("智能路径建议需在 Windows 本机运行")
+        exists_fn = os.path.isdir
+
+    with store.connect() as db:
+        rows = db.execute(
+            "SELECT id,title,folder_path FROM nodes WHERE folder_path IS NOT NULL AND folder_path != '' ORDER BY id LIMIT ?",
+            (MAX_PATH_CHECK + 1,),
+        ).fetchall()
+    if len(rows) > MAX_PATH_CHECK:
+        raise PathRuleError(f"关联路径超过 {MAX_PATH_CHECK} 条，无法安全推断建议")
+
+    def accessible(path):
+        try:
+            return bool(exists_fn(path))
+        except (OSError, ValueError):
+            return False
+
+    if not accessible(target):
+        raise PathRuleError("指定的新根目录无法访问，请确认它存在且当前用户有权限")
+
+    groups = {}
+    for row in rows:
+        try:
+            original = normalize_prefix(row['folder_path'])
+        except PathRuleError:
+            continue  # Historical or non-Windows paths are never guessed.
+        parent = ntpath.dirname(original)
+        for _ in range(MAX_SUGGEST_DEPTH):
+            if not parent or ntpath.normcase(parent) == ntpath.normcase(original):
+                break  # Do not guess exact-record replacements.
+            key = ntpath.normcase(parent)
+            group = groups.setdefault(key, {'source': parent, 'rows': []})
+            group['rows'].append(row)
+            upper = ntpath.dirname(parent)
+            if upper == parent:
+                break
+            parent = upper
+
+    ranked_groups = sorted(groups.values(),
+                           key=lambda g: (-len(g['rows']), -len(g['source']),
+                                          ntpath.normcase(g['source'])))
+    suggestions, cache = [], {}
+    for group in ranked_groups[:MAX_SUGGEST_CANDIDATES]:
+        source = group['source']
+        if ntpath.normcase(source) == ntpath.normcase(target):
+            continue
+        samples = []
+        for row in group['rows'][:MAX_SUGGEST_PROBES]:
+            proposed = replaced_path(row['folder_path'], source, target)
+            if proposed is None or ntpath.normcase(proposed) == ntpath.normcase(row['folder_path']):
+                continue
+            key = ntpath.normcase(proposed)
+            if key not in cache:
+                cache[key] = accessible(proposed)
+            samples.append({'id': row['id'], 'title': row['title'],
+                            'old_path': row['folder_path'],
+                            'new_path': proposed, 'exists': cache[key]})
+        verified = sum(item['exists'] for item in samples)
+        if not verified:
+            continue  # Never recommend a mapping without any positive path evidence.
+        suggestions.append({
+            'source': source, 'target': target, 'linked': len(group['rows']),
+            'checked': len(samples), 'verified': verified,
+            'examples': samples[:3],
+        })
+    suggestions.sort(key=lambda item: (-item['verified'], -item['linked'],
+                                       -(item['verified'] / max(item['checked'], 1)),
+                                       -len(item['source']), ntpath.normcase(item['source'])))
+    return {'target': target, 'total': len(rows),
+            'suggestions': suggestions[:MAX_SUGGEST_RESULTS],
+            'sample_limit': MAX_SUGGEST_PROBES}
 
 def check_health(store, exists_fn=None):
     """Manually triggered, non-recursive directory existence checks.
