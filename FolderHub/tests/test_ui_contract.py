@@ -379,6 +379,7 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('state.renderLimit=100;queueSearchRender();',self.js)
         self.assertIn('flushSearchRender();return;',self.js)
         self.assertIn('if(!skipNav)renderNav();',self.js)
+        self.assertIn('renderSavedViews(); // Invalidate selected saved-view state',self.js)
         self.assertNotIn('else {renderSavedViews();renderFolderGroups();renderWorkspaces()}',self.js)
 
     def test_indexed_navigation_progressive_render_and_focus(self):
@@ -517,6 +518,7 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('const keepTag=tag=>typeof tag==="string"',self.js)
         self.assertIn('state.activeSmartView=restoredSmartView?.name||null;',self.js)
         self.assertIn('if(!skipNav)renderNav();',self.js)
+        self.assertIn('renderSavedViews(); // Invalidate selected saved-view state',self.js)
         self.assertNotIn('else {renderSavedViews();renderFolderGroups();renderWorkspaces()}',self.js)
         self.assertIn('const rewritten=state.savedViews.map(view=>{',self.js)
         self.assertIn('state.savedViews=rewritten;',self.js)
