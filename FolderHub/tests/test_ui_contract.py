@@ -364,7 +364,7 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('const restoredSmartView=fromHistory&&view==="tags"?',self.js)
         self.assertIn('const keepTag=tag=>typeof tag==="string"',self.js)
         self.assertIn('state.activeSmartView=restoredSmartView?.name||null;',self.js)
-        self.assertIn('else {renderSavedViews();renderFolderGroups()}',self.js)
+        self.assertIn('else {renderSavedViews();renderFolderGroups();renderWorkspaces()}',self.js)
         self.assertIn('const rewritten=state.savedViews.map(view=>{',self.js)
         self.assertIn('state.savedViews=rewritten;',self.js)
 
