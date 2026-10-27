@@ -247,7 +247,7 @@ class TrayServiceTests(TestCase):
             result=controller.capture_current_directory(folder)
         self.assertEqual(result['id'],17)
         self.assertEqual(len(seen),2)
-        for invalid in ('relative/folder', None, r'D:\bad\npath'):
+        for invalid in ('relative/folder', None, 'D:\\bad\npath'):
             with self.subTest(path=repr(invalid)):
                 with self.assertRaises(ValueError),patch.object(tray,'urlopen') as remote:
                     controller.capture_current_directory(invalid)
