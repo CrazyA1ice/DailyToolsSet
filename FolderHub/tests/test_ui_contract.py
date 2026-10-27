@@ -245,6 +245,20 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('.quick-result.is-active',self.css)
         self.assertIn('.quick-dialog',self.css)
 
+    def test_tags_edit_filter_and_search(self):
+        for control in ("tagCount","tagFilters","entryTags"):
+            self.assertIn(f'id="{control}"',self.html)
+        self.assertIn('data-view="tags"',self.html)
+        self.assertIn('function renderTagFilters()',self.js)
+        self.assertIn('function chooseTag(tag)',self.js)
+        self.assertIn('data-tag-filter=',self.js)
+        self.assertIn('(node.tags||[]).join(" ").toLocaleLowerCase()',self.js)
+        self.assertIn('tags:$("#entryTags").value.split(',self.js)
+        self.assertIn('const label=(node.tags||[]).length?',self.js)
+        self.assertIn('tag:state.view==="tags"?state.activeTag:null',self.js)
+        self.assertIn('.tag-choice.active',self.css)
+        self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)

@@ -839,3 +839,13 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
   .quick-results{padding:5px 8px}
   .quick-tag{max-width:85px;overflow:hidden;text-overflow:ellipsis}
 }
+
+/* V3.2 cross-folder label filters. */
+.tag-filters{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin-bottom:18px}
+.tag-choice{border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--text);min-height:36px;padding:7px 12px;font:inherit;font-size:.84rem;cursor:pointer}
+.tag-choice:hover,.tag-choice:focus-visible{border-color:var(--accent);color:var(--accent)}
+.tag-choice.active{border-color:var(--accent);background:var(--accent-faint);color:var(--accent);font-weight:700}
+.tag-choice span{margin-left:5px;color:var(--muted)}.tag-overflow{font-size:.8rem;color:var(--muted)}
+.card-tags{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:4px;width:100%}
+.card-tag{border-radius:6px;background:var(--accent-faint);color:var(--accent);padding:3px 7px;font-size:.74rem;line-height:1.45;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.entries.list .card-tag{padding:2px 6px}

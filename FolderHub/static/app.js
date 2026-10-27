@@ -62,7 +62,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {openingIds:new Set(),nodes:[],trash:[],recent:[], renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+const state = {openingIds:new Set(),nodes:[],trash:[],recent:[], activeTag:null, renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
 
 /* V3.0 — Native browser history for modules and special views.
    Search text is stored in the current tab's history.state, never in the URL. */
@@ -76,7 +76,7 @@ function routeFromLocation(){
     return Number.isSafeInteger(id)?{view:"node",id}:{view:"all",id:null};
   }
   const view=hash.slice(1);
-  return ["favorites","recent","trash"].includes(view)?
+  return ["favorites","recent","trash","tags"].includes(view)?
     {view,id:null}:{view:"all",id:null};
 }
 function routeUrl(view,id=null){
@@ -86,6 +86,7 @@ function routeUrl(view,id=null){
 function navigationSnapshot(){
   return {folderhubRoute:1,view:state.view,
     id:state.view==="node"?state.selected:null,
+    tag:state.view==="tags"?state.activeTag:null,
     search:state.search,renderLimit:state.renderLimit,
     scrollY:Math.max(0,Math.round(window.scrollY||0))};
 }
@@ -217,7 +218,7 @@ function rebuildNodeIndex(){
   searchRecords=state.nodes.map(node=>{
     const own=(node.title+" "+(node.folder_path||"")).toLocaleLowerCase();
     const full=ancestors(node.id).map(entry=>entry.title).join(" /").toLocaleLowerCase();
-    return {node,own,body:own+" "+full};
+    return {node,own,body:own+" "+full+" "+(node.tags||[]).join(" ").toLocaleLowerCase()};
   });
 }
 
@@ -290,6 +291,7 @@ function setView(view,id=null,{fromHistory=false,saved=null}={}){
   closeCardMenu();exitSelectMode();
   if(view==="node"&&!byId(id)){view="all";id=null}
   state.view=view;state.selected=view==="node"?id:null;
+  state.activeTag=view==="tags"?(fromHistory&&saved?.tag||null):null;
   state.search=fromHistory&&typeof saved?.search==="string"?saved.search.slice(0,300):"";
   state.searchKeyboardIndex=-1;
   state.renderLimit=fromHistory&&Number.isSafeInteger(saved?.renderLimit)?
@@ -337,6 +339,7 @@ function renderNav(){
   const roots=children(null), fav=state.nodes.filter(n=>n.favorite);
   $("#rootCount").textContent=roots.length;$("#favoriteCount").textContent=fav.length;
   $("#trashCount").textContent=state.trash.length;
+  $("#tagCount").textContent=new Set(state.nodes.flatMap(n=>n.tags||[])).size;
   $("#recentCount").textContent=state.recent.length;
   document.querySelectorAll("#specialNav [data-view]").forEach(el=>el.classList.toggle("active",state.view===el.dataset.view));
   const walk=(nodes) => nodes.map(n=>{
@@ -362,6 +365,7 @@ function renderCrumb(){
   }
   if(state.view==="favorites") bits.push(`<span>›</span><strong>我的收藏</strong>`);
   if(state.view==="recent") bits.push(`<span>›</span><strong>最近使用</strong>`);
+  if(state.view==="tags") bits.push(`<span>›</span><strong>标签筛选${state.activeTag?" · "+h(state.activeTag):""}</strong>`);
   if(state.view==="trash") bits.push(`<span>›</span><strong>回收站</strong>`);
   if(state.view==="node"){
     for(const n of ancestors(state.selected)){
@@ -369,6 +373,26 @@ function renderCrumb(){
     }
   }
   $("#breadcrumb").innerHTML=bits.join("");
+}
+function chooseTag(tag){
+  if(tag&&!state.nodes.some(node=>(node.tags||[]).includes(tag)))return;
+  if(state.view!=="tags")setView("tags");
+  state.activeTag=tag||null;state.renderLimit=100;state.searchKeyboardIndex=-1;
+  render(true);rememberNavigation();
+}
+function renderTagFilters(){
+  const box=$("#tagFilters"),show=state.view==="tags"&&!state.search.trim();
+  box.classList.toggle("hidden",!show);if(!show)return;
+  const counts=new Map();
+  for(const n of state.nodes)for(const tag of n.tags||[])counts.set(tag,(counts.get(tag)||0)+1);
+  const ordered=[...counts].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],"zh-CN"));
+  const subset=ordered.slice(0,80);
+  if(state.activeTag&&!subset.some(([tag])=>tag===state.activeTag)){
+    const current=ordered.find(([tag])=>tag===state.activeTag);if(current)subset.push(current);
+  }
+  box.innerHTML=`<button type="button" class="tag-choice ${state.activeTag?"":"active"}" data-tag-filter="" aria-pressed="${!state.activeTag}">全部标签</button>`+
+    subset.map(([tag,n])=>`<button type="button" class="tag-choice ${state.activeTag===tag?"active":""}" data-tag-filter="${h(tag)}" aria-pressed="${state.activeTag===tag}">⌗ ${h(tag)} <span>${n}</span></button>`).join("");
+  if(ordered.length>subset.length)box.insertAdjacentHTML("beforeend",'<span class="tag-overflow">其余标签可通过搜索查找</span>');
 }
 function card(n,reorderable=false,keyboardActive=false){
   const childCount=children(n.id).length;
@@ -385,6 +409,8 @@ function card(n,reorderable=false,keyboardActive=false){
     `<span class="list-card-context" title="${h(contextText)}">${state.search?highlightSearch(contextText,state.search):h(contextText)}</span>`:"";
   const recentCaption=state.layout!=="list" && recentText?
     `<div class="entry-lineage">${h(recentText)}</div>`:"";
+  const tags=Array.isArray(n.tags)?n.tags:[];
+  const tagChips=tags.length?`<span class="card-tags" title="${h(tags.join("、"))}">${tags.slice(0,3).map(tag=>`<span class="card-tag">⌗ ${state.search?highlightSearch(tag,state.search):h(tag)}</span>`).join("")}${tags.length>3?`<span class="card-tag">+${tags.length-3}</span>`:""}</span>`:"";
   const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
   return `<article class="entry-card ${leaf?"is-leaf":"is-container"} ${state.openingIds.has(n.id)?"is-opening":""} ${state.selectedIds.has(n.id)?"is-selected":""} ${keyboardActive?"keyboard-active":""}" id="folderhub-entry-${n.id}" data-id="${n.id}" tabindex="0" aria-label="${h(n.title)}，右键打开快捷菜单">
     <div class="card-cover tone-${n.id%6} ${n.has_image?'with-image':'with-icon'}" aria-hidden="true">
@@ -405,7 +431,7 @@ function card(n,reorderable=false,keyboardActive=false){
     <button type="button" class="card-primary" data-action="primary" data-id="${n.id}" title="${primaryTitle}">
       <strong>${state.search?highlightSearch(n.title,state.search):h(n.title)}</strong><span class="type-chip ${n.node_type}">${TYPE_LABEL[n.node_type]||'模块'}</span>
       <span class="path" title="${h(n.folder_path||lineage)}">${state.search?highlightSearch(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`),state.search):h(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`))}</span>
-      ${listContext}</button>
+      ${listContext}${tagChips}</button>
     ${state.search && state.layout!=="list"?`<div class="entry-lineage" title="${h(lineage)}">⌁ ${highlightSearch(lineage,state.search)}</div>`:''}
     ${recentCaption}
     <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?'● 文件夹入口':`${childCount} 个子模块`}</span>
@@ -452,6 +478,7 @@ function render(skipNav=false){
   }
   if(!skipNav)renderNav();
   renderCrumb();
+  renderTagFilters();
   const trashView=state.view==="trash"&&!state.search.trim();
   $("#newBtn").hidden=trashView || (state.view==="recent"&&!state.search.trim());
   $("#selectModeBtn").hidden=trashView;
@@ -475,6 +502,10 @@ function render(skipNav=false){
     display=state.recent.map(item=>byId(item.node_id)).filter(Boolean);
     sectionTitle="最近打开的文件夹";
   }
+  else if(state.view==="tags"){
+    display=sorted(state.nodes.filter(node=>(node.tags||[]).length&&(!state.activeTag||node.tags.includes(state.activeTag))));
+    sectionTitle=state.activeTag?`标签：${state.activeTag}`:"全部已标记模块";
+  }
   else if(state.view==="node"){
     const node=byId(state.selected);
     display=node.node_type==="leaf"?[node]:children(state.selected);
@@ -482,7 +513,9 @@ function render(skipNav=false){
   } else{display=children(null);sectionTitle="根模块";}
   $("#sectionHeading").hidden=state.view==="all"&&!searching;
   $("#sectionTitle").textContent=sectionTitle;
-  $("#sectionMeta").textContent=state.view==="recent"&&!searching?
+  $("#sectionMeta").textContent=state.view==="tags"&&!searching?
+    `跨目录显示 ${display.length} 个模块 · 可在模块编辑中添加标签`:
+    state.view==="recent"&&!searching?
     "置顶项目优先显示，其余按最近打开时间排列 · 只记录通过 FolderHub 打开的文件夹":
     `共 ${display.length} 个项目 · ${searching?'搜索覆盖整个目录树，结果显示完整所属层级':'叶子模块直接打开文件资源管理器'}`;
   const canAddChild=state.view==="node"&&!searching&&byId(state.selected)?.node_type!=="leaf";
@@ -617,6 +650,7 @@ function editDialog(id=null,parentId=undefined){
   $("#entryName").value=node?.title||"";
   $("#entryPath").value=node?.folder_path||"";
   $("#entryFavorite").checked=!!node?.favorite;
+  $("#entryTags").value=(node?.tags||[]).join("，");
   $("#entryIcon").value=node?.icon||"folder";
   state.pendingCover=null;state.removeCover=false;
   $("#entryCoverFile").value="";
@@ -659,7 +693,8 @@ async function submitDialog(event){
   const payload={title:$("#entryName").value,node_type:type,icon:$("#entryIcon").value,
     folder_path:type==="leaf"||(!$("#entryPathRow").classList.contains("hidden"))?$("#entryPath").value:null,
     parent_id:type==="root"?null:($("#entryParent").value?Number($("#entryParent").value):null),
-    favorite:$("#entryFavorite").checked};
+    favorite:$("#entryFavorite").checked,
+    tags:$("#entryTags").value.split(/[,，;；\n]+/).map(x=>x.trim()).filter(Boolean)};
   const button=$("#submitEntry");button.disabled=true;
   try {
     const savedId=state.editing;
@@ -1085,12 +1120,13 @@ function renderQuickPalette(){
   quickPalette.selected=0;
   results.innerHTML=quickPalette.items.map(({node,visit},index)=>{
     const path=node.folder_path||ancestors(node.id).map(n=>n.title).join(" / ");
+    const label=(node.tags||[]).length?path+" · 标签："+node.tags.join("、"):path;
     const kinds=[visit?.pinned?"置顶":null,node.favorite?"收藏":null,visit&&!visit.pinned?"最近使用":null].filter(Boolean);
     const suffix=kinds.length?kinds.join(" · "):node.node_type==="leaf"?"文件夹":"模块";
     return `<button type="button" class="quick-result" id="quick-option-${index}" role="option" aria-selected="false" data-quick-index="${index}">
       <span class="quick-icon" aria-hidden="true">${h(iconFor(node))}</span>
       <span class="quick-details"><strong>${term?highlightSearch(node.title,term):h(node.title)}</strong>
-        <small title="${h(path)}">${term?highlightSearch(path,term):h(path)}</small></span>
+        <small title="${h(label)}">${term?highlightSearch(label,term):h(label)}</small></span>
       <span class="quick-tag">${h(suffix)}</span>
     </button>`;
   }).join("");
@@ -1198,6 +1234,9 @@ function bind(){
   $("#entries").addEventListener("keydown",e=>{if((e.key==="F10"&&e.shiftKey)||e.key==="ContextMenu"){const card=e.target.closest(".entry-card");if(!card)return;e.preventDefault();const r=card.getBoundingClientRect();openCardMenu(Number(card.dataset.id),r.left+32,r.top+32)}});
   document.addEventListener("pointerdown",e=>{if(!e.target.closest("#cardContextMenu"))closeCardMenu()});
   $("#specialNav").addEventListener("click",e=>{const item=e.target.closest("[data-view]");if(item)setView(item.dataset.view)});
+  $("#tagFilters").addEventListener("click",e=>{
+    const btn=e.target.closest("[data-tag-filter]");if(btn)chooseTag(btn.dataset.tagFilter||null);
+  });
   $("#treeNav").addEventListener("click",e=>{
     const toggle=e.target.closest("[data-toggle]");
     if(toggle){toggleBranch(Number(toggle.dataset.toggle));return}

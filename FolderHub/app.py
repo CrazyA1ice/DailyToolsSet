@@ -163,7 +163,8 @@ def validate_tags(value):
         if not isinstance(item, str):
             raise UserError("标签必须是文字")
         name = item.strip()
-        if (not name or len(name) > MAX_TAG_LENGTH
+        if (any(ord(char) < 32 or ord(char) == 127 for char in item)
+                or not name or len(name) > MAX_TAG_LENGTH
                 or any(ch in name for ch in ",，;；")
                 or any(ord(ch) < 32 or ord(ch) == 127 for ch in name)):
             raise UserError("标签长度须为 1—24 字，不能包含逗号、分号或控制字符")

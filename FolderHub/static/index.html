@@ -19,6 +19,7 @@
       <button type="button" class="nav-item active" data-view="all"><span>◫</span> 首页 · 根模块 <span class="nav-count" id="rootCount">0</span></button>
       <button type="button" class="nav-item" data-view="favorites"><span>★</span> 我的收藏 <span class="nav-count" id="favoriteCount">0</span></button>
       <button type="button" class="nav-item" data-view="recent" title="最近打开过的文件夹"><span>◷</span> 最近使用 <span class="nav-count" id="recentCount">0</span></button>
+      <button type="button" class="nav-item" data-view="tags" title="跨目录筛选标签"><span>⌗</span> 标签筛选 <span class="nav-count" id="tagCount">0</span></button>
       <button type="button" class="nav-item" data-view="trash"><span>♻</span> 回收站 <span class="nav-count" id="trashCount">0</span></button>
     </nav>
     <div class="nav-group-header"><span class="nav-label">分层目录</span><button id="addRoot" class="icon-button" title="添加根模块" aria-label="添加根模块">＋</button></div>
@@ -40,6 +41,7 @@
     <div class="content">
 
       <div class="section-heading" id="sectionHeading"><div><span class="section-kicker">文件夹与分类</span><h2 id="sectionTitle">全部分类</h2><p id="sectionMeta">点击模块即可进入，绑定文件夹后可直接打开资源管理器</p></div><div id="sectionOperations"></div></div>
+      <div id="tagFilters" class="tag-filters hidden" role="group" aria-label="按标签筛选模块"></div>
       <div id="bulkBar" class="bulk-bar hidden" role="toolbar" aria-label="批量管理模块">
         <strong id="bulkCount">已选择 0 项</strong>
         <button type="button" id="bulkSelectAll" class="outline-btn">全选已显示模块</button>
@@ -166,6 +168,7 @@
         <div class="path-field"><input id="entryPath" type="text" placeholder="例如：D:\Research\Paper2026_1"><button id="pickFolder" type="button" class="outline-btn" title="打开 Windows 文件夹选择窗口">浏览...</button></div>
         <small class="help-text">叶子模块直接映射到一个文件夹，点击即可用 Windows 文件资源管理器打开。</small>
       </div>
+      <label for="entryTags">模块标签（可选）</label><input id="entryTags" type="text" maxlength="320" placeholder="例如：A股，论文，开发" autocomplete="off"><small class="help-text">逗号分隔，最多 12 个，每个不超过 24 字；不改变真实文件夹。</small>
       <label class="check"><input id="entryFavorite" type="checkbox"> <span>加入常用收藏</span></label>
       <div class="dialog-footer"><button id="cancelDialog" type="button" class="outline-btn">取消</button><button type="submit" id="submitEntry" class="primary-btn">保存模块</button></div>
     </form>
