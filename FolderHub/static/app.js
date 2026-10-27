@@ -1392,9 +1392,7 @@ async function openFolderGroup(index){
   try{
     const result=await mutate("POST","/api/groups/open",{name:group.name});
     try{
-      const [recent,frequent]=await Promise.all([api("/api/recent"),api("/api/frequent")]);
-      state.recent=recent.items;state.frequent=frequent.items;
-      render();
+      await refresh();
     }catch(_){/* successful Explorer launches should still be reported */}
     showFolderGroupReport(result);
   }catch(error){toast("打开工作组失败："+error.message,true)}
