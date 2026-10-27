@@ -925,7 +925,9 @@ async function submitDialog(event){
     // Keep current node edits if image upload fails so the cover can be retried.
     if(state.pendingCover)await mutate("POST",`/api/nodes/${actualId}/image`,{data_url:state.pendingCover});
     else if(state.removeCover&&savedId!==null)await mutate("DELETE",`/api/nodes/${actualId}/image`,{});
-    closeDialog();clearPathHealthResults("模块已更改，建议重新检查关联路径。");await refresh();
+    closeDialog();clearPathHealthResults("模块已更改，建议重新检查关联路径。");
+    clearPathSuggestions("模块已更改，请重新分析路径迁移建议。");
+    await refresh();
     if(savedId!==null)expandLineage(savedId);
     else if(type==="root"&&created?.id)state.expanded.add(created.id);
     else if(created?.id)expandLineage(created.id);
@@ -1384,6 +1386,53 @@ function clearPathHealthResults(message="尚未执行检查。"){
   $("#pathHealthSummary").textContent=message;
   $("#pathHealthList").replaceChildren();
 }
+// Migration proposals only suggest prefixes; never submit changes automatically.
+let pathSuggestions = [];
+let pathSuggestionGeneration = 0;
+function clearPathSuggestions(message="输入新根目录后生成建议。"){
+  pathSuggestionGeneration++;
+  pathSuggestions=[];
+  $("#pathSuggestSummary").textContent=message;
+  $("#pathSuggestList").replaceChildren();
+}
+function renderPathSuggestions(suggestions){
+  return suggestions.map((item,index)=>'<div class="path-row path-suggestion">'
+    +'<strong>旧前缀：<code title="'+h(item.source)+'">'+h(item.source)+'</code></strong>'
+    +'<span class="path-arrow">→</span><code title="'+h(item.target)+'">'+h(item.target)+'</code>'
+    +'<small>涉及 '+item.linked+' 条路径；抽样检查 '+item.checked+' 条，其中 '+item.verified+' 条可访问。</small>'
+    +'<div class="path-row-actions"><button type="button" class="outline-btn" data-path-suggestion="'+index+'">采用并生成预览</button></div>'
+    +'</div>').join("");
+}
+async function suggestPaths(){
+  clearPathSuggestions("正在分析已保存的关联路径，请稍候...");
+  const generation=pathSuggestionGeneration;
+  const target=$("#pathSuggestedRoot").value;
+  const button=$("#pathSuggest");button.disabled=true;
+  try{
+    const result=await mutate("POST","/api/paths/suggest",{target});
+    if(generation!==pathSuggestionGeneration)return;
+    pathSuggestions=Array.isArray(result.suggestions)?result.suggestions:[];
+    $("#pathSuggestSummary").textContent=pathSuggestions.length?
+      "在 "+result.total+" 条关联路径中找到 "+pathSuggestions.length+" 种候选迁移规则。验证数量只是抽样，不代表全部目录可用。":
+      "未找到有实际路径证据的建议。可直接使用下方手动前缀迁移功能。";
+    $("#pathSuggestList").innerHTML=renderPathSuggestions(pathSuggestions);
+  }catch(e){
+    if(generation!==pathSuggestionGeneration)return;
+    $("#pathSuggestSummary").textContent="分析失败："+e.message;
+    toast(e.message,true);
+  }finally{button.disabled=false}
+}
+async function acceptPathSuggestion(event){
+  const button=event.target.closest("[data-path-suggestion]");
+  if(!button)return;
+  const index=Number(button.dataset.pathSuggestion);
+  const proposal=pathSuggestions[index];
+  if(!Number.isInteger(index)||index<0||!proposal)return;
+  $("#pathPrefixFrom").value=proposal.source;
+  $("#pathPrefixTo").value=proposal.target;
+  clearPathPlan();
+  await previewPaths(); // Read-only; apply still needs an explicit confirmation.
+}
 // Path migration must be explicit: a preview is invalidated when either input changes.
 let currentPathPlan = null;
 let pathPreviewGeneration = 0;
@@ -1490,6 +1539,7 @@ async function applyPaths(){
     clearPathPlan();
     $("#pathPlanSummary").textContent=`已修改 ${result.changed} 条关联路径。可点击上方按钮重新检查。`;
     clearPathHealthResults("关联路径已更新，请重新执行检查。");
+    clearPathSuggestions("关联路径已更新，请重新分析迁移建议。");
     await refresh();
     toast(`已更新 ${result.changed} 条导航路径，真实文件夹未受影响`);
   }catch(e){currentPathPlan=null;$("#pathPlanSummary").textContent="提交失败："+e.message+"；请重新生成预览。";toast(e.message,true)}
@@ -1796,6 +1846,9 @@ function bind(){
   $("#copyHomepage").addEventListener("click",copyHomepage);
   $("#storageRefresh").addEventListener("click",refreshStorage);
   $("#storageBackup").addEventListener("click",downloadPortableBackup);
+  $("#pathSuggest").addEventListener("click",suggestPaths);
+  $("#pathSuggestedRoot").addEventListener("input",()=>clearPathSuggestions());
+  $("#pathSuggestList").addEventListener("click",acceptPathSuggestion);
   $("#pathCheck").addEventListener("click",checkPaths);
   $("#pathExport").addEventListener("click",exportMissingPaths);
   $("#pathHealthList").addEventListener("click",actOnPathHealth);
