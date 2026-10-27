@@ -130,7 +130,8 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('.path-suggestion',self.css)
 
     def test_workspace_navigation_and_portable_settings_contract(self):
-        for control in ('workspaceSection','workspaceCount','workspaceNav',
+        self.assertIn('id="workspaceSection"',self.html)
+        for control in ('workspaceCount','workspaceNav',
                         'workspaceNew','workspaceLayer','workspaceForm',
                         'workspaceName','workspaceDescription','workspaceMemberSearch',
                         'workspaceMemberList','workspaceMemberSummary','workspaceSave',
