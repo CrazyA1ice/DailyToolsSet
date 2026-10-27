@@ -360,6 +360,21 @@ class HttpTests(unittest.TestCase):
         except ValueError:pass
         return r.status,content
 
+    def workspace_snapshot(self, ids):
+        """Mirror the frozen, ordered confirmation shown by the browser."""
+        nodes = {node["id"]: node for node in self.srv.store.all()}
+        snapshot = []
+        for node_id in ids:
+            node = nodes.get(node_id)
+            kind = node["resource_kind"] if node else None
+            snapshot.append({
+                "id": node_id, "title": node["title"] if node else None,
+                "kind": kind,
+                "target": (node["folder_path"] if kind == "folder"
+                           else node["resource_target"]) if node else None,
+            })
+        return snapshot
+
     def test_v53_workspace_launch_http_auth_saved_ids_and_partial_failures(self):
         root=self.srv.store.create({"title":"Project","node_type":"root"})
         doc=self.srv.store.create({"title":"Paper","node_type":"leaf",
@@ -382,6 +397,7 @@ class HttpTests(unittest.TestCase):
             if node["id"]==web:raise app.UserError("目标网页暂时无法启动")
         with patch.object(app,"open_saved_resource",side_effect=run):
             status,body=self.request("POST",endpoint,{"name":"科研","ids":[root],
+                                                     "expected_items":self.workspace_snapshot([doc,web]),
                                                      "command":"dangerous"})
         self.assertEqual(status,200)
         self.assertEqual(body["attempted"],2)
@@ -399,10 +415,64 @@ class HttpTests(unittest.TestCase):
             self.srv.store.preferences.save({"workspaces":[{
                 "name":"BadType","description":"","members":[root],
                 "launch_ids":[root]}]})
-            status,response=self.request("POST","/api/workspaces/launch",{"name":"BadType"})
+            status,response=self.request("POST","/api/workspaces/launch",
+                 {"name":"BadType","expected_items":self.workspace_snapshot([root])})
             self.assertEqual(status,200)
             self.assertFalse(response["results"][0]["ok"])
             self.assertIn("分类模块",response["results"][0]["error"])
+            opener.assert_not_called()
+
+    def test_v54_workspace_launch_requires_fresh_ordered_resource_snapshot(self):
+        root = self.srv.store.create({"title":"Project","node_type":"root"})
+        doc = self.srv.store.create({"title":"Report","node_type":"leaf",
+            "parent_id":root,"resource_kind":"file",
+            "resource_target":r"D:\\Project\\report.pdf"})
+        web = self.srv.store.create({"title":"Docs","node_type":"leaf",
+            "parent_id":root,"resource_kind":"url",
+            "resource_target":"https://example.org/"})
+        workspace = {"name":"Lab","description":"","members":[doc,web],
+                     "launch_ids":[doc,web]}
+        self.srv.store.preferences.save({"workspaces":[workspace]})
+        original = self.workspace_snapshot([doc,web])
+        endpoint = "/api/workspaces/launch"
+
+        with patch.object(app,"open_saved_resource") as opener:
+            bad_requests = [
+                {"name":"Lab"},  # Previous frontend versions must refresh.
+                {"name":"Lab","expected_items":list(reversed(original))},
+                {"name":"Lab","expected_items":[{**original[0],"id":True},original[1]]},
+                {"name":"Lab","expected_items":[{**original[0],"target":"D:changed"},original[1]]},
+                {"name":"Lab","expected_items":[{**original[0],"title":"Renamed"},original[1]]},
+                {"name":"Lab","expected_items":[{**original[0],"extra":"unconfirmed"},original[1]]},
+            ]
+            for request in bad_requests:
+                with self.subTest(request=request):
+                    status, response = self.request("POST",endpoint,request)
+                    self.assertEqual(status,400)
+                    self.assertIn("重新确认",response["error"])
+            opener.assert_not_called()
+
+            self.srv.store.update(doc,{"resource_target":r"D:\\Project\\report-v2.pdf"})
+            status, response = self.request("POST",endpoint,
+                {"name":"Lab","expected_items":original})
+            self.assertEqual(status,400)
+            self.assertIn("重新确认",response["error"])
+            opener.assert_not_called()
+
+            refreshed = self.workspace_snapshot([doc,web])
+            status, response = self.request("POST",endpoint,
+                {"name":"Lab","expected_items":refreshed})
+            self.assertEqual(status,200)
+            self.assertEqual(response["succeeded"],2)
+            self.assertEqual(opener.call_count,2)
+
+            reordered = {**workspace,"launch_ids":[web,doc]}
+            self.srv.store.preferences.save({"workspaces":[reordered]})
+            opener.reset_mock()
+            status, response = self.request("POST",endpoint,
+                {"name":"Lab","expected_items":refreshed})
+            self.assertEqual(status,400)
+            self.assertIn("重新确认",response["error"])
             opener.assert_not_called()
 
     def test_everything_search_endpoint_is_opt_in_and_bounds_input(self):
