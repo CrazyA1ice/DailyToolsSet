@@ -1839,7 +1839,7 @@ const quickPalette={open:false,items:[],selected:0,returnFocus:null};
 function quickCandidates(query=""){
   const term=String(query).trim();
   const candidates=term?searchAll(term):
-    [...children(null),...state.nodes.filter(node=>Boolean(node.folder_path))];
+    [...children(null),...state.nodes.filter(node=>Boolean(node.folder_path||node.resource_target))];
   const seen=new Set();
   return candidates.filter(node=>{
     if(seen.has(node.id))return false;
@@ -1860,7 +1860,7 @@ function renderQuickPalette(){
   results.innerHTML=quickPalette.items.map(({node},index)=>{
     const path=node.folder_path||ancestors(node.id).map(n=>n.title).join(" / ");
     const label=(node.tags||[]).length?path+" · 标签："+node.tags.join("、"):path;
-    const suffix=node.node_type==="leaf"?"文件夹":"模块";
+    const suffix=node.node_type==="leaf"?(node.resource_kind==="url"?"网页":node.resource_kind==="file"?"文件":"文件夹"):"模块";
     return `<button type="button" class="quick-result" id="quick-option-${index}" role="option" aria-selected="false" data-quick-index="${index}">
       <span class="quick-icon" aria-hidden="true">${h(iconFor(node))}</span>
       <span class="quick-details"><strong>${term?highlightSearch(node.title,term):h(node.title)}</strong>
