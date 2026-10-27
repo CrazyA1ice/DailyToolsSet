@@ -324,6 +324,26 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('state.recent=[];state.frequent=[];',self.js)
         self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
 
+    def test_saved_folder_groups_and_result_dialog(self):
+        for control in ("folderGroupSection","folderGroupNav","folderGroupCount",
+                        "bulkSaveGroup","groupResultLayer","groupResultSummary",
+                        "groupResultRows","groupResultClose","groupResultDone"):
+            self.assertIn(f'id="{control}"',self.html)
+        self.assertIn('function renderFolderGroups()',self.js)
+        self.assertIn('async function saveSelectedFolderGroup()',self.js)
+        self.assertIn('async function openFolderGroup(index)',self.js)
+        self.assertIn('async function renameFolderGroup(index)',self.js)
+        self.assertIn('async function deleteFolderGroup(index)',self.js)
+        self.assertIn('"/api/groups/open"',self.js)
+        self.assertIn('folderGroups:state.folderGroups.map',self.js)
+        self.assertIn('state.folderGroups=Array.isArray(saved.folderGroups)',self.js)
+        self.assertIn('data-group-open=',self.js)
+        self.assertIn('data-group-rename=',self.js)
+        self.assertIn('data-group-delete=',self.js)
+        self.assertIn('renderFolderGroups();',self.js)
+        self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
+        self.assertIn('.group-report-row.failure',self.css)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)

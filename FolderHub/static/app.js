@@ -62,7 +62,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {savedViews:[],activeSmartView:null,openingIds:new Set(),nodes:[],trash:[],recent:[],frequent:[], activeTag:null, tagSelection:[], tagExcluded:[], tagMatchMode:"any", tagPickMode:"include", renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+const state = {savedViews:[],folderGroups:[],groupBusy:false,activeSmartView:null,openingIds:new Set(),nodes:[],trash:[],recent:[],frequent:[], activeTag:null, tagSelection:[], tagExcluded:[], tagMatchMode:"any", tagPickMode:"include", renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
 
 /* V3.0 — Native browser history for modules and special views.
    Search text is stored in the current tab's history.state, never in the URL. */
@@ -131,7 +131,8 @@ function collectProjectSettings(){
   return {...preferences,theme:state.theme,layout:state.layout,
     expanded:state.treeInitialized?[...state.expanded]:initialExpanded,
     savedViews:state.savedViews.map(view=>({name:view.name,includes:[...view.includes],
-      excludes:[...view.excludes],mode:view.mode}))};
+      excludes:[...view.excludes],mode:view.mode})),
+    folderGroups:state.folderGroups.map(group=>({name:group.name,members:[...group.members]}))};
 }
 async function persistProjectSettings(){
   if(!projectSettingsReady)return true;
@@ -175,6 +176,9 @@ async function loadProjectSettings(){
   initialExpanded=Array.isArray(saved.expanded)?saved.expanded:null;
   state.savedViews=Array.isArray(saved.savedViews)?saved.savedViews.map(view=>({
     name:view.name,includes:[...view.includes],excludes:[...view.excludes],mode:view.mode
+  })):[];
+  state.folderGroups=Array.isArray(saved.folderGroups)?saved.folderGroups.map(group=>({
+    name:group.name,members:[...group.members]
   })):[];
   projectSettingsReady=true;
   document.documentElement.dataset.theme=state.theme;
@@ -392,6 +396,7 @@ function renderNav(){
   }).join("");
   $("#treeNav").innerHTML=walk(roots);
   renderSavedViews();
+  renderFolderGroups();
 }
 function renderSavedViews(){
   const list=$("#smartViewNav"),section=$("#smartViewSection");
@@ -400,6 +405,20 @@ function renderSavedViews(){
   list.innerHTML=state.savedViews.map((view,index)=>{
     const desc=`${view.mode==="all"?"全部匹配":"任一匹配"} · 包含 ${view.includes.length} · 排除 ${view.excludes.length}`;
     return `<button type="button" class="nav-item saved-view-link ${state.view==="tags"&&state.activeSmartView===view.name?"active":""}" data-saved-view="${index}" title="${h(desc)}：${h(view.name)}"><span>◇</span><span class="saved-view-title">${h(view.name)}</span><span class="saved-view-counter">${view.includes.length+view.excludes.length}</span></button>`;
+  }).join("");
+}
+function renderFolderGroups(){
+  const section=$("#folderGroupSection"),list=$("#folderGroupNav");
+  section.classList.toggle("hidden",!state.folderGroups.length);
+  $("#folderGroupCount").textContent=String(state.folderGroups.length);
+  list.innerHTML=state.folderGroups.map((group,index)=>{
+    const present=group.members.filter(id=>Boolean(byId(id)?.folder_path)).length;
+    const desc=`已关联 ${present} / ${group.members.length} 个目录 · 点击打开工作组`;
+    return `<div class="folder-group-row">
+      <button type="button" class="nav-item folder-group-launch" data-group-open="${index}" title="${h(desc)}" ${state.groupBusy?"disabled":""}><span aria-hidden="true">◈</span><span class="folder-group-name">${h(group.name)}</span><span class="folder-group-members">${present}/${group.members.length}</span></button>
+      <button type="button" class="folder-group-command" data-group-rename="${index}" title="重命名 ${h(group.name)}" aria-label="重命名工作组 ${h(group.name)}" ${state.groupBusy?"disabled":""}>✎</button>
+      <button type="button" class="folder-group-command" data-group-delete="${index}" title="删除工作组（不删除文件夹）" aria-label="删除工作组 ${h(group.name)}" ${state.groupBusy?"disabled":""}>×</button>
+    </div>`;
   }).join("");
 }
 function renderCrumb(){
@@ -668,7 +687,7 @@ function render(skipNav=false){
     if(navigationReady)window.history.replaceState(navigationSnapshot(),"",routeUrl("all"));
   }
   if(!skipNav)renderNav();
-  else renderSavedViews();
+  else {renderSavedViews();renderFolderGroups()}
   renderCrumb();
   renderTagFilters();
   const trashView=state.view==="trash"&&!state.search.trim();
@@ -1016,6 +1035,108 @@ function toggleSelected(id){
   else state.selectedIds.add(id);
   render(true);
 }
+
+/* V3.8 — named groups of existing linked modules; nothing touches real folders. */
+function validateFolderGroupName(value){
+  if(typeof value!=="string"||!value.trim()||value.trim().length>40||
+     /[\x00-\x1f\x7f]/.test(value))
+    throw new Error("工作组名称须为 1—40 字且不能包含控制字符");
+  return value.trim();
+}
+async function commitFolderGroupChange(next,successText){
+  const previous=state.folderGroups;
+  state.folderGroups=next;
+  const saved=await persistProjectSettings();
+  if(!saved){
+    state.folderGroups=previous;
+    render();return false;
+  }
+  render();
+  toast(successText);
+  return true;
+}
+async function saveSelectedFolderGroup(){
+  if(state.batchBusy||state.groupBusy)return;
+  const members=[...state.selectedIds];
+  if(members.length<2||members.length>8){
+    toast("请先选择 2—8 个需要一起打开的模块",true);return;
+  }
+  const invalid=members.filter(id=>!byId(id)?.folder_path);
+  if(invalid.length){
+    toast(`有 ${invalid.length} 个模块尚未关联文件夹，请先编辑并设置路径`,true);return;
+  }
+  const input=prompt("为文件夹工作组命名（2—8 个目录，最多 40 字）：");
+  if(input===null)return;
+  let name;
+  try{name=validateFolderGroupName(input)}catch(e){toast(e.message,true);return}
+  const previous=state.folderGroups;
+  const index=previous.findIndex(group=>group.name.toLocaleLowerCase()===name.toLocaleLowerCase());
+  if(index>=0 && !confirm(`工作组「${previous[index].name}」已存在。确定用当前选中的 ${members.length} 个目录替换原成员吗？`))return;
+  if(index<0&&previous.length>=20){
+    toast("最多保存 20 个工作组，请先删除不再需要的工作组",true);return;
+  }
+  const updated=previous.map(group=>({name:group.name,members:[...group.members]}));
+  if(index>=0)updated[index]={name,members};
+  else updated.push({name,members});
+  if(await commitFolderGroupChange(updated,index>=0?"工作组目录已更新":"工作组已保存到侧栏")){
+    exitSelectMode();render();
+  }
+}
+async function renameFolderGroup(index){
+  const group=state.folderGroups[index];
+  if(!group||state.groupBusy)return;
+  const input=prompt("修改工作组名称：",group.name);
+  if(input===null)return;
+  let name;
+  try{name=validateFolderGroupName(input)}catch(e){toast(e.message,true);return}
+  if(name===group.name)return;
+  if(state.folderGroups.some((item,i)=>i!==index&&item.name.toLocaleLowerCase()===name.toLocaleLowerCase())){
+    toast("已有同名工作组",true);return;
+  }
+  const updated=state.folderGroups.map((item,i)=>i===index?
+    {name,members:[...item.members]}:{name:item.name,members:[...item.members]});
+  await commitFolderGroupChange(updated,"工作组已重命名");
+}
+async function deleteFolderGroup(index){
+  const group=state.folderGroups[index];
+  if(!group||state.groupBusy)return;
+  if(!confirm(`确定删除工作组「${group.name}」吗？\n只会移除快捷入口，不会删除任何模块或真实文件夹。`))return;
+  await commitFolderGroupChange(state.folderGroups.filter((_,i)=>i!==index),"工作组已删除");
+}
+function closeGroupReport(){
+  $("#groupResultLayer").classList.add("hidden");
+}
+function showFolderGroupReport(result){
+  $("#groupResultTitle").textContent=`${result.group} · 打开结果`;
+  $("#groupResultSummary").textContent=`成功打开 ${result.opened} 项，未打开 ${result.failed} 项。失败的目录不会影响其他目录。`;
+  $("#groupResultRows").innerHTML=result.results.map(row=>
+    `<div class="group-report-row ${row.ok?"success":"failure"}">
+      <span aria-hidden="true">${row.ok?"✓":"!"}</span>
+      <div><strong>${h(row.title)}</strong><small>${row.ok?"已发送 Windows 资源管理器打开指令":h(row.error||"打开失败")}</small></div>
+    </div>`).join("");
+  $("#groupResultLayer").classList.remove("hidden");
+  $("#groupResultClose").focus();
+}
+async function openFolderGroup(index){
+  const group=state.folderGroups[index];
+  if(!group||state.groupBusy)return;
+  const names=group.members.map(id=>byId(id)?.title||`已删除模块 #${id}`);
+  const question=`打开工作组「${group.name}」中的 ${names.length} 个目录吗？\n\n${names.map((name,i)=>`${i+1}. ${name}`).join("\n")}\n\n仅打开已有绑定路径，不修改真实文件夹。`;
+  if(!confirm(question))return;
+  state.groupBusy=true;
+  renderFolderGroups();updateBatchBar();
+  try{
+    const result=await mutate("POST","/api/groups/open",{name:group.name});
+    try{
+      const [recent,frequent]=await Promise.all([api("/api/recent"),api("/api/frequent")]);
+      state.recent=recent.items;state.frequent=frequent.items;
+      render();
+    }catch(_){/* successful Explorer launches should still be reported */}
+    showFolderGroupReport(result);
+  }catch(error){toast("打开工作组失败："+error.message,true)}
+  finally{state.groupBusy=false;renderFolderGroups();updateBatchBar()}
+}
+
 function updateBatchBar(){
   const bar=$("#bulkBar"),count=state.selectedIds.size;
   bar.classList.toggle("hidden",!state.selectMode);
@@ -1023,6 +1144,7 @@ function updateBatchBar(){
   $("#selectModeBtn").setAttribute("aria-pressed",String(state.selectMode));
   $("#selectModeBtn").textContent=state.selectMode?"✓ 退出多选":"☑ 多选";
   for(const id of ["bulkFavorite","bulkUnfavorite","bulkTagAdd","bulkTagRemove","bulkDelete"]){$("#"+id).disabled=state.batchBusy||count===0}
+  $("#bulkSaveGroup").disabled=state.batchBusy||state.groupBusy||count<2||count>8;
   $("#bulkSelectAll").disabled=state.batchBusy||state.visibleIds.length===0;
   $("#bulkCancel").disabled=state.batchBusy;
 }
@@ -1419,7 +1541,8 @@ function markQuickSelection(){
 function openQuickPalette(){
   if(!$("#quickLayer").classList.contains("hidden"))return;
   if(!$("#dialogLayer").classList.contains("hidden") ||
-     !$("#settingsLayer").classList.contains("hidden"))return;
+     !$("#settingsLayer").classList.contains("hidden") ||
+     !$("#groupResultLayer").classList.contains("hidden"))return;
   closeCardMenu();
   quickPalette.returnFocus=document.activeElement;
   quickPalette.open=true;
@@ -1501,6 +1624,20 @@ function bind(){
   $("#bulkUnfavorite").addEventListener("click",()=>batchAction("unfavorite"));
   $("#bulkTagAdd").addEventListener("click",()=>batchTags("add"));
   $("#bulkTagRemove").addEventListener("click",()=>batchTags("remove"));
+  $("#bulkSaveGroup").addEventListener("click",saveSelectedFolderGroup);
+  $("#folderGroupNav").addEventListener("click",event=>{
+    const open=event.target.closest("[data-group-open]");
+    if(open){openFolderGroup(Number(open.dataset.groupOpen));return}
+    const rename=event.target.closest("[data-group-rename]");
+    if(rename){renameFolderGroup(Number(rename.dataset.groupRename));return}
+    const remove=event.target.closest("[data-group-delete]");
+    if(remove)deleteFolderGroup(Number(remove.dataset.groupDelete));
+  });
+  $("#groupResultClose").addEventListener("click",closeGroupReport);
+  $("#groupResultDone").addEventListener("click",closeGroupReport);
+  $("#groupResultLayer").addEventListener("click",event=>{
+    if(event.target===$("#groupResultLayer"))closeGroupReport();
+  });
   $("#bulkDelete").addEventListener("click",()=>batchAction("delete"));
   $("#cardContextMenu").addEventListener("click",e=>{const btn=e.target.closest("[data-menu-action]");if(btn&&state.contextId!==null)contextAction(btn.dataset.menuAction,state.contextId)});
   $("#entries").addEventListener("contextmenu",e=>{const card=e.target.closest(".entry-card");if(!card||e.target.closest("input,textarea"))return;e.preventDefault();openCardMenu(Number(card.dataset.id),e.clientX,e.clientY)});
@@ -1626,6 +1763,9 @@ function bind(){
       return;
     }
     if(quickPalette.open)return;
+    if(e.key==="Escape"&&!$("#groupResultLayer").classList.contains("hidden")){
+      closeGroupReport();return;
+    }
     if(e.key==="Escape"&&!$("#cardContextMenu").classList.contains("hidden")){closeCardMenu();return}
     if(e.key==="Escape"&&state.selectMode){exitSelectMode();render();return}
     if(e.key==="Escape"&&!$("#dialogLayer").classList.contains("hidden"))closeDialog();

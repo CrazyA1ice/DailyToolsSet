@@ -27,6 +27,10 @@
       <div class="nav-label">智能收藏夹 <span id="smartViewCount" class="saved-view-count">0</span></div>
       <nav id="smartViewNav" class="nav-stack" aria-label="已保存的组合筛选"></nav>
     </div>
+    <div id="folderGroupSection" class="folder-group-section hidden">
+      <div class="nav-label">文件夹工作组 <span id="folderGroupCount" class="saved-view-count">0</span></div>
+      <nav id="folderGroupNav" class="folder-group-nav" aria-label="保存的文件夹工作组"></nav>
+    </div>
     <div class="nav-group-header"><span class="nav-label">分层目录</span><button id="addRoot" class="icon-button" title="添加根模块" aria-label="添加根模块">＋</button></div>
     <nav id="treeNav" class="tree-nav" aria-label="模块树"></nav>
     <div class="side-footer"><div class="side-footer-icon">✓</div><div><strong>本地安全运行</strong><small>只管理入口，不移动文件</small></div></div>
@@ -54,12 +58,24 @@
         <button type="button" id="bulkUnfavorite" class="outline-btn">☆ 取消收藏</button>
         <button type="button" id="bulkTagAdd" class="outline-btn">⌗ 批量添加标签</button>
         <button type="button" id="bulkTagRemove" class="outline-btn">− 批量移除标签</button>
+        <button type="button" id="bulkSaveGroup" class="outline-btn" title="选中 2—8 个已绑定文件夹后保存为工作组">◈ 保存为工作组</button>
         <button type="button" id="bulkDelete" class="outline-btn danger-btn">移除所选</button>
         <button type="button" id="bulkCancel" class="outline-btn">完成</button>
       </div>
       <section class="entries" id="entries" aria-live="polite"></section>
     </div>
   </main>
+</div>
+<div id="groupResultLayer" class="dialog-layer hidden" role="presentation">
+  <div class="dialog group-report-dialog" role="dialog" aria-modal="true" aria-labelledby="groupResultTitle">
+    <div class="dialog-header">
+      <div><div class="eyebrow">FOLDER GROUP</div><h2 id="groupResultTitle">工作组打开结果</h2></div>
+      <button type="button" id="groupResultClose" class="icon-button" aria-label="关闭工作组结果">✕</button>
+    </div>
+    <div id="groupResultSummary" class="group-report-summary" role="status"></div>
+    <div id="groupResultRows" class="group-report-rows" aria-label="工作组各目录打开状态"></div>
+    <div class="dialog-footer"><button id="groupResultDone" type="button" class="primary-btn">完成</button></div>
+  </div>
 </div>
 <div id="quickLayer" class="quick-layer hidden" role="presentation">
   <div class="quick-dialog" role="dialog" aria-modal="true" aria-labelledby="quickTitle" aria-describedby="quickHelp">
