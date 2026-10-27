@@ -940,3 +940,4 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
 .path-suggestion .path-arrow{font-size:.95rem}
 .path-suggestion small{font-size:.83rem;color:var(--muted)}
 .path-suggestion strong code{font-weight:550}
+.path-prefix-grid label[for="pathSuggestedRoot"]{grid-column:1/-1}
