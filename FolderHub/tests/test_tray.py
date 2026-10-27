@@ -200,26 +200,80 @@ class TrayServiceTests(TestCase):
         browser.assert_called_once_with(
             'http://127.0.0.1:8765/#workspace/%E8%AE%BA%E6%96%87%20%26%20%E9%A1%B9%E7%9B%AE')
 
-    def test_external_service_snapshot_uses_read_only_endpoints(self):
+    def test_external_service_snapshot_uses_one_bounded_read_only_endpoint(self):
         svc=tray.ServiceController(port=9876)
         svc.external=True
         calls=[]
         def fake(url,timeout=None):
             calls.append(url)
-            if url.endswith('/api/nodes'):
-                return BytesIO(b'{"nodes":[{"id":5,"title":"Folder","folder_path":"C:/Folder","favorite":true}]}')
-            if url.endswith('/api/recent'):
-                return BytesIO(b'{"items":[]}')
-            if url.endswith('/api/preferences'):
-                return BytesIO(b'{"settings":{"workspaces":[{"name":"Lab"}]}}')
-            raise AssertionError(url)
-        with patch.object(tray,'server_is_folderhub',return_value=True), \
+            self.assertEqual(url,'http://127.0.0.1:9876/api/quick-menu')
+            return BytesIO(b'{"nodes":[{"id":5,"title":"Folder","resource_kind":"folder",'
+                           b'"node_type":"leaf","has_target":true}],'
+                           b'"workspaces":[{"name":"Lab"}]}')
+        with patch.object(tray,'server_is_folderhub',return_value=True) as identity, \
              patch.object(tray,'urlopen',side_effect=fake):
             items=svc.quick_entries()
         self.assertEqual([x['kind'] for x in items],
                          ['heading','folder','heading','workspace'])
-        self.assertEqual(len(calls),2)
-        self.assertTrue(all('/api/' in url for url in calls))
+        self.assertEqual(len(calls),1)
+        identity.assert_called_once_with(9876)
+
+    def test_v56_bounded_quick_snapshot_equivalent_to_full_tree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=tray.app.Store(Path(directory)/'data'/'folderhub.db')
+            # Bulk insert mirrors a large portable tree, without expensive
+            # single-record CRUD loops or any live Explorer interactions.
+            rows=[]
+            for index in range(1600):
+                rows.append(('Folder '+str(index),'leaf',r'D:\Data',
+                             'folder',None,index%17))
+            for index in range(12):
+                rows.append(('PDF '+str(index),'leaf',None,'file',
+                             rf'D:\Docs\report{index}.pdf',index%17))
+                rows.append(('Web '+str(index),'leaf',None,'url',
+                             f'https://example.org/{index}',index%17))
+            rows.extend([
+                ('Unlinked PDF','leaf',None,'file',None,0),
+                ('Unlinked Folder','leaf',None,'folder',None,0),
+                ('Group URL','group',None,'url','https://example.org',0),
+            ])
+            with store.connect() as db:
+                db.executemany("""INSERT INTO nodes
+                    (title,node_type,folder_path,resource_kind,resource_target,
+                     sort_order,created_at,updated_at)
+                    VALUES (?,?,?,?,?,?,'2026-01-01','2026-01-01')""",rows)
+            expected=tray.build_quick_entries(store.all(),[],[])
+            with patch.object(store,'all',side_effect=AssertionError(
+                    'menu snapshot must never read entire tree')):
+                minimal=store.quick_menu_nodes()
+            result=tray.build_quick_entries(minimal,[],[])
+            self.assertEqual(result,expected)
+            self.assertLessEqual(len(minimal),24)
+            self.assertTrue(all(item['has_target'] is True for item in minimal))
+            self.assertTrue(all('folder_path' not in item and
+                                'resource_target' not in item and
+                                'tags' not in item for item in minimal))
+            self.assertEqual(len([item for item in result
+                                  if item['kind']=='folder']),8)
+            # A completed write must be visible on the very next shortcut.
+            first_id=minimal[0]['id']
+            store.update(first_id,{'title':'Renamed shortcut'})
+            self.assertEqual(tray.build_quick_entries(
+                store.quick_menu_nodes(),[],[]),
+                tray.build_quick_entries(store.all(),[],[]))
+
+    def test_owned_tray_uses_bounded_snapshot_not_store_all(self):
+        with tempfile.TemporaryDirectory() as directory:
+            svc=tray.ServiceController(data_dir=Path(directory),port=0)
+            svc.start()
+            try:
+                with patch.object(svc.server.store,'all',
+                                  side_effect=AssertionError('full scan')) as full:
+                    entries=svc.quick_entries()
+                self.assertEqual(entries,[])
+                full.assert_not_called()
+            finally:
+                svc.stop()
 
     def test_windows_message_handler_routes_global_hotkey(self):
         window=tray.WindowsTray.__new__(tray.WindowsTray)
