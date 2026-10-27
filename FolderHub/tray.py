@@ -504,17 +504,17 @@ class WindowsTray:
         # where ShellWindows COM may expose a non-active tab for the same HWND.
         reply=self.user32.MessageBoxW(
             self.hwnd,
-            "将以下文件夹添加到 FolderHub 收藏？\n\n" + folder +
+            "将以下文件夹加入 FolderHub 导航？\n\n" + folder +
             "\n\n若与资源管理器当前显示的路径不一致，请选「否」。"
             "\n该操作只添加快捷导航，不会复制或移动实际文件。",
-            "确认快速收藏", 0x00000004 | 0x00000020 | 0x00000100 |
+            "确认快速收录", 0x00000004 | 0x00000020 | 0x00000100 |
             MB_TOPMOST | MB_SETFOREGROUND)
         if reply!=6:  # IDYES; default button is NO.
             return
         try:
             result=self.controller.capture_current_directory(folder)
-            self._message("已加入收藏：" + folder if result.get("created")
-                          else "此目录已在导航中，已设为收藏：" + folder)
+            self._message("已收录目录：" + folder if result.get("created")
+                          else "此目录已在导航中：" + folder)
         except (OSError, ValueError, RuntimeError) as error:
             self._message("快速收藏失败：" + str(error))
 
