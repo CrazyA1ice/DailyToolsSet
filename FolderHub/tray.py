@@ -106,12 +106,30 @@ def safe_menu_title(value, limit=46):
 
 
 def build_quick_entries(nodes,recent,workspaces):
-    """Directory and workspace launch only; ignore usage/favorite metadata."""
-    folders=[{"kind":"folder","target":item["id"],
-              "label":safe_menu_title(item.get("title"))}
-             for item in nodes if type(item) is dict and type(item.get("id")) is int
-             and item.get("folder_path")][:8]
-    entries=([{"kind":"heading","label":"文件夹导航"}]+folders) if folders else []
+    """Bounded unified navigation. Only IDs, never raw targets, leave this layer.
+
+    The existing authenticated /api/nodes/<id>/open route makes the final
+    decision whether a folder, document or website can be opened.
+    """
+    resources=[]
+    for item in nodes:
+        if type(item) is not dict or type(item.get("id")) is not int:
+            continue
+        kind=item.get("resource_kind","folder")
+        if kind == "folder":
+            if not item.get("folder_path"):
+                continue
+            label=safe_menu_title(item.get("title"))
+        elif kind in ("file","url") and item.get("node_type") == "leaf":
+            if not item.get("resource_target"):
+                continue
+            label=("📄 " if kind=="file" else "🌐 ")+safe_menu_title(item.get("title"),42)
+        else:
+            continue
+        resources.append({"kind":"folder","target":item["id"],"label":label})
+        if len(resources) >= 8:
+            break
+    entries=([{"kind":"heading","label":"快速打开资源"}]+resources) if resources else []
     groups=[{"kind":"workspace","target":item["name"],
              "label":safe_menu_title(item["name"])}
             for item in workspaces[:8] if type(item) is dict
