@@ -66,6 +66,39 @@ class PortablePreferencesTests(unittest.TestCase):
             self.store.capture_folder(str(document))
         self.assertEqual(self.store.all(),original)
 
+    def test_quick_capture_http_requires_auth_and_never_modifies_directory(self):
+        folder=self.root/'ViaHttp'
+        folder.mkdir()
+        server=app.FolderServer(('127.0.0.1',0),self.store)
+        thread=threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        def send(token=None):
+            connection=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=5)
+            headers={'Content-Type':'application/json'}
+            if token is not None:
+                headers['X-FolderHub-Token']=token
+            connection.request('POST','/api/quick-capture',
+                               body=json.dumps({'folder_path':str(folder)}),
+                               headers=headers)
+            response=connection.getresponse()
+            status=response.status
+            payload=json.loads(response.read())
+            connection.close()
+            return status,payload
+        self.assertEqual(send()[0],403)
+        status,first=send(server.token)
+        self.assertEqual(status,200)
+        self.assertTrue(first['created'])
+        status,second=send(server.token)
+        self.assertEqual(status,200)
+        self.assertFalse(second['created'])
+        self.assertEqual(first['id'],second['id'])
+        self.assertTrue(folder.is_dir())
+        self.assertEqual(len(self.store.all()),2)
+
     def test_first_browser_import_and_other_browser_cannot_overwrite(self):
         self.assertFalse(self.prefs.get()['configured'])
         result=self.prefs.save({'theme':'forest','font':'xlarge','expanded':[2,9],
