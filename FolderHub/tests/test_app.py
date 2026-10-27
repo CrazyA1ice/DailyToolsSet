@@ -893,3 +893,70 @@ class FrequentUsageTests(unittest.TestCase):
         self.assertEqual(response.status,405)
         response.read()
         conn.close()
+
+
+
+class FolderGroupOpenTests(unittest.TestCase):
+    """One-click groups open saved IDs only, never client-provided filesystem paths."""
+
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store=app.Store(Path(self.tmp.name)/'db'/'folderhub.db')
+        root=self.store.create({"title":"研究","node_type":"root"})
+        self.good=self.store.create({"title":"数据","node_type":"leaf","parent_id":root,
+                                     "folder_path":r"D:\\Data"})
+        self.bad=self.store.create({"title":"结果","node_type":"leaf","parent_id":root,
+                                    "folder_path":r"D:\\Results"})
+        self.store.preferences.save({'folderGroups':[{
+            'name':'量化研究','members':[self.good,self.bad]}]})
+
+    def test_group_continues_after_failed_explorer_and_records_success_only(self):
+        def try_open(path):
+            if path == r"D:\\Results":
+                raise app.UserError("磁盘暂不可访问")
+        with patch.object(app,"open_in_explorer",side_effect=try_open) as opened:
+            result=self.store.open_folder_group("量化研究")
+        self.assertEqual(opened.call_count,2)
+        self.assertEqual((result["opened"],result["failed"]),(1,1))
+        self.assertEqual([row["ok"] for row in result["results"]],[True,False])
+        self.assertEqual(result["results"][1]["error"],"磁盘暂不可访问")
+        self.assertEqual(self.store.frequent()[0]["node_id"],self.good)
+        self.assertEqual(len(self.store.frequent()),1)
+
+    def test_removed_module_does_not_abort_remaining_opens(self):
+        self.store.delete(self.good)
+        with patch.object(app,"open_in_explorer",return_value=None) as launched:
+            result=self.store.open_folder_group("量化研究")
+        self.assertEqual(result["opened"],1)
+        self.assertEqual(result["failed"],1)
+        self.assertIn("已删除",result["results"][0]["error"])
+        launched.assert_called_once_with(r"D:\\Results")
+
+    def test_name_or_missing_group_is_rejected(self):
+        for name in ("不存在",True,[],None,""):
+            with self.subTest(name=name),self.assertRaises(app.UserError):
+                self.store.open_folder_group(name)
+
+    def test_group_endpoint_is_authenticated_and_rejects_raw_paths(self):
+        server=app.FolderServer(("127.0.0.1",0),self.store)
+        thread=threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        def post(body,token=True):
+            conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=5)
+            headers={"Host":f"127.0.0.1:{server.server_port}",
+                     "Content-Type":"application/json"}
+            if token:headers["X-FolderHub-Token"]=server.token
+            conn.request("POST","/api/groups/open",json.dumps(body),headers)
+            resp=conn.getresponse();status=resp.status;data=json.loads(resp.read())
+            conn.close();return status,data
+        with patch.object(app,"open_in_explorer",return_value=None) as launched:
+            self.assertEqual(post({"name":"量化研究"},False)[0],403)
+            self.assertEqual(post({"name":"不存在","path":r"C:\\Private"})[0],400)
+            status,data=post({"name":"量化研究","path":r"C:\\Private"})
+        self.assertEqual(status,200)
+        self.assertEqual(data["opened"],2)
+        self.assertEqual(launched.call_count,2)
+        self.assertEqual(self.store.frequent()[0]["open_count"],1)

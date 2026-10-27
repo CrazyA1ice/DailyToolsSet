@@ -100,6 +100,39 @@ class PortablePreferencesTests(unittest.TestCase):
         self.assertEqual(self.prefs.get()['settings']['savedViews'],[])
         self.assertEqual(self.prefs.snapshot_bytes().count(b'"savedViews"'),1)
 
+    def test_folder_groups_survive_zip_and_validate_atomically(self):
+        groups=[{'name':'量化研究','members':[11,12,13]},
+                {'name':'学习资料','members':[2,7]}]
+        self.prefs.save({'folderGroups':groups,'theme':'forest'})
+        reopened=PreferencesStore(self.root/'data'/'preferences.json')
+        self.assertEqual(reopened.get()['settings']['folderGroups'],groups)
+        archive=self.store.make_portable_backup()
+        try:
+            with zipfile.ZipFile(archive) as zipped:
+                persisted=json.loads(zipped.read('data/preferences.json'))['settings']
+                self.assertEqual(persisted['folderGroups'],groups)
+        finally:
+            archive.unlink(missing_ok=True)
+        before=(self.root/'data'/'preferences.json').read_bytes()
+        invalid=[
+            {'folderGroups':None},
+            {'folderGroups':[{'name':'A','members':[1]}]},
+            {'folderGroups':[{'name':'A','members':[1,True]}]},
+            {'folderGroups':[{'name':'A','members':[1,1]}]},
+            {'folderGroups':[{'name':'A','members':[1,'2']}]},
+            {'folderGroups':[{'name':' A ','members':[1,2]}]},
+            {'folderGroups':[{'name':'A\\n','members':[1,2]}]},
+            {'folderGroups':[{'name':'A','members':list(range(1,10))}]},
+            {'folderGroups':[{'name':'A','members':[1,2]},
+                             {'name':'a','members':[3,4]}]},
+            {'folderGroups':[{'name':'A','members':[1,2]}]*21},
+            {'folderGroups':[{'name':'A','members':[1,2],'extra':True}]},
+        ]
+        for case in invalid:
+            with self.subTest(case=str(case)[:75]),self.assertRaises(PreferenceError):
+                self.prefs.save(case)
+            self.assertEqual((self.root/'data'/'preferences.json').read_bytes(),before)
+
     def test_backup_includes_preferences_even_when_not_created(self):
         archive=self.store.make_portable_backup()
         try:

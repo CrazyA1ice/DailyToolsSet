@@ -11,7 +11,7 @@ DEFAULTS = {
     'font': 'large', 'density': 'comfortable', 'listDensity': 'normal', 'sidebar': 'normal',
     'columns': 'auto', 'accent': 'blue', 'showCovers': True,
     'coverHeight': 'normal', 'coverFit': 'cover', 'sidebarCollapsed': False,
-    'theme': 'cloud', 'layout': 'grid', 'expanded': None, 'savedViews': [],
+    'theme': 'cloud', 'layout': 'grid', 'expanded': None, 'savedViews': [], 'folderGroups': [],
 }
 CHOICES = {
     'font': ('normal', 'large', 'xlarge'),
@@ -29,6 +29,8 @@ BOOLEAN_KEYS = frozenset(('showCovers', 'sidebarCollapsed'))
 MAX_EXPANDED = 20000
 MAX_SAVED_VIEWS = 24
 MAX_SMART_TAGS = 30
+MAX_FOLDER_GROUPS = 20
+MAX_GROUP_MEMBERS = 8
 MAX_BYTES = 128 * 1024
 
 
@@ -74,11 +76,35 @@ def validate_saved_views(value):
     return result
 
 
+def validate_folder_groups(value):
+    """Portable folder-group definitions store only node IDs, never raw paths."""
+    if not isinstance(value, list) or len(value) > MAX_FOLDER_GROUPS:
+        raise PreferenceError('最多保存 20 个文件夹工作组')
+    result, names = [], set()
+    for group in value:
+        if not isinstance(group, dict) or set(group) != {'name', 'members'}:
+            raise PreferenceError('文件夹组结构无效')
+        name, members = group['name'], group['members']
+        if (not isinstance(name, str) or name != name.strip()
+                or not 1 <= len(name) <= 40
+                or any(ord(ch) < 32 or ord(ch) == 127 for ch in name)):
+            raise PreferenceError('文件夹组名称须为 1—40 字，不能包含控制字符')
+        if name.casefold() in names:
+            raise PreferenceError('文件夹组名称不能重复')
+        names.add(name.casefold())
+        if (not isinstance(members, list) or not 2 <= len(members) <= MAX_GROUP_MEMBERS
+                or any(type(node_id) is not int or node_id < 1 for node_id in members)
+                or len(members) != len(set(members))):
+            raise PreferenceError('文件夹组须包含 2—8 个不重复的有效模块 ID')
+        result.append({'name': name, 'members': members[:]})
+    return result
+
+
 def validate(value):
     """Validate a complete/partial settings object without coercing or trusting unknown keys."""
     if not isinstance(value, dict) or set(value) - set(DEFAULTS):
         raise PreferenceError('个性化设置格式或字段无效')
-    result = {**DEFAULTS, 'savedViews': []}
+    result = {**DEFAULTS, 'savedViews': [], 'folderGroups': []}
     for key, item in value.items():
         if key in CHOICES:
             if type(item) is not str or item not in CHOICES[key]:
@@ -93,6 +119,8 @@ def validate(value):
                 raise PreferenceError('目录树展开状态无效')
         elif key == 'savedViews':
             item = validate_saved_views(item)
+        elif key == 'folderGroups':
+            item = validate_folder_groups(item)
         result[key] = item
     return result
 
@@ -124,7 +152,7 @@ class PreferencesStore:
         with self._lock:
             settings = self._read()
             return {'configured': settings is not None,
-                    'settings': settings if settings is not None else {**DEFAULTS, 'savedViews': []}}
+                    'settings': settings if settings is not None else {**DEFAULTS, 'savedViews': [], 'folderGroups': []}}
 
     def _write(self, settings):
         data = json.dumps({'format': 'FolderHubPreferences', 'version': 1, 'settings': settings},
@@ -160,6 +188,6 @@ class PreferencesStore:
         with self._lock:
             settings = self._read()
             if settings is None:
-                settings = {**DEFAULTS, 'savedViews': []}
+                settings = {**DEFAULTS, 'savedViews': [], 'folderGroups': []}
             return (json.dumps({'format': 'FolderHubPreferences', 'version': 1, 'settings': settings},
                                ensure_ascii=False, indent=2) + '\n').encode('utf-8')

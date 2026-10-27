@@ -431,6 +431,49 @@ class Store:
         finally:
             db.close()
 
+    def open_folder_group(self, name):
+        """Open only paths belonging to a saved group; report each result independently."""
+        if not isinstance(name, str) or not name or len(name) > 40:
+            raise UserError("文件夹组名称无效")
+        definitions = self.preferences.get()["settings"]["folderGroups"]
+        group = next((row for row in definitions if row["name"] == name), None)
+        if group is None:
+            raise UserError("文件夹工作组不存在，请刷新页面")
+        ids = group["members"]
+        with self.connect() as db:
+            placeholders = ",".join("?" for _ in ids)
+            rows = db.execute(
+                f"SELECT id,title,folder_path FROM nodes WHERE id IN ({placeholders})", ids)
+            by_id = {row["id"]: dict(row) for row in rows}
+        details = []
+        for node_id in ids:
+            node = by_id.get(node_id)
+            if node is None:
+                details.append({"id":node_id, "title":f"已删除的模块 #{node_id}",
+                                "ok":False, "error":"模块已删除"})
+                continue
+            item = {"id":node_id, "title":node["title"]}
+            folder = node["folder_path"]
+            if not folder:
+                item.update(ok=False,error="模块未关联文件夹")
+                details.append(item)
+                continue
+            try:
+                open_in_explorer(folder)
+            except (UserError, OSError, RuntimeError) as error:
+                item.update(ok=False,error=str(error))
+            else:
+                item["ok"] = True
+                try:
+                    self.record_open(node_id)
+                except (UserError, sqlite3.Error) as error:
+                    print("[FolderHub] group-open usage history failed:", repr(error),
+                          file=sys.stderr)
+            details.append(item)
+        success = sum(bool(item["ok"]) for item in details)
+        return {"ok":success == len(details), "group":name, "opened":success,
+                "failed":len(details)-success, "results":details}
+
     def recent(self, limit=30):
         """Most recently opened linked folders. No original files are inspected."""
         if type(limit) is not int or not 1 <= limit <= 200:
@@ -1052,6 +1095,11 @@ class Handler(BaseHTTPRequestHandler):
                     data=self.request_json()
                     return self.reply(200,self.server.store.set_recent_pin(
                         data.get("node_id"), data.get("pinned")))
+                return self.reply(405,{"error":"不支持的请求方法"})
+            if path=="/api/groups/open":
+                if method=="POST":
+                    data=self.request_json()
+                    return self.reply(200,self.server.store.open_folder_group(data.get("name")))
                 return self.reply(405,{"error":"不支持的请求方法"})
             if path=="/api/frequent":
                 if method=="GET":
