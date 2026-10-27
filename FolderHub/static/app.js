@@ -726,7 +726,7 @@ function card(n,reorderable=false,keyboardActive=false){
       <span class="path" title="${h(resourceTarget||lineage)}">${state.search?highlightSearch(linked?resourceTarget:(leaf?'未设置有效资源':`${childCount} 个子模块`),state.search):h(linked?resourceTarget:(leaf?'未设置有效资源':`${childCount} 个子模块`))}</span>
       ${listContext}${tagChips}</button>
     ${state.search && state.layout!=="list"?`<div class="entry-lineage" title="${h(lineage)}">⌁ ${highlightSearch(lineage,state.search)}</div>`:''}
-    <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?'● ${resourceLabel}入口':`${childCount} 个子模块`}</span>
+    <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?`● ${resourceLabel}入口`:`${childCount} 个子模块`}</span>
       <div class="card-links">${state.search && !state.selectMode?`<button type="button" data-action="locate" data-id="${n.id}" title="定位到原目录，不打开文件夹">⌖ 定位</button>`:""}${!leaf?`<button data-action="enter" data-id="${n.id}">进入 ›</button>`:''}
         ${linked?`<button data-action="open" data-id="${n.id}">打开 ↗</button>`:''}
         ${linked && state.layout==="list"?`<button type="button" data-action="copy-path" data-id="${n.id}" title="复制资源地址">复制地址</button>`:''}
@@ -905,9 +905,15 @@ function updateEntryType(){
   $("#entryParentRow").classList.toggle("hidden",t==="root");
   const node=state.editing===null?null:byId(state.editing);
   const hasLegacyPath=!!node?.folder_path && node.node_type!=="leaf" && node.node_type===t;
-  $("#entryPathRow").classList.toggle("hidden",t!=="leaf"&&!hasLegacyPath);
-  $("#entryPathRequired").textContent=t==="leaf"?"（必填）":hasLegacyPath?"（旧版路径，仅保留使用）":"";
-  $("#entryPath").required=t==="leaf";
+  const kind=$("#entryResourceKind").value;
+  $("#entryKindRow").classList.toggle("hidden",t!=="leaf");
+  $("#entryTargetRow").classList.toggle("hidden",t!=="leaf"||kind==="folder");
+  $("#entryPathRow").classList.toggle("hidden",!(t==="leaf"&&kind==="folder")&&!hasLegacyPath);
+  $("#entryPathRequired").textContent=t==="leaf"&&kind==="folder"?"（必填）":hasLegacyPath?"（旧版路径，仅保留使用）":"";
+  $("#entryPath").required=t==="leaf"&&kind==="folder";
+  $("#entryResourceTarget").required=t==="leaf"&&kind!=="folder";
+  $("#entryTargetLabel").textContent=kind==="file"?"本地文件绝对路径":"网页 URL";
+  $("#entryResourceTarget").placeholder=kind==="file"?"例如 D:\\Research\\paper.pdf":"https://example.com/";
   $("#entryTypeHelp").textContent=t==="root"?"顶层分类，只能建在目录最上层。":
     t==="group"?"用于继续划分子模块，可无限嵌套。":
     "最末级文件夹入口：必须关联一个文件夹，不能添加子模块。";
@@ -922,6 +928,8 @@ function editDialog(id=null,parentId=undefined){
   $("#dialogTitle").textContent=node?"编辑模块":"新建模块";
   $("#entryName").value=node?.title||"";
   $("#entryPath").value=node?.folder_path||"";
+  $("#entryResourceKind").value=node?.resource_kind||"folder";
+  $("#entryResourceTarget").value=node?.resource_target||"";
   $("#entryTags").value=(node?.tags||[]).join("，");
   $("#entryIcon").value=node?.icon||"folder";
   state.pendingCover=null;state.removeCover=false;
@@ -963,7 +971,10 @@ async function submitDialog(event){
   event.preventDefault();
   const type=$("#entryType").value;
   const payload={title:$("#entryName").value,node_type:type,icon:$("#entryIcon").value,
-    folder_path:type==="leaf"||(!$("#entryPathRow").classList.contains("hidden"))?$("#entryPath").value:null,
+    folder_path:(type==="leaf"&&$("#entryResourceKind").value==="folder") ||
+      (type!=="leaf"&&!$("#entryPathRow").classList.contains("hidden"))?$("#entryPath").value:null,
+    resource_kind:type==="leaf"?$("#entryResourceKind").value:"folder",
+    resource_target:type==="leaf"&&$("#entryResourceKind").value!=="folder"?$("#entryResourceTarget").value:null,
     parent_id:type==="root"?null:($("#entryParent").value?Number($("#entryParent").value):null),
     tags:$("#entryTags").value.split(/[,，;；\n]+/).map(x=>x.trim()).filter(Boolean)};
   const button=$("#submitEntry");button.disabled=true;
@@ -993,7 +1004,8 @@ async function openFolder(id){
   document.getElementById(`folderhub-entry-${id}`)?.classList.add("is-opening");
   try{
     await mutate("POST",`/api/nodes/${id}/open`);
-    toast("已向 Windows 资源管理器发送打开指令，并尝试将窗口置前");
+    toast((byId(id)?.resource_kind||"folder")==="folder"?
+      "已向 Windows 资源管理器发送打开指令":"已发送资源打开指令");
   }catch(e){toast(e.message,true)}
   finally{
     state.openingIds.delete(id);
@@ -1495,11 +1507,11 @@ function openCardMenu(id,x,y){
   if(!n||state.selectMode)return;
   state.contextId=id;
   const actions=[];
-  if(n.node_type==="leaf"||n.folder_path)actions.push(["open","在资源管理器中打开"]);
+  if(n.node_type==="leaf"||n.folder_path)actions.push(["open","打开资源"]);
   if(n.node_type!=="leaf")actions.push(["enter","进入模块"]);
   actions.push(["edit","编辑模块"],["workspace-add","加入项目工作区…"]);
   if(n.node_type!=="leaf")actions.push(["child","新建子模块"]);
-  if(n.folder_path)actions.push(["copy-path","复制文件夹路径"]);
+  if(n.folder_path||n.resource_target)actions.push(["copy-path","复制资源地址"]);
   actions.push(["delete","移除导航记录"]);
   menu.innerHTML=actions.map(([action,label])=>`<button type="button" role="menuitem" class="${action==='delete'?'menu-danger':''}" data-menu-action="${action}">${h(label)}</button>`).join("");
   menu.classList.remove("hidden");
@@ -1509,8 +1521,8 @@ function openCardMenu(id,x,y){
   menu.querySelector("button")?.focus();
 }
 async function copyFolderPath(id){
-  const folder=byId(id)?.folder_path;
-  if(!folder){toast("该模块未关联文件夹",true);return}
+  const folder=byId(id)?.folder_path||byId(id)?.resource_target;
+  if(!folder){toast("该模块未关联资源地址",true);return}
   let copied=false;
   try{
     if(navigator.clipboard?.writeText){
@@ -1897,8 +1909,8 @@ function closeQuickPalette(){
 async function quickLaunch(index){
   const entry=quickPalette.items[index],node=entry?.node;
   if(!node || !byId(node.id))return;
-  if(node.node_type==="leaf"&&!node.folder_path){
-    toast("该叶子模块尚未绑定文件夹，请先编辑模块",true);
+  if(node.node_type==="leaf"&&!node.folder_path&&!node.resource_target){
+    toast("该叶子模块尚未关联资源，请先编辑模块",true);
     return;
   }
   closeQuickPalette();
@@ -2174,6 +2186,7 @@ function bind(){
   $("#importFile").addEventListener("change",async e=>{await restoreBackup(e.target.files[0]);e.target.value=""});
   $("#entryForm").addEventListener("submit",submitDialog);
   $("#entryType").addEventListener("change",updateEntryType);
+  $("#entryResourceKind").addEventListener("change",updateEntryType);
   $("#entryParent").addEventListener("change",e=>{
     if(!e.target.value)$("#entryType").value="root";
     else if($("#entryType").value==="root")$("#entryType").value="group";
