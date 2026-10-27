@@ -172,9 +172,11 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertNotIn('persistProjectSettings()',self.js[start:end])
 
     def test_workspace_quick_add_uses_existing_ids_and_validation(self):
+        self.assertIn('id="workspacePickerTitle"',self.html)
+        self.assertIn('aria-labelledby="workspacePickerTitle"',self.html)
         for control in ('workspacePickerLayer','workspacePickerList',
-                        'workspacePickerTitle','workspacePickerClose',
-                        'workspacePickerCancel','workspacePickerSummary'):
+                        'workspacePickerClose','workspacePickerCancel',
+                        'workspacePickerSummary'):
             self.assertIn(f'id="{control}"',self.html)
             self.assertIn(control,self.js)
         self.assertIn('["workspace-add","加入项目工作区…"]',self.js)
