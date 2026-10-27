@@ -194,6 +194,19 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertNotIn('state.openingIds.add(id);render()',body)
         self.assertIn('if(state.view==="recent"&&!state.search.trim())render(true)',body)
 
+    def test_highlight_locate_and_focus_restoration(self):
+        self.assertIn("function highlightSearch(value,query)",self.js)
+        self.assertIn("class=\"search-hit\"",self.js)
+        self.assertIn("function locateNode(id)",self.js)
+        self.assertIn("data-action=\"locate\"",self.js)
+        self.assertIn('case "locate":locateNode(id);break;',self.js)
+        self.assertIn("const limit=Math.ceil((index+1)/100)*100",self.js)
+        self.assertIn('restoreCardFocus(id,"favorite")',self.js)
+        self.assertIn('restoreCardFocus(id,"pin")',self.js)
+        self.assertIn(".search-hit",self.css)
+        self.assertIn(".entry-card.is-located",self.css)
+        self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)

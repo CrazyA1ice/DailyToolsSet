@@ -770,3 +770,13 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
 @media(prefers-reduced-motion:reduce){
   .entry-card{transform:none!important}
 }
+
+/* V2.9 - matched words and non-destructive locate feedback. */
+.search-hit{background:color-mix(in srgb,var(--accent) 18%,var(--surface));color:var(--text);
+  font-weight:800;border-radius:3px;padding:0 1px;box-decoration-break:clone}
+.entry-card.is-located{border-color:var(--accent);
+  outline:3px solid color-mix(in srgb,var(--accent) 42%,transparent);outline-offset:2px;
+  box-shadow:0 9px 26px color-mix(in srgb,var(--accent) 18%,transparent)}
+.card-links [data-action="locate"]{color:var(--accent);
+  border:1px solid color-mix(in srgb,var(--accent) 22%,transparent);border-radius:7px;white-space:nowrap}
+.card-links [data-action="locate"]:hover,.card-links [data-action="locate"]:focus-visible{background:var(--accent-faint)}

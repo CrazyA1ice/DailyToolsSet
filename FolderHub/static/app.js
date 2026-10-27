@@ -116,6 +116,34 @@ document.documentElement.dataset.theme=state.theme;
 applyPreferences();
 const $ = (s) => document.querySelector(s);
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function highlightSearch(value,query){
+  const content=String(value??"");
+  const words=[...new Set(String(query??"").trim().toLocaleLowerCase().split(/\s+/).filter(Boolean))].slice(0,16).sort((a,b)=>b.length-a.length);
+  if(!words.length)return h(content);
+  const lower=content.toLocaleLowerCase();
+  let cursor=0,html="";
+  while(cursor<content.length){
+    let best=-1,hit="";
+    for(const term of words){
+      const found=lower.indexOf(term,cursor);
+      if(found!==-1&&(best===-1||found<best||(found===best&&term.length>hit.length))){
+        best=found;hit=term;
+      }
+    }
+    if(best===-1)break;
+    html+=h(content.slice(cursor,best))+`<mark class="search-hit">${h(content.slice(best,best+hit.length))}</mark>`;
+    cursor=best+hit.length;
+  }
+  return html+h(content.slice(cursor));
+}
+function restoreCardFocus(id,action){
+  const card=document.getElementById(`folderhub-entry-${id}`);
+  const selector=action===null?".card-primary":`[data-action="${action}"]`;
+  const target=card?.querySelector(selector)||
+    document.querySelector("#entries .card-primary")||$("#search");
+  target?.focus?.({preventScroll:true});
+}
 let toastTimer;
 // Rebuilt only after the server returns new node data. Rendering/searching then
 // use O(1) lookups instead of scanning every node for every card/ancestor.
@@ -212,6 +240,25 @@ function setView(view,id=null){
   if(view==="node"&&id!==null)expandLineage(id);
   render();
 }
+
+function locateNode(id){
+  const node=byId(id);
+  if(!node)return;
+  const parent=node.parent_id??null;
+  const siblings=children(parent),index=siblings.findIndex(item=>item.id===id);
+  if(index<0)return;
+  const limit=Math.ceil((index+1)/100)*100;
+  setView(parent===null?"all":"node",parent);
+  if(limit>state.renderLimit){state.renderLimit=limit;render(true)}
+  requestAnimationFrame(()=>{
+    const card=document.getElementById(`folderhub-entry-${id}`);
+    if(!card)return;
+    card.classList.add("is-located");
+    card.scrollIntoView({block:"center",behavior:"auto"});
+    restoreCardFocus(id,null);
+    window.setTimeout(()=>card.classList.remove("is-located"),3600);
+  });
+}
 const TYPE_LABEL = {root:"根模块",group:"普通模块",leaf:"叶子模块"};
 const iconFor = n => ICONS[n.icon] || ICONS.folder;
 const coverUrl = n => `/api/nodes/${n.id}/image?v=${encodeURIComponent(n.updated_at||"")}`;
@@ -269,7 +316,7 @@ function card(n,reorderable=false,keyboardActive=false){
   // List metadata belongs in the primary information column, not the grid's
   // auxiliary sibling row (which was deliberately hidden in list mode).
   const listContext=state.layout==="list" && contextText?
-    `<span class="list-card-context" title="${h(contextText)}">${h(contextText)}</span>`:"";
+    `<span class="list-card-context" title="${h(contextText)}">${state.search?highlightSearch(contextText,state.search):h(contextText)}</span>`:"";
   const recentCaption=state.layout!=="list" && recentText?
     `<div class="entry-lineage">${h(recentText)}</div>`:"";
   const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
@@ -290,13 +337,13 @@ function card(n,reorderable=false,keyboardActive=false){
       </div>
     </div>
     <button type="button" class="card-primary" data-action="primary" data-id="${n.id}" title="${primaryTitle}">
-      <strong>${h(n.title)}</strong><span class="type-chip ${n.node_type}">${TYPE_LABEL[n.node_type]||'模块'}</span>
-      <span class="path" title="${h(n.folder_path||lineage)}">${h(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`))}</span>
+      <strong>${state.search?highlightSearch(n.title,state.search):h(n.title)}</strong><span class="type-chip ${n.node_type}">${TYPE_LABEL[n.node_type]||'模块'}</span>
+      <span class="path" title="${h(n.folder_path||lineage)}">${state.search?highlightSearch(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`),state.search):h(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`))}</span>
       ${listContext}</button>
-    ${state.search && state.layout!=="list"?`<div class="entry-lineage" title="${h(lineage)}">⌁ ${h(lineage)}</div>`:''}
+    ${state.search && state.layout!=="list"?`<div class="entry-lineage" title="${h(lineage)}">⌁ ${highlightSearch(lineage,state.search)}</div>`:''}
     ${recentCaption}
     <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?'● 文件夹入口':`${childCount} 个子模块`}</span>
-      <div class="card-links">${!leaf?`<button data-action="enter" data-id="${n.id}">进入 ›</button>`:''}
+      <div class="card-links">${state.search && !state.selectMode?`<button type="button" data-action="locate" data-id="${n.id}" title="定位到原目录，不打开文件夹">⌖ 定位</button>`:""}${!leaf?`<button data-action="enter" data-id="${n.id}">进入 ›</button>`:''}
         ${linked?`<button data-action="open" data-id="${n.id}">打开 ↗</button>`:''}
         ${linked && state.layout==="list"?`<button type="button" data-action="copy-path" data-id="${n.id}" title="复制关联的文件夹路径">复制路径</button>`:''}
         ${!leaf?`<button data-action="child" data-id="${n.id}">＋ 子模块</button>`:''}
@@ -592,16 +639,23 @@ async function removeNode(id){
 }
 async function favoriteNode(id){
   const n=byId(id);if(!n)return;
-  try{await mutate("PATCH",`/api/nodes/${id}`,{favorite:!n.favorite});await refresh()}
-  catch(e){toast(e.message,true)}
+  const hadCardFocus=Number(document.activeElement?.closest(".entry-card")?.dataset.id)===id;
+  try{
+    await mutate("PATCH",`/api/nodes/${id}`,{favorite:!n.favorite});
+    await refresh();
+    if(hadCardFocus)restoreCardFocus(id,"favorite");
+  }catch(e){toast(e.message,true)}
 }
 async function toggleRecentPin(id){
   const visit=state.recent.find(row=>row.node_id===id);
   if(!visit)return;
+  const hadCardFocus=Number(document.activeElement?.closest(".entry-card")?.dataset.id)===id;
   try{
     await mutate("POST","/api/recent/pin",{node_id:id,pinned:!Boolean(visit.pinned)});
     state.recent=(await api("/api/recent")).items;
-    render();toast(visit.pinned?"已取消置顶":"已置顶到最近使用顶部");
+    render();
+    if(hadCardFocus)restoreCardFocus(id,"pin");
+    toast(visit.pinned?"已取消置顶":"已置顶到最近使用顶部");
   }catch(e){toast("修改置顶失败："+e.message,true)}
 }
 async function clearRecentHistory(){
@@ -617,6 +671,7 @@ async function act(action,id){
     case "select":toggleSelected(id);break;
     case "menu":{const card=[...document.querySelectorAll("#entries .entry-card")].find(x=>Number(x.dataset.id)===id);const bounds=card?.getBoundingClientRect();if(bounds)openCardMenu(id,bounds.right-235,bounds.top+42);break}
     case "open":await openFolder(id);break;
+    case "locate":locateNode(id);break;
     case "copy-path":await copyFolderPath(id);break;
     case "enter":setView("node",id);break;
     case "child":if(byId(id)?.node_type!=="leaf")editDialog(null,id);else toast("叶子模块不能拥有子模块",true);break;
