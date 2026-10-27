@@ -34,8 +34,24 @@ python app.py                     # 默认 8765 端口，自动打开浏览器
 python app.py --port 8770         # 指定其他端口
 python app.py --no-browser        # 不自动打开浏览器
 python app.py --data-dir "D:\FolderHubData"   # 自定义数据库及图片位置（图片在此目录下的 uploads/）
-python -m unittest discover -s tests -v      # 运行全部测试
+python -m unittest discover -s tests -t . -v  # 运行全部测试（当前目录必须是 FolderHub）
 ```
+
+**测试目录说明（Windows / Git Bash / Python 3.15）：** `FolderHub/tests/__init__.py` 使测试目录成为可导入的包。执行命令前先确认当前目录；从项目仓库根目录（`DailyToolsSet`）测试时可以不切换工作目录：
+
+```powershell
+# 当前目录：D:\ChatGPT\DailyToolsSet
+python -m unittest discover -s FolderHub/tests -t FolderHub -v
+```
+
+或者进入 `FolderHub` 后运行：
+
+```powershell
+cd D:\ChatGPT\DailyToolsSet\FolderHub
+python -m unittest discover -s tests -t . -v
+```
+
+出现 `Start directory is not importable: 'tests'` 时，先确认 GitHub 最新代码已更新、`tests/__init__.py` 存在，以及 `-s` 指向真实的测试目录。该错误意味着**测试发现阶段失败，不是测试用例失败**。
 
 自定义数据目录也支持环境变量 `FOLDERHUB_DATA_DIR`。首次使用 Windows 的文件夹浏览功能需要 Python 自带 tkinter（标准 Windows Python 安装一般包含）。
 
