@@ -10,7 +10,7 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app
-from preferences_store import PreferencesStore, PreferenceError, DEFAULTS
+from preferences_store import PreferencesStore, PreferenceError, PreferenceConflict, DEFAULTS
 
 
 class PortablePreferencesTests(unittest.TestCase):
@@ -31,6 +31,62 @@ class PortablePreferencesTests(unittest.TestCase):
         self.assertEqual(second['settings']['theme'],'forest')
         self.assertEqual(second['settings']['expanded'],[2,9])
         self.assertTrue((self.root/'data'/'preferences.json').is_file())
+
+    def test_preference_revision_prevents_stale_workspace_overwrite(self):
+        first=self.prefs.get()
+        self.assertFalse(first['configured'])
+        self.assertIsNone(first['revision'])
+        old_workspace={'name':'Research','description':'base','members':[1],
+                       'status':'planning','links':[]}
+        created=self.prefs.save({'workspaces':[old_workspace]},only_if_missing=True)
+        original_revision=created['revision']
+        self.assertTrue(original_revision.startswith('sha256:'))
+        tab_one=self.prefs.get()
+        tab_two=self.prefs.get()
+        self.assertEqual(tab_one['revision'],tab_two['revision'])
+        updated={'name':'Research','description':'edited in first tab','members':[1,2],
+                 'status':'active','links':[]}
+        saved=self.prefs.save({'workspaces':[updated]},
+                              expected_revision=tab_one['revision'])
+        self.assertNotEqual(saved['revision'],original_revision)
+        baseline=(self.root/'data'/'preferences.json').read_bytes()
+        with self.assertRaises(PreferenceConflict):
+            self.prefs.save({'workspaces':[old_workspace]},
+                            expected_revision=tab_two['revision'])
+        self.assertEqual((self.root/'data'/'preferences.json').read_bytes(),baseline)
+        self.assertEqual(self.prefs.get()['settings']['workspaces'],[updated])
+        self.assertEqual(self.prefs.get()['revision'],saved['revision'])
+        self.assertEqual(
+            self.prefs.save({'workspaces':[updated]},expected_revision=saved['revision'])['revision'],
+            saved['revision'])
+
+    def test_revision_null_only_initializes_missing_preferences_once(self):
+        self.assertIsNone(self.prefs.get()['revision'])
+        first=self.prefs.save({'theme':'forest'},expected_revision=None)
+        self.assertIsInstance(first['revision'],str)
+        baseline=(self.root/'data'/'preferences.json').read_bytes()
+        with self.assertRaises(PreferenceConflict):
+            self.prefs.save({'theme':'sand'},expected_revision=None)
+        self.assertEqual((self.root/'data'/'preferences.json').read_bytes(),baseline)
+        self.assertEqual(self.prefs.get()['settings']['theme'],'forest')
+
+    def test_preference_revisions_survive_restart_and_reject_malformed_tokens(self):
+        created=self.prefs.save({'theme':'forest','expanded':[1,2]})
+        reopened=PreferencesStore(self.root/'data'/'preferences.json')
+        self.assertEqual(reopened.get()['revision'],created['revision'])
+        baseline=(self.root/'data'/'preferences.json').read_bytes()
+        for token in ('', 'sha256:'+'x'*64, 'sha256:'+('0'*63),
+                      123, False, [], {'revision':'sha256:'+'0'*64}):
+            with self.subTest(token=repr(token)),self.assertRaises(PreferenceError):
+                self.prefs.save({'theme':'sand'},expected_revision=token)
+            self.assertEqual((self.root/'data'/'preferences.json').read_bytes(),baseline)
+        with self.assertRaises(PreferenceConflict):
+            self.prefs.save({'theme':'sand'},expected_revision=None)
+        self.assertEqual((self.root/'data'/'preferences.json').read_bytes(),baseline)
+        # Deprecated clients that do not send a revision keep working.
+        legacy=self.prefs.save({'theme':'sand'})
+        self.assertEqual(self.prefs.get()['revision'],legacy['revision'])
+        self.assertEqual(self.prefs.get()['settings']['theme'],'sand')
 
     def test_survives_reopening_and_project_copy(self):
         import shutil
@@ -331,7 +387,22 @@ class PortablePreferencesTests(unittest.TestCase):
         self.assertEqual(body['settings']['theme'],'forest')
         self.assertEqual(send('PUT','/api/preferences',{'settings':{'theme':123}},server.token)[0],400)
         self.assertEqual(send('GET','/api/preferences')[1]['settings']['theme'],'forest')
-        self.assertEqual(send('PUT','/api/preferences',{'settings':{'theme':'aurora'}},server.token)[0],200)
+        initial=send('GET','/api/preferences')[1]
+        self.assertIsInstance(initial['revision'],str)
+        code,saved=send('PUT','/api/preferences',
+                        {'settings':{'theme':'aurora'},
+                         'expected_revision':initial['revision']},server.token)
+        self.assertEqual(code,200)
+        self.assertNotEqual(saved['revision'],initial['revision'])
+        code,body=send('PUT','/api/preferences',
+                       {'settings':{'theme':'sand'},
+                        'expected_revision':initial['revision']},server.token)
+        self.assertEqual(code,409)
+        self.assertEqual(body['code'],'preferences_conflict')
+        self.assertEqual(send('GET','/api/preferences')[1]['settings']['theme'],'aurora')
+        self.assertEqual(send('GET','/api/preferences')[1]['revision'],saved['revision'])
+        self.assertEqual(send('PUT','/api/preferences',{'settings':{'theme':'graphite'},
+                                                       'expected_revision':'bad'},server.token)[0],400)
         self.assertEqual(send('GET','/api/preferences')[1]['settings']['theme'],'aurora')
 
 

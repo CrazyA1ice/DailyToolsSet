@@ -508,6 +508,18 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
         self.assertIn('.group-report-row.failure',self.css)
 
+    def test_preference_revision_contract_protects_multiple_browser_tabs(self):
+        self.assertIn('let preferencesRevision=null;',self.js)
+        self.assertIn('let preferencesConflict=false;',self.js)
+        self.assertIn('expected_revision:preferencesRevision',self.js)
+        self.assertIn('preferencesRevision=saved.revision;',self.js)
+        self.assertIn('preferencesRevision=payload.revision??null;',self.js)
+        self.assertIn('preferencesConflict=true;',self.js)
+        self.assertIn('pendingSettings=null;',self.js)
+        self.assertIn('e.code==="preferences_conflict"',self.js)
+        self.assertIn('error.status=response.status;',self.js)
+        self.assertIn('if(preferencesConflict)',self.js)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)

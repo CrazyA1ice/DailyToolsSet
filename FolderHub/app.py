@@ -26,7 +26,7 @@ import webbrowser
 import startup
 import explorer_window
 import path_management
-from preferences_store import PreferencesStore, PreferenceError
+from preferences_store import PreferencesStore, PreferenceError, PreferenceConflict
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -1094,8 +1094,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200,self.server.store.preferences.get())
                 if method in ("PUT","POST"):
                     data=self.request_json(128 * 1024)
-                    result=self.server.store.preferences.save(
-                        data.get("settings"),only_if_missing=method=="POST")
+                    options = {'only_if_missing': method=="POST"}
+                    if "expected_revision" in data:
+                        options["expected_revision"] = data["expected_revision"]
+                    result=self.server.store.preferences.save(data.get("settings"),**options)
                     return self.reply(200,result)
                 return self.reply(405,{"error":"不支持的请求方法"})
             if method=="GET" and path=="/api/startup":
@@ -1239,6 +1241,8 @@ class Handler(BaseHTTPRequestHandler):
                 types={"index.html":"text/html; charset=utf-8","app.js":"application/javascript; charset=utf-8","styles.css":"text/css; charset=utf-8","favicon.svg":"image/svg+xml"}
                 return self.reply(200,(STATIC / name).read_bytes(),types[name])
             return self.reply(404,{"error":"页面或接口不存在"})
+        except PreferenceConflict as exc:
+            return self.reply(409,{"error":str(exc),"code":"preferences_conflict"})
         except (UserError, PreferenceError, startup.StartupError, path_management.PathRuleError) as exc:
             return self.reply(400,{"error":str(exc)})
         except (OSError,sqlite3.Error) as exc:

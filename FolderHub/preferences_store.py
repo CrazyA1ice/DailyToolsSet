@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -44,6 +45,20 @@ MAX_BYTES = 128 * 1024
 
 class PreferenceError(ValueError):
     pass
+
+
+class PreferenceConflict(PreferenceError):
+    """A browser tried to replace settings based on an obsolete revision."""
+
+
+_UNSET = object()
+
+
+def settings_revision(settings):
+    if settings is None:
+        return None
+    canonical = json.dumps(settings, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    return 'sha256:' + hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
 
 def validate_saved_views(value):
@@ -240,6 +255,7 @@ class PreferencesStore:
         with self._lock:
             settings = self._read()
             return {'configured': settings is not None,
+                    'revision': settings_revision(settings),
                     'settings': settings if settings is not None else {**DEFAULTS, 'savedViews': [], 'folderGroups': [], 'workspaces': []}}
 
     def _write(self, settings):
@@ -261,15 +277,27 @@ class PreferencesStore:
                 temporary.unlink(missing_ok=True)
         return settings
 
-    def save(self, settings, *, only_if_missing=False):
+    def save(self, settings, *, only_if_missing=False, expected_revision=_UNSET):
         with self._lock:
-            if only_if_missing:
-                existing = self._read()
-                if existing is not None:
-                    return {'configured': True, 'settings': existing, 'imported': False}
+            # Compare against the current on-disk content inside the same lock
+            # as the atomic replace. Omitted revision keeps older API callers
+            # compatible; browser clients send the revision explicitly.
+            existing = self._read()
+            if only_if_missing and existing is not None:
+                return {'configured': True, 'settings': existing,
+                        'revision': settings_revision(existing), 'imported': False}
+            if expected_revision is not _UNSET and not only_if_missing:
+                if (expected_revision is not None and
+                        (type(expected_revision) is not str or len(expected_revision) != 71
+                         or not expected_revision.startswith('sha256:')
+                         or any(c not in '0123456789abcdef' for c in expected_revision[7:]))):
+                    raise PreferenceError('个性化设置版本格式无效')
+                if expected_revision != settings_revision(existing):
+                    raise PreferenceConflict('其他页面已修改个性化设置；已拒绝旧版本覆盖，请记录本页尚未保存的内容并刷新后重试')
             checked = validate(settings)
             self._write(checked)
-            return {'configured': True, 'settings': checked, 'imported': only_if_missing}
+            return {'configured': True, 'settings': checked,
+                    'revision': settings_revision(checked), 'imported': only_if_missing}
 
     def snapshot_bytes(self):
         """Give portable backups a valid complete settings file, even before first browser visit."""
