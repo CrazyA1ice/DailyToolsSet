@@ -628,3 +628,11 @@ powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1
 
 该脚本自动进入项目目录执行 `python -m unittest discover -s tests -t . -v`，将完整结果输出到 `FolderHub/test-results/folderhub-tests-YYYYMMDD-HHMMSS.txt`，并尝试将过去写到仓库根目录的旧测试日志迁入同一目录。测试日志、data/、uploads/ 和 tmp/ 均由 `FolderHub/.gitignore` 排除 Git 跟踪。Everything 本身是外部安装的软件，不需要也不建议复制进项目仓库。Windows 完整测试和原生文件打开仍需在用户 Windows 环境验收。
 
+## V5.1：资源快捷启动与 Everything 搜索稳定性
+
+- 全局快捷功能菜单现支持已保存的 **文件夹、常见文档和网页**，全部继续使用已授权的模块 ID 打开接口；托盘不接收或执行用户输入的原始路径。菜单仍最多8个资源入口、8个工作区。为避免大量旧文件夹占满菜单，最多预留2个文件、2个网页入口，其余位置按原模块顺序补齐。遍历模块一次，每种类型只缓存最多8个候选条目。
+- Everything 查询结果额外检查路径是否仍为**真实可访问的文件或目录**。已删除、断开连接或无法访问的索引结果直接跳过，并显示跳过数量；不会再把失效目录误当成文件。
+- Everything 可能找到可执行程序，但 FolderHub 仍只允许安全文档格式。不能加入导航的文件结果会显示“文件类型不支持”，按钮禁用，而不是打开编辑框后才报错。对于文件/网页的允许范围依然以服务端验证为准。
+- 新增旧版 V4 SQLite 表与回收站升级模拟、搜索结果分类、混合类型托盘导航、不可添加文件提示的回归覆盖。
+- **本地验证：** 更新仓库后使用 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`，全部测试日志与临时数据仍写在 `FolderHub/test-results/`、`FolderHub/tmp/`。升级前建议从界面下载一次便携备份。
+- Windows 实机还需验证：中文路径搜索结果、Everything 索引中的离线文件、文件和网页托盘快捷打开，以及运行旧数据目录时的自动升级。
