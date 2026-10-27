@@ -7,6 +7,9 @@ down before the tray exits. An independently started app.py is never killed by u
 from __future__ import annotations
 
 import argparse
+import base64
+import ntpath
+import subprocess
 import ctypes
 from ctypes import wintypes
 import json
@@ -32,6 +35,9 @@ HOTKEY_ID = 46
 HOTKEY_MODIFIERS = 0x0001 | 0x0002 | 0x0004  # Alt + Ctrl + Shift
 HOTKEY_VK = ord("F")
 HOTKEY_LABEL = "Ctrl+Alt+Shift+F"
+CAPTURE_HOTKEY_ID = 47
+CAPTURE_HOTKEY_VK = ord("A")
+CAPTURE_HOTKEY_LABEL = "Ctrl+Alt+Shift+A"
 
 
 def server_is_folderhub(port=PORT):
@@ -98,6 +104,53 @@ def build_quick_entries(nodes, recent, workspaces):
     return entries
 
 
+def explorer_directory_for_hwnd(hwnd, *, run=None):
+    """Read a *specific* Explorer window through built-in PowerShell ShellWindows COM.
+
+    Only a numeric foreground Explorer HWND is inserted into the constant script,
+    never user text. ShellWindows may expose another tab on some Windows 11
+    builds: the user must inspect the exact returned directory before saving.
+    """
+    if type(hwnd) is not int or hwnd <= 0:
+        raise ValueError("资源管理器窗口句柄无效")
+    script = f"""
+$ErrorActionPreference = 'Stop'
+$target = [long]{hwnd}
+$shell = New-Object -ComObject Shell.Application
+foreach ($window in @($shell.Windows())) {{
+    try {{
+        if ([long]$window.HWND -ne $target) {{ continue }}
+        $folder = [string]$window.Document.Folder.Self.Path
+        if ($folder -and [IO.Path]::IsPathRooted($folder) -and
+            (Test-Path -LiteralPath $folder -PathType Container)) {{
+            [Console]::Out.Write([Convert]::ToBase64String(
+                [Text.Encoding]::Unicode.GetBytes($folder)))
+            break
+        }}
+    }} catch {{ continue }}
+}}
+"""
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    runner = run or subprocess.run
+    try:
+        process = runner(["powershell.exe", "-NoProfile", "-NonInteractive",
+                          "-EncodedCommand", encoded],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         stdin=subprocess.DEVNULL, timeout=7, check=False,
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError("无法读取资源管理器窗口，请确认 Windows PowerShell 可用") from error
+    if process.returncode != 0 or not process.stdout.strip():
+        raise RuntimeError("未能识别当前资源管理器的真实目录；请尝试使用单独窗口，或在网页中手动添加")
+    try:
+        path = base64.b64decode(process.stdout.strip(), validate=True).decode("utf-16-le")
+    except (ValueError, UnicodeError) as error:
+        raise RuntimeError("读取的资源管理器路径编码无效") from error
+    if not ntpath.isabs(path) or "\\x00" in path:
+        raise RuntimeError("当前窗口不是可以收藏的文件系统目录")
+    return path
+
+
 class ServiceController:
     """The tray owns its server; never terminate an independently started process."""
 
@@ -162,6 +215,32 @@ class ServiceController:
         if not result.get("ok"):
             raise RuntimeError("文件夹打开请求未成功")
         return result
+
+    def capture_current_directory(self, folder_path):
+        """Save a user-confirmed Explorer path via the existing local auth model."""
+        if type(folder_path) is not str or not ntpath.isabs(folder_path):
+            raise ValueError("收藏路径必须来自有效的绝对 Windows 文件夹")
+        if any(ord(c) < 32 for c in folder_path):
+            raise ValueError("文件夹路径不能包含控制字符")
+        with urlopen(f"{self.url.rstrip('/')}/api/config", timeout=1.5) as reply:
+            config = json.load(reply)
+        if not (type(config) is dict and config.get("platform") == "win32"
+                and isinstance(config.get("token"), str) and config["token"]):
+            raise RuntimeError("未能确认 FolderHub 本地服务")
+        payload = json.dumps({"folder_path":folder_path},ensure_ascii=False).encode("utf-8")
+        request = Request(f"{self.url.rstrip('/')}/api/quick-capture", data=payload,
+                          headers={"Content-Type": "application/json",
+                                   "X-FolderHub-Token": config["token"]},
+                          method="POST")
+        try:
+            with urlopen(request,timeout=6) as reply:
+                return json.load(reply)
+        except HTTPError as error:
+            try:
+                message=json.load(error).get("error",str(error))
+            except (ValueError,OSError):
+                message=str(error)
+            raise RuntimeError(message) from error
 
     def open_quick_workspace(self, name):
         if type(name) is not str or not name:
@@ -235,6 +314,7 @@ class WindowsTray:
         self.hwnd = None
         self.icon_added = False
         self.hotkey_registered = False
+        self.capture_hotkey_registered = False
         self._callback = self.WNDPROC(self._window_proc)  # Hold callback for whole loop.
         self.taskbar_created = self.user32.RegisterWindowMessageW("TaskbarCreated")
 
@@ -300,6 +380,9 @@ class WindowsTray:
         u.RegisterHotKey.restype = wintypes.BOOL
         u.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
         u.UnregisterHotKey.restype = wintypes.BOOL
+        u.GetForegroundWindow.restype = wintypes.HWND
+        u.GetClassNameW.argtypes = [wintypes.HWND, ctypes.c_wchar_p, ctypes.c_int]
+        u.GetClassNameW.restype = ctypes.c_int
         s.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
         s.Shell_NotifyIconW.restype = wintypes.BOOL
         k.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
@@ -336,6 +419,52 @@ class WindowsTray:
         if self.hotkey_registered and self.hwnd:
             self.user32.UnregisterHotKey(self.hwnd, HOTKEY_ID)
             self.hotkey_registered = False
+
+    def _register_capture_hotkey(self):
+        self.capture_hotkey_registered = bool(self.user32.RegisterHotKey(
+            self.hwnd, CAPTURE_HOTKEY_ID,
+            HOTKEY_MODIFIERS | self.MOD_NOREPEAT, CAPTURE_HOTKEY_VK))
+        if not self.capture_hotkey_registered:
+            print("[FolderHub] quick-capture shortcut unavailable (already in use or blocked)",
+                  file=sys.stderr)
+
+    def _remove_capture_hotkey(self):
+        if self.capture_hotkey_registered and self.hwnd:
+            self.user32.UnregisterHotKey(self.hwnd, CAPTURE_HOTKEY_ID)
+            self.capture_hotkey_registered = False
+
+    def _capture_explorer_directory(self):
+        foreground=self.user32.GetForegroundWindow()
+        if not foreground:
+            raise RuntimeError("请先切换到需要收藏的 Windows 资源管理器窗口")
+        name=ctypes.create_unicode_buffer(128)
+        if not self.user32.GetClassNameW(foreground,name,len(name)) or name.value not in (
+                "CabinetWClass","ExploreWClass"):
+            raise RuntimeError("仅支持资源管理器中的当前文件夹，请先激活资源管理器窗口")
+        return explorer_directory_for_hwnd(int(foreground))
+
+    def _capture_current_folder(self):
+        try:
+            folder=self._capture_explorer_directory()
+        except (OSError, ValueError, RuntimeError) as error:
+            self._message(str(error))
+            return
+        # Explicit path confirmation matters for Windows 11 multi-tab Explorer,
+        # where ShellWindows COM may expose a non-active tab for the same HWND.
+        reply=self.user32.MessageBoxW(
+            self.hwnd,
+            "将以下文件夹添加到 FolderHub 收藏？\n\n" + folder +
+            "\n\n若与资源管理器当前显示的路径不一致，请选「否」。"
+            "\n该操作只添加快捷导航，不会复制或移动实际文件。",
+            "确认快速收藏", 0x00000004 | 0x00000020 | 0x00000100)
+        if reply!=6:  # IDYES; default button is NO.
+            return
+        try:
+            result=self.controller.capture_current_directory(folder)
+            self._message("已加入收藏：" + folder if result.get("created")
+                          else "此目录已在导航中，已设为收藏：" + folder)
+        except (OSError, ValueError, RuntimeError) as error:
+            self._message("快速收藏失败：" + str(error))
 
     def _remove_icon(self):
         if self.icon_added and self.hwnd:
@@ -433,6 +562,9 @@ class WindowsTray:
 
     def _window_proc(self, hwnd, msg, wparam, lparam):
         try:
+            if msg == self.WM_HOTKEY and wparam == CAPTURE_HOTKEY_ID:
+                self._capture_current_folder()
+                return 0
             if msg == self.WM_HOTKEY and wparam == HOTKEY_ID:
                 self._show_quick_menu()
                 return 0
@@ -479,6 +611,7 @@ class WindowsTray:
             self.controller.start()
             self._add_icon()
             self._register_hotkey()
+            self._register_capture_hotkey()
             if open_browser:
                 webbrowser.open(self.controller.url)
             message = wintypes.MSG()
@@ -491,6 +624,7 @@ class WindowsTray:
                 u.TranslateMessage(ctypes.byref(message))
                 u.DispatchMessageW(ctypes.byref(message))
         finally:
+            self._remove_capture_hotkey()
             self._remove_hotkey()
             self._remove_icon()
             self.controller.stop()
