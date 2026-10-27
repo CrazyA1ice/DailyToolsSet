@@ -962,3 +962,22 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
 .workspace-member-row span{min-width:0;overflow-wrap:anywhere;font-size:.88rem}
 .workspace-member-row small{display:block;font-size:.76rem;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
 .workspace-member-missing{color:var(--danger,#bd5660)}
+
+/* V4.2: explicit workspace membership ordering, cloning and quick-add menu. */
+.workspace-member-heading{margin:7px 1px 2px;color:var(--muted);font-size:.8rem;font-weight:750}
+.workspace-member-label{flex:1;min-width:0;display:flex;gap:9px;align-items:center;cursor:pointer}
+.workspace-member-label>span{flex:1;min-width:0;overflow-wrap:anywhere;font-size:.88rem}
+.workspace-member-order{display:flex;gap:4px;flex:none}
+.workspace-member-order button{width:32px;height:32px;border:1px solid var(--line-strong);
+  border-radius:8px;background:var(--surface);color:var(--text);cursor:pointer;font:inherit}
+.workspace-member-order button:hover:not(:disabled){color:var(--accent);background:var(--accent-faint)}
+.workspace-member-order button:disabled{opacity:.35;cursor:default}
+.workspace-picker-dialog{width:min(540px,calc(100vw - 24px));max-height:min(85vh,690px);overflow-y:auto}
+.workspace-picker-summary{padding:0 22px;overflow-wrap:anywhere}
+.workspace-picker-list{display:grid;gap:7px;max-height:380px;overflow-y:auto;padding:4px 22px 18px}
+.workspace-picker-option{width:100%;display:flex;align-items:center;justify-content:space-between;
+  gap:12px;border:1px solid var(--line-strong);background:var(--surface);color:var(--text);
+  border-radius:9px;padding:11px 12px;text-align:left;cursor:pointer;font:inherit}
+.workspace-picker-option:hover:not(:disabled){border-color:var(--accent);background:var(--accent-faint)}
+.workspace-picker-option:disabled{opacity:.55;cursor:not-allowed}
+.workspace-picker-option small{flex:none;font-size:.8rem;color:var(--muted)}

@@ -72,6 +72,15 @@
     </div>
   </main>
 </div>
+<div id="workspacePickerLayer" class="dialog-layer hidden" role="presentation">
+  <div class="dialog workspace-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="workspacePickerTitle">
+    <div class="dialog-header"><div><div class="eyebrow">QUICK ADD TO WORKSPACE</div><h2 id="workspacePickerTitle">将模块加入工作区</h2></div>
+      <button id="workspacePickerClose" type="button" class="icon-button" aria-label="关闭加入工作区窗口">✕</button></div>
+    <p id="workspacePickerSummary" class="settings-note workspace-picker-summary"></p>
+    <div id="workspacePickerList" class="workspace-picker-list" role="group" aria-label="选择目标工作区"></div>
+    <div class="dialog-footer"><button id="workspacePickerCancel" type="button" class="outline-btn">取消</button></div>
+  </div>
+</div>
 <div id="workspaceLayer" class="dialog-layer hidden" role="presentation">
   <div class="dialog workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="workspaceDialogTitle">
     <div class="dialog-header"><div><div class="eyebrow">PROJECT WORKSPACE</div><h2 id="workspaceDialogTitle">新建工作区</h2></div>

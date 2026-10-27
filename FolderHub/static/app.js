@@ -781,7 +781,7 @@ function render(skipNav=false){
   $("#newBtnText").textContent=canAddChild?"新建子模块":"新建根模块";
   $("#searchHint").textContent=searching?`${display.length} 项结果`:"Ctrl K";
   $("#sectionOperations").innerHTML=state.view==="workspace"&&!searching?
-    '<button type="button" data-action="edit-workspace">编辑工作区</button>':
+    '<button type="button" data-action="edit-workspace">编辑工作区</button><button type="button" data-action="copy-workspace">复制工作区</button>':
     state.view==="node"&&!searching?
     `<button data-action="edit-current">编辑当前模块</button>`:
     state.view==="recent"&&!searching&&state.recent.length?
@@ -1052,6 +1052,7 @@ async function act(action,id){
     case "empty-create":editDialog();break;
     case "edit-current":editDialog(state.selected);break;
     case "edit-workspace":openWorkspaceDialog(state.workspaces.findIndex(item=>item.name===state.activeWorkspace));break;
+    case "copy-workspace":duplicateWorkspace(state.workspaces.findIndex(item=>item.name===state.activeWorkspace));break;
     case "load-more":{
       const previous=state.visibleIds.length;
       state.renderLimit+=100;
@@ -1089,28 +1090,49 @@ let workspaceDraftMembers=new Set();
 let workspaceSaving=false;
 function validateWorkspaceName(value){
   const name=String(value??"").trim();
-  if(!name||name.length>40||/[\x00-\x1f\x7f]/.test(name))
+  if(!name||Array.from(name).length>40||/[\x00-\x1f\x7f]/.test(name))
     throw new Error("工作区名称必须是 1—40 字，不能包含控制字符");
   return name;
 }
+function movedWorkspaceMemberIds(ids,id,direction){
+  const next=ids.slice(),index=next.indexOf(id),destination=index+direction;
+  if((direction!==-1&&direction!==1)||index<0||destination<0||destination>=next.length)return next;
+  [next[index],next[destination]]=[next[destination],next[index]];
+  return next;
+}
+function moveWorkspaceDraftMember(id,direction){
+  const before=[...workspaceDraftMembers],after=movedWorkspaceMemberIds(before,id,direction);
+  if(before.every((value,index)=>value===after[index]))return;
+  workspaceDraftMembers=new Set(after);
+  renderWorkspaceMembers();
+  $("#workspaceMemberList").querySelector('[data-workspace-move="'+id+'"][data-workspace-step="'+direction+'"]')?.focus();
+}
 function renderWorkspaceMembers(){
   const needle=$("#workspaceMemberSearch").value.trim().toLocaleLowerCase();
-  const candidates=state.nodes.filter(node=>
-    !needle || (node.title+" "+(node.folder_path||"")+" "+ancestors(node.id).map(p=>p.title).join(" ")).toLocaleLowerCase().includes(needle));
-  const ordered=candidates.sort((a,b)=>Number(workspaceDraftMembers.has(b.id))-Number(workspaceDraftMembers.has(a.id))||a.id-b.id);
-  const page=ordered.slice(0,120);
-  const missing=[...workspaceDraftMembers].filter(id=>!byId(id));
-  const row=node=>{
-    const selected=workspaceDraftMembers.has(node.id);
-    const label=ancestors(node.id).map(x=>x.title).join(" / ");
-    return `<label class="workspace-member-row"><input type="checkbox" data-workspace-member="${node.id}" ${selected?"checked":""} ${!selected&&workspaceDraftMembers.size>=30?"disabled":""}>
-      <span>${h(node.title)}<small>${h(label||node.folder_path||"根模块")}</small></span></label>`;
-  };
-  $("#workspaceMemberList").innerHTML=page.map(row).join("")+
-    missing.map(id=>`<label class="workspace-member-row workspace-member-missing"><input type="checkbox" data-workspace-member="${id}" checked><span>已删除模块 #${id}<small>取消勾选以移除失效引用</small></span></label>`).join("")+
-    (ordered.length>page.length?`<p class="settings-note">当前筛选仅显示前 120 个模块，请继续输入关键词缩小范围。</p>`:"")+
-    (!page.length&&!missing.length?'<p class="settings-note">没有匹配的模块。</p>':"");
-  $("#workspaceMemberSummary").textContent=`已选择 ${workspaceDraftMembers.size}/30 个模块；筛选匹配 ${ordered.length} 个。`;
+  const selected=[...workspaceDraftMembers];
+  const matches=node=>!needle||(node.title+" "+(node.folder_path||"")+" "+ancestors(node.id).map(p=>p.title).join(" ")).toLocaleLowerCase().includes(needle);
+  const remaining=state.nodes.filter(node=>!workspaceDraftMembers.has(node.id)&&matches(node)).sort((a,b)=>a.id-b.id);
+  const page=remaining.slice(0,120);
+  const checked=selected.map((id,index)=>{
+    const node=byId(id);
+    const label=node?node.title:"已删除模块 #"+id;
+    const context=node?(ancestors(node.id).map(x=>x.title).join(" / ")||node.folder_path||"根模块"):"取消勾选以移除失效引用";
+    return '<div class="workspace-member-row workspace-chosen-row '+(node?"":"workspace-member-missing")+'">'
+      +'<label class="workspace-member-label"><input type="checkbox" data-workspace-member="'+id+'" checked><span>'+h(label)+'<small>'+h(context)+'</small></span></label>'
+      +'<div class="workspace-member-order"><button type="button" data-workspace-move="'+id+'" data-workspace-step="-1" aria-label="将 '+h(label)+' 上移" title="上移" '+(index===0?"disabled":"")+'>↑</button>'
+      +'<button type="button" data-workspace-move="'+id+'" data-workspace-step="1" aria-label="将 '+h(label)+' 下移" title="下移" '+(index===selected.length-1?"disabled":"")+'>↓</button></div></div>';
+  });
+  const available=page.map(node=>{
+    const context=ancestors(node.id).map(x=>x.title).join(" / ")||node.folder_path||"根模块";
+    return '<label class="workspace-member-row workspace-member-label"><input type="checkbox" data-workspace-member="'+node.id+'" '+(selected.length>=30?"disabled":"")+'>'
+      +'<span>'+h(node.title)+'<small>'+h(context)+'</small></span></label>';
+  });
+  $("#workspaceMemberList").innerHTML=
+    (checked.length?'<p class="workspace-member-heading">已选成员 · 顺序即工作区显示顺序</p>'+checked.join(""):"")
+    +'<p class="workspace-member-heading">可添加模块</p>'
+    +(available.length?available.join(""):'<p class="settings-note">没有其他匹配的模块。</p>')
+    +(remaining.length>page.length?'<p class="settings-note">仅显示前 120 个匹配模块，请继续输入关键词缩小范围。</p>':"");
+  $("#workspaceMemberSummary").textContent="已选择 "+selected.length+"/30 个模块；可添加候选 "+remaining.length+" 个。";
 }
 function openWorkspaceDialog(index=-1,initialMembers=null){
   if(workspaceSaving)return;
@@ -1172,6 +1194,29 @@ async function submitWorkspace(event){
   }catch(e){state.workspaces=previous;toast("工作区保存失败："+e.message,true)}
   finally{workspaceSaving=false;$("#workspaceSave").disabled=false;render()}
 }
+function uniqueWorkspaceCopyName(original){
+  const names=new Set(state.workspaces.map(item=>item.name.toLocaleLowerCase()));
+  for(let i=1;i<=100;i++){
+    const suffix=i===1?"（副本）":"（副本 "+i+"）";
+    const name=Array.from(original).slice(0,40-Array.from(suffix).length).join("")+suffix;
+    if(!names.has(name.toLocaleLowerCase()))return name;
+  }
+  throw new Error("找不到可用的副本名称，请先清理同名工作区");
+}
+function duplicateWorkspace(index){
+  const item=state.workspaces[index];
+  if(!item||workspaceSaving)return;
+  if(state.workspaces.length>=20){toast("最多保存20个工作区，请先删除不用的工作区",true);return}
+  const existing=item.members.filter(id=>byId(id));
+  if(!existing.length){toast("原工作区没有可用模块，无法复制。请先修复成员",true);return}
+  let name;
+  try{name=uniqueWorkspaceCopyName(item.name)}catch(e){toast(e.message,true);return}
+  openWorkspaceDialog(-1,existing);
+  $("#workspaceDialogTitle").textContent="复制项目工作区";
+  $("#workspaceName").value=name;
+  $("#workspaceDescription").value=item.description;
+  toast("已复制工作区内容，请检查名称与模块后点击保存");
+}
 async function deleteWorkspace(index){
   const item=state.workspaces[index];
   if(!item||workspaceSaving)return;
@@ -1181,6 +1226,57 @@ async function deleteWorkspace(index){
   if(!await persistProjectSettings()){state.workspaces=old;render();return}
   if(state.view==="workspace"&&state.activeWorkspace===item.name)setView("all");
   render();toast("工作区已删除，文件夹和模块均未删除");
+}
+/* V4.2 quick-add reuses the saved workspace IDs; it never accepts paths. */
+let workspacePickerNodeId=null;
+function closeWorkspacePicker(){
+  if(workspaceSaving)return;
+  $("#workspacePickerLayer").classList.add("hidden");
+  workspacePickerNodeId=null;
+}
+function openWorkspacePicker(nodeId){
+  const node=byId(nodeId);
+  if(!node||workspaceSaving)return;
+  closeCardMenu();
+  if(!state.workspaces.length){
+    openWorkspaceDialog(-1,[nodeId]);
+    toast("尚无工作区，已为你预选该模块，请先新建工作区");
+    return;
+  }
+  workspacePickerNodeId=nodeId;
+  $("#workspacePickerSummary").textContent="将「"+node.title+"」加入哪个项目工作区？仅增加模块引用，不修改电脑中的文件。";
+  $("#workspacePickerList").innerHTML=state.workspaces.map((item,index)=>{
+    const exists=item.members.includes(nodeId),full=item.members.length>=30;
+    const status=exists?"已关联":full?"已满（30项）":item.members.length+"/30项";
+    return '<button type="button" class="workspace-picker-option" data-workspace-append="'+index+'" '+(exists||full?"disabled":"")+'>'
+      +'<span>'+h(item.name)+'</span><small>'+h(status)+'</small></button>';
+  }).join("");
+  $("#workspacePickerLayer").classList.remove("hidden");
+  const initial=$("#workspacePickerList").querySelector("button:not(:disabled)");
+  (initial||$("#workspacePickerClose")).focus();
+}
+async function addNodeToWorkspace(index){
+  const nodeId=workspacePickerNodeId,item=state.workspaces[index];
+  if(!item||!byId(nodeId)||workspaceSaving||item.members.includes(nodeId)||item.members.length>=30)return;
+  const before=state.workspaces;
+  const after=before.map((w,i)=>i===index?
+    {name:w.name,description:w.description,members:[...w.members,nodeId]}:
+    {name:w.name,description:w.description,members:[...w.members]});
+  workspaceSaving=true;
+  state.workspaces=after;
+  try{
+    if(!await persistProjectSettings()){
+      state.workspaces=before;
+      toast("加入工作区失败，原配置未变更",true);return;
+    }
+    workspaceSaving=false;
+    closeWorkspacePicker();
+    render();
+    toast("已将模块加入「"+item.name+"」");
+  }catch(error){
+    state.workspaces=before;
+    toast("加入工作区失败："+error.message,true);
+  }finally{workspaceSaving=false;render()}
 }
 /* V3.8 — named groups of existing linked modules; nothing touches real folders. */
 function validateFolderGroupName(value){
@@ -1394,7 +1490,7 @@ function openCardMenu(id,x,y){
   const actions=[];
   if(n.node_type==="leaf"||n.folder_path)actions.push(["open","在资源管理器中打开"]);
   if(n.node_type!=="leaf")actions.push(["enter","进入模块"]);
-  actions.push(["edit","编辑模块"],["favorite",n.favorite?"取消收藏":"添加到收藏"]);
+  actions.push(["edit","编辑模块"],["favorite",n.favorite?"取消收藏":"添加到收藏"],["workspace-add","加入项目工作区…"]);
   if(n.node_type!=="leaf")actions.push(["child","新建子模块"]);
   if(n.folder_path)actions.push(["copy-path","复制文件夹路径"]);
   actions.push(["delete","移除导航记录"]);
@@ -1433,6 +1529,7 @@ async function copyFolderPath(id){
 async function contextAction(action,id){
   const n=byId(id);closeCardMenu();if(!n)return;
   if(action==="copy-path")await copyFolderPath(id);
+  else if(action==="workspace-add")openWorkspacePicker(id);
   else await act(action,id);
 }
 async function exportBackup(){
@@ -1891,6 +1988,13 @@ function bind(){
   });
   $("#workspaceForm").addEventListener("submit",submitWorkspace);
   $("#workspaceMemberSearch").addEventListener("input",renderWorkspaceMembers);
+  $("#workspaceMemberList").addEventListener("click",e=>{
+    const button=e.target.closest("[data-workspace-move]");
+    if(!button)return;
+    const id=Number(button.dataset.workspaceMove),direction=Number(button.dataset.workspaceStep);
+    if(!Number.isSafeInteger(id)||!workspaceDraftMembers.has(id))return;
+    moveWorkspaceDraftMember(id,direction);
+  });
   $("#workspaceMemberList").addEventListener("change",e=>{
     if(!e.target.matches("[data-workspace-member]"))return;
     const id=Number(e.target.dataset.workspaceMember);
@@ -1907,6 +2011,23 @@ function bind(){
     if(e.key!=="Tab")return;
     const controls=[...$("#workspaceLayer").querySelectorAll("input,textarea,button")]
       .filter(el=>!el.disabled && el.offsetParent!==null);
+    if(!controls.length)return;
+    const first=controls[0],last=controls.at(-1);
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
+  });
+  $("#workspacePickerClose").addEventListener("click",closeWorkspacePicker);
+  $("#workspacePickerCancel").addEventListener("click",closeWorkspacePicker);
+  $("#workspacePickerLayer").addEventListener("click",e=>{if(e.target===$("#workspacePickerLayer"))closeWorkspacePicker()});
+  $("#workspacePickerList").addEventListener("click",e=>{
+    const btn=e.target.closest("[data-workspace-append]");
+    if(btn&&!btn.disabled)addNodeToWorkspace(Number(btn.dataset.workspaceAppend));
+  });
+  $("#workspacePickerLayer").addEventListener("keydown",e=>{
+    if(e.key==="Escape"){e.preventDefault();e.stopPropagation();closeWorkspacePicker();return}
+    if(e.key!=="Tab")return;
+    const controls=[...$("#workspacePickerLayer").querySelectorAll("button")]
+      .filter(el=>!el.disabled&&el.offsetParent!==null);
     if(!controls.length)return;
     const first=controls[0],last=controls.at(-1);
     if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
@@ -2058,6 +2179,9 @@ function bind(){
       return;
     }
     if(quickPalette.open)return;
+    if(e.key==="Escape"&&!$("#workspacePickerLayer").classList.contains("hidden")){
+      closeWorkspacePicker();return;
+    }
     if(e.key==="Escape"&&!$("#workspaceLayer").classList.contains("hidden")){
       closeWorkspaceDialog();return;
     }
