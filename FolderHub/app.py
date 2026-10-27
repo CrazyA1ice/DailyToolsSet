@@ -1252,6 +1252,17 @@ class Handler(BaseHTTPRequestHandler):
                     result=everything_search.search(terms[0])
                 except (ValueError,everything_search.EverythingUnavailable) as error:
                     raise UserError(str(error)) from error
+                # Search can find programs and other resource types that the
+                # unified navigation deliberately refuses to launch. Mark
+                # those results before rendering, rather than letting users
+                # proceed to a save form that will reject the item later.
+                for entry in result["items"]:
+                    try:
+                        if entry["kind"] == "file":
+                            validate_resource("file",entry["path"])
+                        entry["supported"] = True
+                    except UserError:
+                        entry["supported"] = False
                 return self.reply(200,result)
             if method=="GET" and path=="/api/nodes":
                 return self.reply(200,{"nodes":self.server.store.all()})
