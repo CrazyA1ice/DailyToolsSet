@@ -55,7 +55,8 @@ def search(query, *, run=None, executable=None):
                 or len(path) > 2048 or key in seen):
             continue
         seen.add(key)
-        paths.append({"path": path, "name": ntpath.basename(path) or path})
+        paths.append({"path": path, "name": ntpath.basename(path) or path,
+                      "kind": "folder" if os.path.isdir(path) else "file"})
         if len(paths) == MAX_RESULTS:
             break
     return {"items": paths, "source": "Everything", "limit": MAX_RESULTS}
