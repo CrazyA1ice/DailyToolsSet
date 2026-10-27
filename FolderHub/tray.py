@@ -383,6 +383,9 @@ class WindowsTray:
         u.GetForegroundWindow.restype = wintypes.HWND
         u.GetClassNameW.argtypes = [wintypes.HWND, ctypes.c_wchar_p, ctypes.c_int]
         u.GetClassNameW.restype = ctypes.c_int
+        u.MessageBoxW.argtypes = [wintypes.HWND, wintypes.LPCWSTR,
+                                  wintypes.LPCWSTR, wintypes.UINT]
+        u.MessageBoxW.restype = ctypes.c_int
         s.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
         s.Shell_NotifyIconW.restype = wintypes.BOOL
         k.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
