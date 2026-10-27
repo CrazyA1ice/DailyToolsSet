@@ -1078,14 +1078,17 @@ def launch_workspace(store, name, expected_items=None):
     with store.connect() as db:
         records = {node_id: db.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
                    for node_id in selected}
-    current_items = [
-        {"id": node_id,
-         "title": row["title"] if row is not None else None,
-         "kind": row["resource_kind"] if row is not None else None,
-         "target": ((row["folder_path"] if row["resource_kind"] == "folder"
-                     else row["resource_target"]) if row is not None else None)}
-        for node_id in selected for row in [records[node_id]]
-    ]
+    current_items = []
+    for node_id in selected:
+        row = records[node_id]
+        kind = row["resource_kind"] if row is not None else None
+        current_items.append({
+            "id": node_id,
+            "title": row["title"] if row is not None else None,
+            "kind": kind,
+            "target": (row["folder_path"] if kind == "folder"
+                       else row["resource_target"]) if row is not None else None,
+        })
     if expected_items != current_items:
         raise UserError(stale_message)
     results = []
