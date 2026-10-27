@@ -289,7 +289,8 @@ class PreferencesStore:
             if expected_revision is not _UNSET and not only_if_missing:
                 if (expected_revision is not None and
                         (type(expected_revision) is not str or len(expected_revision) != 71
-                         or not expected_revision.startswith('sha256:'))):
+                         or not expected_revision.startswith('sha256:')
+                         or any(c not in '0123456789abcdef' for c in expected_revision[7:]))):
                     raise PreferenceError('个性化设置版本格式无效')
                 if expected_revision != settings_revision(existing):
                     raise PreferenceConflict('其他页面已修改个性化设置；已拒绝旧版本覆盖，请记录本页尚未保存的内容并刷新后重试')
