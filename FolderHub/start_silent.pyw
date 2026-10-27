@@ -19,13 +19,15 @@ try:
         sys.exit(main())
 except Exception:
     try:
-        (Path.home() / "FolderHub-startup-error.log").write_text(
-            traceback.format_exc(), encoding="utf-8")
+        # A portable application must not leak its own diagnostics into HOME.
+        log_file = Path(__file__).resolve().parent / "data" / "startup-error.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_file.write_text(traceback.format_exc(), encoding="utf-8")
     except OSError:
         pass
     if sys.platform == "win32":
         ctypes.windll.user32.MessageBoxW(
-            None, "FolderHub 启动失败。请查看用户主目录中的 FolderHub-startup-error.log，"
+            None, "FolderHub 启动失败。请查看 FolderHub/data/startup-error.log，"
             "或者使用 start_windows.bat 调试。", "FolderHub", 0x10)
     else:
         raise
