@@ -283,7 +283,7 @@ function rebuildNodeIndex(){
   }
   for(const nodes of childrenByParent.values())nodes.sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
   searchRecords=state.nodes.map(node=>{
-    const own=(node.title+" "+(node.folder_path||"")).toLocaleLowerCase();
+    const own=(node.title+" "+(node.folder_path||node.resource_target||"")).toLocaleLowerCase();
     const full=ancestors(node.id).map(entry=>entry.title).join(" /").toLocaleLowerCase();
     return {node,own,body:own+" "+full+" "+(node.tags||[]).join(" ").toLocaleLowerCase()};
   });
@@ -695,7 +695,10 @@ function renderTagFilters(){
 }
 function card(n,reorderable=false,keyboardActive=false){
   const childCount=children(n.id).length;
-  const linked=!!n.folder_path;
+  const resourceKind=n.resource_kind||'folder';
+  const resourceTarget=resourceKind==='folder'?n.folder_path:n.resource_target;
+  const resourceLabel=resourceKind==='file'?'文件':resourceKind==='url'?'网页':'文件夹';
+  const linked=!!resourceTarget;
   const leaf=n.node_type==="leaf";
   const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
   const contextText=state.search?`所属：${lineage}`:"";
@@ -703,11 +706,11 @@ function card(n,reorderable=false,keyboardActive=false){
     `<span class="list-card-context" title="${h(contextText)}">${highlightSearch(contextText,state.search)}</span>`:"";
   const tags=Array.isArray(n.tags)?n.tags:[];
   const tagChips=tags.length?`<span class="card-tags" title="${h(tags.join("、"))}">${tags.slice(0,3).map(tag=>`<span class="card-tag">⌗ ${state.search?highlightSearch(tag,state.search):h(tag)}</span>`).join("")}${tags.length>3?`<span class="card-tag">+${tags.length-3}</span>`:""}</span>`:"";
-  const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
+  const primaryTitle=leaf?"打开资源":"进入此模块";
   return `<article class="entry-card ${leaf?"is-leaf":"is-container"} ${state.openingIds.has(n.id)?"is-opening":""} ${state.selectedIds.has(n.id)?"is-selected":""} ${keyboardActive?"keyboard-active":""}" id="folderhub-entry-${n.id}" data-id="${n.id}" tabindex="0" aria-label="${h(n.title)}，右键打开快捷菜单">
     <div class="card-cover tone-${n.id%6} ${n.has_image?'with-image':'with-icon'}" aria-hidden="true">
       ${n.has_image?`<img class="cover-image" src="${coverUrl(n)}" loading="lazy" alt="">`:`<span class="cover-emoji">${h(iconFor(n))}</span><span class="cover-decoration"></span>`}
-      <span class="cover-type">${TYPE_LABEL[n.node_type]||"模块"}</span>
+      <span class="cover-type">${(leaf?resourceLabel:TYPE_LABEL[n.node_type]||"模块")}</span>
     </div>
     <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${h(iconFor(n))}</span>
       <div class="card-actions">
@@ -719,14 +722,14 @@ function card(n,reorderable=false,keyboardActive=false){
       </div>
     </div>
     <button type="button" class="card-primary" data-action="primary" data-id="${n.id}" title="${primaryTitle}">
-      <strong>${state.search?highlightSearch(n.title,state.search):h(n.title)}</strong><span class="type-chip ${n.node_type}">${TYPE_LABEL[n.node_type]||'模块'}</span>
-      <span class="path" title="${h(n.folder_path||lineage)}">${state.search?highlightSearch(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`),state.search):h(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`))}</span>
+      <strong>${state.search?highlightSearch(n.title,state.search):h(n.title)}</strong><span class="type-chip ${n.node_type}">${(leaf?resourceLabel:TYPE_LABEL[n.node_type]||'模块')}</span>
+      <span class="path" title="${h(resourceTarget||lineage)}">${state.search?highlightSearch(linked?resourceTarget:(leaf?'未设置有效资源':`${childCount} 个子模块`),state.search):h(linked?resourceTarget:(leaf?'未设置有效资源':`${childCount} 个子模块`))}</span>
       ${listContext}${tagChips}</button>
     ${state.search && state.layout!=="list"?`<div class="entry-lineage" title="${h(lineage)}">⌁ ${highlightSearch(lineage,state.search)}</div>`:''}
-    <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?'● 文件夹入口':`${childCount} 个子模块`}</span>
+    <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?`● ${resourceLabel}入口`:`${childCount} 个子模块`}</span>
       <div class="card-links">${state.search && !state.selectMode?`<button type="button" data-action="locate" data-id="${n.id}" title="定位到原目录，不打开文件夹">⌖ 定位</button>`:""}${!leaf?`<button data-action="enter" data-id="${n.id}">进入 ›</button>`:''}
         ${linked?`<button data-action="open" data-id="${n.id}">打开 ↗</button>`:''}
-        ${linked && state.layout==="list"?`<button type="button" data-action="copy-path" data-id="${n.id}" title="复制关联的文件夹路径">复制路径</button>`:''}
+        ${linked && state.layout==="list"?`<button type="button" data-action="copy-path" data-id="${n.id}" title="复制资源地址">复制地址</button>`:''}
         ${!leaf?`<button data-action="child" data-id="${n.id}">＋ 子模块</button>`:''}
       </div></div>
   </article>`;
@@ -902,9 +905,15 @@ function updateEntryType(){
   $("#entryParentRow").classList.toggle("hidden",t==="root");
   const node=state.editing===null?null:byId(state.editing);
   const hasLegacyPath=!!node?.folder_path && node.node_type!=="leaf" && node.node_type===t;
-  $("#entryPathRow").classList.toggle("hidden",t!=="leaf"&&!hasLegacyPath);
-  $("#entryPathRequired").textContent=t==="leaf"?"（必填）":hasLegacyPath?"（旧版路径，仅保留使用）":"";
-  $("#entryPath").required=t==="leaf";
+  const kind=$("#entryResourceKind").value;
+  $("#entryKindRow").classList.toggle("hidden",t!=="leaf");
+  $("#entryTargetRow").classList.toggle("hidden",t!=="leaf"||kind==="folder");
+  $("#entryPathRow").classList.toggle("hidden",!(t==="leaf"&&kind==="folder")&&!hasLegacyPath);
+  $("#entryPathRequired").textContent=t==="leaf"&&kind==="folder"?"（必填）":hasLegacyPath?"（旧版路径，仅保留使用）":"";
+  $("#entryPath").required=t==="leaf"&&kind==="folder";
+  $("#entryResourceTarget").required=t==="leaf"&&kind!=="folder";
+  $("#entryTargetLabel").textContent=kind==="file"?"本地文件绝对路径":"网页 URL";
+  $("#entryResourceTarget").placeholder=kind==="file"?"例如 D:\\Research\\paper.pdf":"https://example.com/";
   $("#entryTypeHelp").textContent=t==="root"?"顶层分类，只能建在目录最上层。":
     t==="group"?"用于继续划分子模块，可无限嵌套。":
     "最末级文件夹入口：必须关联一个文件夹，不能添加子模块。";
@@ -919,6 +928,8 @@ function editDialog(id=null,parentId=undefined){
   $("#dialogTitle").textContent=node?"编辑模块":"新建模块";
   $("#entryName").value=node?.title||"";
   $("#entryPath").value=node?.folder_path||"";
+  $("#entryResourceKind").value=node?.resource_kind||"folder";
+  $("#entryResourceTarget").value=node?.resource_target||"";
   $("#entryTags").value=(node?.tags||[]).join("，");
   $("#entryIcon").value=node?.icon||"folder";
   state.pendingCover=null;state.removeCover=false;
@@ -960,7 +971,10 @@ async function submitDialog(event){
   event.preventDefault();
   const type=$("#entryType").value;
   const payload={title:$("#entryName").value,node_type:type,icon:$("#entryIcon").value,
-    folder_path:type==="leaf"||(!$("#entryPathRow").classList.contains("hidden"))?$("#entryPath").value:null,
+    folder_path:(type==="leaf"&&$("#entryResourceKind").value==="folder") ||
+      (type!=="leaf"&&!$("#entryPathRow").classList.contains("hidden"))?$("#entryPath").value:null,
+    resource_kind:type==="leaf"?$("#entryResourceKind").value:"folder",
+    resource_target:type==="leaf"&&$("#entryResourceKind").value!=="folder"?$("#entryResourceTarget").value:null,
     parent_id:type==="root"?null:($("#entryParent").value?Number($("#entryParent").value):null),
     tags:$("#entryTags").value.split(/[,，;；\n]+/).map(x=>x.trim()).filter(Boolean)};
   const button=$("#submitEntry");button.disabled=true;
@@ -990,7 +1004,8 @@ async function openFolder(id){
   document.getElementById(`folderhub-entry-${id}`)?.classList.add("is-opening");
   try{
     await mutate("POST",`/api/nodes/${id}/open`);
-    toast("已向 Windows 资源管理器发送打开指令，并尝试将窗口置前");
+    toast((byId(id)?.resource_kind||"folder")==="folder"?
+      "已向 Windows 资源管理器发送打开指令":"已发送资源打开指令");
   }catch(e){toast(e.message,true)}
   finally{
     state.openingIds.delete(id);
@@ -1492,11 +1507,11 @@ function openCardMenu(id,x,y){
   if(!n||state.selectMode)return;
   state.contextId=id;
   const actions=[];
-  if(n.node_type==="leaf"||n.folder_path)actions.push(["open","在资源管理器中打开"]);
+  if(n.node_type==="leaf"||n.folder_path)actions.push(["open","打开资源"]);
   if(n.node_type!=="leaf")actions.push(["enter","进入模块"]);
   actions.push(["edit","编辑模块"],["workspace-add","加入项目工作区…"]);
   if(n.node_type!=="leaf")actions.push(["child","新建子模块"]);
-  if(n.folder_path)actions.push(["copy-path","复制文件夹路径"]);
+  if(n.folder_path||n.resource_target)actions.push(["copy-path","复制资源地址"]);
   actions.push(["delete","移除导航记录"]);
   menu.innerHTML=actions.map(([action,label])=>`<button type="button" role="menuitem" class="${action==='delete'?'menu-danger':''}" data-menu-action="${action}">${h(label)}</button>`).join("");
   menu.classList.remove("hidden");
@@ -1506,8 +1521,8 @@ function openCardMenu(id,x,y){
   menu.querySelector("button")?.focus();
 }
 async function copyFolderPath(id){
-  const folder=byId(id)?.folder_path;
-  if(!folder){toast("该模块未关联文件夹",true);return}
+  const folder=byId(id)?.folder_path||byId(id)?.resource_target;
+  if(!folder){toast("该模块未关联资源地址",true);return}
   let copied=false;
   try{
     if(navigator.clipboard?.writeText){
@@ -1824,7 +1839,7 @@ const quickPalette={open:false,items:[],selected:0,returnFocus:null};
 function quickCandidates(query=""){
   const term=String(query).trim();
   const candidates=term?searchAll(term):
-    [...children(null),...state.nodes.filter(node=>Boolean(node.folder_path))];
+    [...children(null),...state.nodes.filter(node=>Boolean(node.folder_path||node.resource_target))];
   const seen=new Set();
   return candidates.filter(node=>{
     if(seen.has(node.id))return false;
@@ -1845,7 +1860,7 @@ function renderQuickPalette(){
   results.innerHTML=quickPalette.items.map(({node},index)=>{
     const path=node.folder_path||ancestors(node.id).map(n=>n.title).join(" / ");
     const label=(node.tags||[]).length?path+" · 标签："+node.tags.join("、"):path;
-    const suffix=node.node_type==="leaf"?"文件夹":"模块";
+    const suffix=node.node_type==="leaf"?(node.resource_kind==="url"?"网页":node.resource_kind==="file"?"文件":"文件夹"):"模块";
     return `<button type="button" class="quick-result" id="quick-option-${index}" role="option" aria-selected="false" data-quick-index="${index}">
       <span class="quick-icon" aria-hidden="true">${h(iconFor(node))}</span>
       <span class="quick-details"><strong>${term?highlightSearch(node.title,term):h(node.title)}</strong>
@@ -1894,8 +1909,8 @@ function closeQuickPalette(){
 async function quickLaunch(index){
   const entry=quickPalette.items[index],node=entry?.node;
   if(!node || !byId(node.id))return;
-  if(node.node_type==="leaf"&&!node.folder_path){
-    toast("该叶子模块尚未绑定文件夹，请先编辑模块",true);
+  if(node.node_type==="leaf"&&!node.folder_path&&!node.resource_target){
+    toast("该叶子模块尚未关联资源，请先编辑模块",true);
     return;
   }
   closeQuickPalette();
@@ -1943,9 +1958,67 @@ function bindQuickPalette(){
   });
 }
 
+
+/* Optional local-only Everything ES search. Results never launch automatically. */
+let everythingItems=[];
+function closeEverything(){
+  $("#everythingLayer").classList.add("hidden");
+}
+async function runEverythingSearch(event){
+  event.preventDefault();
+  const query=$("#everythingQuery").value.trim(),button=$("#everythingSubmit");
+  if(query.length<2||query.length>100){toast("请输入 2—100 字搜索词",true);return}
+  button.disabled=true;
+  $("#everythingStatus").textContent="正在查询本机 Everything 索引…";
+  $("#everythingResults").replaceChildren();
+  try{
+    const result=await api("/api/everything/search?q="+encodeURIComponent(query));
+    everythingItems=result.items||[];
+    $("#everythingStatus").textContent="找到 "+everythingItems.length+" 项；搜索结果不会自动打开。";
+    $("#everythingResults").innerHTML=everythingItems.map((item,index)=>
+      '<div class="everything-result"><span title="'+h(item.path)+'"><strong>'+h(item.name)+'</strong>'
+      +'<small>'+h(item.path)+'</small></span><button type="button" data-everything-add="'+index+'">＋ 加入导航</button></div>').join("");
+  }catch(error){
+    everythingItems=[];
+    $("#everythingStatus").textContent=error.message;
+  }finally{button.disabled=false}
+}
+function chooseEverythingResult(index){
+  const item=everythingItems[index];if(!item)return;
+  const parent=state.nodes.find(node=>node.node_type==="root");
+  if(!parent){toast("请先建立一个根分类，再添加 Everything 搜索结果",true);return}
+  closeEverything();
+  editDialog(null,parent.id);
+  $("#entryType").value="leaf";
+  $("#entryResourceKind").value=item.kind==="folder"?"folder":"file";
+  if(item.kind==="folder")$("#entryPath").value=item.path;
+  else $("#entryResourceTarget").value=item.path;
+  $("#entryName").value=item.name;
+  updateEntryType();
+}
+function bindEverything(){
+  $("#everythingBtn").addEventListener("click",()=>{
+    $("#everythingLayer").classList.remove("hidden");
+    $("#everythingQuery").focus();
+  });
+  $("#everythingClose").addEventListener("click",closeEverything);
+  $("#everythingLayer").addEventListener("click",event=>{
+    if(event.target===$("#everythingLayer"))closeEverything();
+  });
+  $("#everythingLayer").addEventListener("keydown",event=>{
+    if(event.key==="Escape"){event.preventDefault();closeEverything()}
+  });
+  $("#everythingForm").addEventListener("submit",runEverythingSearch);
+  $("#everythingResults").addEventListener("click",event=>{
+    const button=event.target.closest("[data-everything-add]");
+    if(button)chooseEverythingResult(Number(button.dataset.everythingAdd));
+  });
+}
+
 function bind(){
   bindSorting();
   bindQuickPalette();
+  bindEverything();
   window.addEventListener("popstate",restoreBrowserNavigation);
   $("#selectModeBtn").addEventListener("click",()=>{if(state.batchBusy)return;state.selectMode=!state.selectMode;state.selectedIds.clear();closeCardMenu();render(true)});
   $("#bulkCancel").addEventListener("click",()=>{exitSelectMode();render(true)});
@@ -2171,6 +2244,7 @@ function bind(){
   $("#importFile").addEventListener("change",async e=>{await restoreBackup(e.target.files[0]);e.target.value=""});
   $("#entryForm").addEventListener("submit",submitDialog);
   $("#entryType").addEventListener("change",updateEntryType);
+  $("#entryResourceKind").addEventListener("change",updateEntryType);
   $("#entryParent").addEventListener("change",e=>{
     if(!e.target.value)$("#entryType").value="root";
     else if($("#entryType").value==="root")$("#entryType").value="group";

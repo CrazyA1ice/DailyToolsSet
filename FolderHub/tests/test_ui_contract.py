@@ -24,6 +24,35 @@ class AdminUiContractTests(unittest.TestCase):
         cls.js = (STATIC / "app.js").read_text(encoding="utf-8")
         cls.css = (STATIC / "styles.css").read_text(encoding="utf-8")
 
+    def test_everything_search_is_optional_local_and_explicit(self):
+        for control in ("everythingBtn","everythingLayer","everythingForm",
+                        "everythingQuery","everythingResults","everythingStatus","everythingClose"):
+            self.assertIn('id="'+control+'"',self.html)
+            self.assertIn(control,self.js)
+        self.assertIn('function runEverythingSearch(event)',self.js)
+        self.assertIn('function chooseEverythingResult(index)',self.js)
+        self.assertIn('bindEverything();',self.js)
+        self.assertIn('"/api/everything/search?q="+encodeURIComponent(query)',self.js)
+        self.assertIn('h(item.path)',self.js)
+        self.assertIn('h(item.name)',self.js)
+        self.assertIn('editDialog(null,parent.id)',self.js)
+        self.assertIn('.everything-result',self.css)
+
+    def test_unified_file_folder_web_resource_editor(self):
+        for control in ("entryKindRow","entryResourceKind","entryTargetRow",
+                        "entryResourceTarget","entryTargetLabel"):
+            self.assertIn('id="'+control+'"',self.html)
+            self.assertIn(control,self.js)
+        for kind in ('value="folder"','value="file"','value="url"'):
+            self.assertIn(kind,self.html)
+        self.assertIn('resource_kind:type==="leaf"',self.js)
+        self.assertIn('resource_target:type==="leaf"',self.js)
+        self.assertIn('n.resource_target',self.js)
+        self.assertIn("resourceKind==='file'",self.js)
+        self.assertIn("resourceKind==='url'",self.js)
+        self.assertIn('$("#entryResourceKind").addEventListener("change",updateEntryType)',self.js)
+        self.assertIn('#entryTargetRow',self.css)
+
     def test_controls_have_unique_ids_and_matching_scripts(self):
         parser = IdCollector()
         parser.feed(self.html)

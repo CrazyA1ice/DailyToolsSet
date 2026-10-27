@@ -602,3 +602,29 @@ FolderHub 现在可以在**托盘程序运行期间**按 **Ctrl + Alt + Shift + 
 - **保留的快捷搜索：** 网页内部 Ctrl+Shift+P 的“快速打开模块”属于页面内快捷操作，不注册 Windows 全局热键。托盘退出时会注销唯一的 Windows 全局热键。
 - 仍需 Windows 实测：快捷键切换后旧组合是否释放、冲突时的恢复、菜单选择快速收藏后的路径确认、置顶弹窗在多显示器和资源管理器标签页场景下的行为。
 
+
+## V4.9：可选 Everything 本地搜索（不创建第二套索引）
+
+- 点击主界面的 **「全盘搜索」** 打开本机 Everything 搜索弹窗。需要 Windows Everything 正在运行，并安装官方 ES 命令行工具 `es.exe`。可将 ES 加入系统 PATH，或仅为 FolderHub 配置环境变量 `FOLDERHUB_ES_PATH=C:\\Tools\\Everything\\es.exe`。
+- 搜索只调用本机 ES，不递归扫描磁盘、不联网、不自动执行任何文件。关键词限制 2—100 字，单次最多返回30条结果，4秒超时。前端对文件名、路径做 HTML 转义。
+- 对搜索结果点击 **「加入导航」**，系统预填文件或文件夹名称与路径，用户在原有模块编辑器中检查分类后点击保存。必须先建立至少一个根分类。Everything 是可选组件，未安装不影响 FolderHub 的其他功能。
+- ES 官方文档：https://www.voidtools.com/support/everything/command_line_interface/
+
+## V5.0：文件夹、文件、网页统一模块导航
+
+- 原有根模块、普通模块不变；叶子模块新增资源类型：**文件夹 / 文件 / 网页**。工作区仍使用模块 ID，因此新文件及网页可以和文件夹一起加入同一个工作区，使用搜索、标签、排序、备份与恢复。
+- 「新建模块 → 叶子模块 → 资源类型」选择文件时填入绝对文件路径，选择网页时填入 `https://` 或 `http://` 开头的网址；模块点击「打开」后使用 Windows 文件关联应用或默认浏览器打开。
+- **安全约束：** 文件仅支持 PDF、Office文档、普通文本、图片等指定非可执行扩展名，拒绝 `.exe`、`.bat`、`.cmd`、脚本等可直接运行的类型；网址仅支持完整 HTTP/HTTPS，不接受账户密码或控制字符。已保存的网页只有明确点击后才会打开，搜索结果不会自行启动文件。
+- SQLite 在原 `nodes` 和兼容回收站记录上按需增加 `resource_kind` 和 `resource_target` 字段，旧数据默认为 `folder`。JSON 导出版本升级为 V5，导入继续兼容 V1—V4；完整 ZIP 便携备份自然包含新增数据。升级前建议先下载一次完整备份。
+
+## 文件与测试输出统一放在 FolderHub
+
+项目运行数据、用户模块与完整备份工作目录继续位于 `FolderHub/data/` 及 `FolderHub/uploads/`，本轮额外提供 `FolderHub/run_tests.ps1`：
+
+```powershell
+# 从 DailyToolsSet 仓库根目录启动；日志始终存入 FolderHub/test-results/
+powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1
+```
+
+该脚本自动进入项目目录执行 `python -m unittest discover -s tests -t . -v`，将完整结果输出到 `FolderHub/test-results/folderhub-tests-YYYYMMDD-HHMMSS.txt`，并尝试将过去写到仓库根目录的旧测试日志迁入同一目录。测试日志、data/、uploads/ 和 tmp/ 均由 `FolderHub/.gitignore` 排除 Git 跟踪。Everything 本身是外部安装的软件，不需要也不建议复制进项目仓库。Windows 完整测试和原生文件打开仍需在用户 Windows 环境验收。
+
