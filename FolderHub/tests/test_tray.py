@@ -6,6 +6,8 @@ The Win32 tray UI itself still requires manual testing in Windows Explorer.
 from pathlib import Path
 import json
 from io import BytesIO
+import base64
+import subprocess
 import sys
 import tempfile
 from unittest import TestCase
@@ -189,4 +191,108 @@ class TrayServiceTests(TestCase):
         window._show_quick_menu.assert_called_once_with()
         window._show_quick_menu.reset_mock()
         window._window_proc(123,window.WM_HOTKEY,tray.HOTKEY_ID+1,0)
+        window._show_quick_menu.assert_not_called()
+
+    def test_explorer_path_probe_uses_bounded_powershell_only_for_hwnd(self):
+        expected=r'C:\Work\研究'
+        observed=[]
+        def runner(args,**kwargs):
+            observed.append((args,kwargs))
+            output=base64.b64encode(expected.encode('utf-16-le'))
+            return subprocess.CompletedProcess(args,0,output,b'')
+        value=tray.explorer_directory_for_hwnd(123456,run=runner)
+        self.assertEqual(value,expected)
+        args,opts=observed[0]
+        self.assertEqual(args[:3],['powershell.exe','-NoProfile','-NonInteractive'])
+        self.assertEqual(args[3],'-EncodedCommand')
+        script=base64.b64decode(args[4]).decode('utf-16-le')
+        self.assertIn('$target = [long]123456',script)
+        self.assertIn('Shell.Application',script)
+        self.assertIn('Test-Path -LiteralPath',script)
+        self.assertEqual(opts['timeout'],7)
+        self.assertEqual(opts['stdin'],subprocess.DEVNULL)
+        with self.assertRaises(ValueError):
+            tray.explorer_directory_for_hwnd('123456',run=runner)
+        self.assertEqual(len(observed),1)
+
+    def test_explorer_probe_rejects_missing_virtual_and_failed_windows(self):
+        for stdout,code in ((b'',0),
+                            (base64.b64encode('::{virtual}'.encode('utf-16-le')),0),
+                            (b'invalid base64!',0),(b'',1)):
+            with self.subTest(output=stdout,code=code):
+                def runner(args,**kwargs):
+                    return subprocess.CompletedProcess(args,code,stdout,b'')
+                with self.assertRaises(RuntimeError):
+                    tray.explorer_directory_for_hwnd(55,run=runner)
+        def timeout(args,**kwargs):
+            raise subprocess.TimeoutExpired(args,7)
+        with self.assertRaises(RuntimeError):
+            tray.explorer_directory_for_hwnd(55,run=timeout)
+
+    def test_capture_authenticates_existing_local_api_and_never_embeds_path_in_url(self):
+        controller=tray.ServiceController(port=9999)
+        seen=[]
+        folder=r'D:\项目\机器学习'
+        def mocked_urlopen(request,timeout=None):
+            seen.append(request)
+            if isinstance(request,str):
+                self.assertEqual(request,'http://127.0.0.1:9999/api/config')
+                return BytesIO(b'{"platform":"win32","token":"valid-token"}')
+            self.assertEqual(request.full_url,'http://127.0.0.1:9999/api/quick-capture')
+            self.assertEqual(request.get_method(),'POST')
+            self.assertEqual(request.get_header('X-folderhub-token'),'valid-token')
+            self.assertEqual(json.loads(request.data.decode('utf-8')),{'folder_path':folder})
+            return BytesIO(b'{"id":17,"created":true,"favorite":true}')
+        with patch.object(tray,'urlopen',side_effect=mocked_urlopen):
+            result=controller.capture_current_directory(folder)
+        self.assertEqual(result['id'],17)
+        self.assertEqual(len(seen),2)
+        for invalid in ('relative/folder', None, r'D:\bad\npath'):
+            with self.subTest(path=repr(invalid)):
+                with self.assertRaises(ValueError),patch.object(tray,'urlopen') as remote:
+                    controller.capture_current_directory(invalid)
+                    remote.assert_not_called()
+
+    def test_capture_requires_explicit_yes_before_writing(self):
+        window=tray.WindowsTray.__new__(tray.WindowsTray)
+        window.hwnd=123
+        window.user32=MagicMock()
+        window.controller=MagicMock()
+        window._message=MagicMock()
+        window._capture_explorer_directory=MagicMock(return_value=r'C:\Work\Project')
+        window.user32.MessageBoxW.return_value=7  # no (default)
+        window._capture_current_folder()
+        window.controller.capture_current_directory.assert_not_called()
+        window.user32.MessageBoxW.return_value=6  # yes
+        window.controller.capture_current_directory.return_value={'created':True,'id':7}
+        window._capture_current_folder()
+        window.controller.capture_current_directory.assert_called_once_with(r'C:\Work\Project')
+
+    def test_capture_hotkey_cleanup_does_not_remove_navigation_hotkey(self):
+        window=tray.WindowsTray.__new__(tray.WindowsTray)
+        window.hwnd=123
+        window.user32=MagicMock()
+        window.hotkey_registered=True
+        window.capture_hotkey_registered=False
+        window.user32.RegisterHotKey.return_value=1
+        window._register_capture_hotkey()
+        self.assertTrue(window.capture_hotkey_registered)
+        window.user32.RegisterHotKey.assert_called_once_with(
+            123,tray.CAPTURE_HOTKEY_ID,
+            tray.HOTKEY_MODIFIERS|window.MOD_NOREPEAT,tray.CAPTURE_HOTKEY_VK)
+        window._remove_capture_hotkey()
+        window.user32.UnregisterHotKey.assert_called_once_with(123,tray.CAPTURE_HOTKEY_ID)
+        self.assertTrue(window.hotkey_registered)
+        window.user32.RegisterHotKey.return_value=0
+        window._register_capture_hotkey()
+        self.assertFalse(window.capture_hotkey_registered)
+
+    def test_capture_hotkey_message_dispatch_is_separate_from_quick_nav(self):
+        window=tray.WindowsTray.__new__(tray.WindowsTray)
+        window.taskbar_created=99
+        window._capture_current_folder=MagicMock()
+        window._show_quick_menu=MagicMock()
+        window.user32=MagicMock()
+        self.assertEqual(window._window_proc(123,window.WM_HOTKEY,tray.CAPTURE_HOTKEY_ID,0),0)
+        window._capture_current_folder.assert_called_once_with()
         window._show_quick_menu.assert_not_called()
