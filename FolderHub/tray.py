@@ -475,15 +475,6 @@ class WindowsTray:
         finally:
             self.user32.DestroyMenu(menu)
 
-    def _remove_icon(self):
-        if self.icon_added and self.hwnd:
-            self.shell32.Shell_NotifyIconW(self.NIM_DELETE,ctypes.byref(self._icon_data()))
-            self.icon_added=False
-
-    def _message(self,message,title="FolderHub"):
-        self.user32.MessageBoxW(self.hwnd,message,title,
-             0x40|MB_TOPMOST|MB_SETFOREGROUND)
-
     def _capture_explorer_directory(self,foreground=None):
         if foreground is None:foreground=self.user32.GetForegroundWindow()
         if not foreground:
@@ -516,7 +507,7 @@ class WindowsTray:
             self._message("已收录目录：" + folder if result.get("created")
                           else "此目录已在导航中：" + folder)
         except (OSError, ValueError, RuntimeError) as error:
-            self._message("快速收藏失败：" + str(error))
+            self._message("快速收录失败：" + str(error))
 
     def _remove_icon(self):
         if self.icon_added and self.hwnd:
@@ -524,7 +515,8 @@ class WindowsTray:
             self.icon_added = False
 
     def _message(self, message, title="FolderHub"):
-        self.user32.MessageBoxW(self.hwnd, message, title, 0x40)
+        self.user32.MessageBoxW(self.hwnd, message, title,
+                               0x40 | MB_TOPMOST | MB_SETFOREGROUND)
 
     def _show_menu(self):
         menu = self.user32.CreatePopupMenu()
@@ -592,9 +584,9 @@ class WindowsTray:
                 self.user32.AppendMenuW(menu, 0, command, item["label"])
             if not lookup:
                 self.user32.AppendMenuW(menu, 0x0001 | 0x0002, 0,
-                                        "暂无可用的收藏、最近目录或工作区")
+                                        "暂无已绑定文件夹或项目工作区")
             self.user32.AppendMenuW(menu, 0x0800, 0, None)
-            self.user32.AppendMenuW(menu,0,MENU_CAPTURE,"＋ 收藏当前资源管理器目录…")
+            self.user32.AppendMenuW(menu,0,MENU_CAPTURE,"＋ 收录当前资源管理器目录…")
             self.user32.AppendMenuW(menu, 0, MENU_OPEN, "打开完整工作台…")
             position = wintypes.POINT()
             self.user32.GetCursorPos(ctypes.byref(position))
