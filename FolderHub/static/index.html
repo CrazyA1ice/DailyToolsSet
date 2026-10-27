@@ -55,6 +55,7 @@
     <div class="content">
 
       <div class="section-heading" id="sectionHeading"><div><span class="section-kicker">文件夹与分类</span><h2 id="sectionTitle">全部分类</h2><p id="sectionMeta">点击模块即可进入，绑定文件夹后可直接打开资源管理器</p></div><div id="sectionOperations"></div></div>
+      <section id="workspaceResources" class="workspace-resources hidden" aria-label="项目状态与常用资源"></section>
       <div id="tagFilters" class="tag-filters hidden" role="group" aria-label="按标签筛选模块"></div>
       <div id="bulkBar" class="bulk-bar hidden" role="toolbar" aria-label="批量管理模块">
         <strong id="bulkCount">已选择 0 项</strong>
@@ -90,6 +91,17 @@
       <input id="workspaceName" type="text" maxlength="40" autocomplete="off" required placeholder="例如：科研项目、前端开发">
       <label for="workspaceDescription">项目说明（可选，最多240字）</label>
       <textarea id="workspaceDescription" rows="3" maxlength="240" placeholder="记录工作区的用途、当前进展和备注"></textarea>
+      <label for="workspaceStatus">项目状态</label>
+      <select id="workspaceStatus" aria-label="项目状态">
+        <option value="planning">筹备中</option>
+        <option value="active">进行中</option>
+        <option value="paused">已暂停</option>
+        <option value="done">已完成</option>
+      </select>
+      <div class="workspace-link-heading"><label>常用网页资源（最多8条）</label>
+        <button id="workspaceLinkAdd" type="button" class="outline-btn">＋ 添加资源</button></div>
+      <div id="workspaceLinkList" class="workspace-link-list" role="group" aria-label="工作区网页资源"></div>
+      <p class="settings-note">仅支持 HTTP/HTTPS 网页链接，不会自动访问或读取这些网站。</p>
       <label for="workspaceMemberSearch">选择模块（至少1个，最多30个）</label>
       <input id="workspaceMemberSearch" type="search" autocomplete="off" placeholder="筛选模块名称或所属目录">
       <p id="workspaceMemberSummary" class="settings-note" role="status">请选择需要集中浏览的模块</p>
