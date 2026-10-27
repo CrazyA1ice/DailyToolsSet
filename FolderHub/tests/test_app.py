@@ -294,6 +294,16 @@ class HttpTests(unittest.TestCase):
         except ValueError:pass
         return r.status,content
 
+    def test_everything_search_endpoint_is_opt_in_and_bounds_input(self):
+        payload={"items":[{"name":"report.pdf","path":r"C:\Docs\report.pdf",
+                            "kind":"file"}],"source":"Everything","limit":30}
+        with patch.object(app.everything_search,"search",return_value=payload) as search:
+            code,response=self.request("GET","/api/everything/search?q=report")
+            self.assertEqual((code,response),(200,payload))
+            search.assert_called_once_with("report")
+        self.assertEqual(self.request("GET","/api/everything/search?q=a")[0],400)
+        self.assertEqual(self.request("GET","/api/everything/search")[0],400)
+
     def test_static_and_crud(self):
         status,page=self.request("GET","/")
         self.assertEqual(status,200)
