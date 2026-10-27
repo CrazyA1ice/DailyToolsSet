@@ -582,12 +582,12 @@ class Store:
         """
         path = validate_path(folder_path)
         if not path or not os.path.isdir(path):
-            raise UserError("仅能收藏当前存在的真实文件夹，请检查资源管理器路径")
+            raise UserError("仅能收录当前存在的真实文件夹，请检查资源管理器路径")
         normalized = ntpath.normcase(ntpath.normpath(path))
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             rows = db.execute(
-                "SELECT id,folder_path,favorite FROM nodes WHERE folder_path IS NOT NULL"
+                "SELECT id,folder_path FROM nodes WHERE folder_path IS NOT NULL"
             ).fetchall()
             for row in rows:
                 if ntpath.normcase(ntpath.normpath(row["folder_path"])) == normalized:
