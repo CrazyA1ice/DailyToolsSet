@@ -941,3 +941,24 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
 .path-suggestion small{font-size:.83rem;color:var(--muted)}
 .path-suggestion strong code{font-weight:550}
 .path-prefix-grid label[for="pathSuggestedRoot"]{grid-column:1/-1}
+
+/* V4.1: saved project workspaces: browse/organize modules, not bulk-open. */
+.workspace-section{padding:10px 0 12px;border-bottom:1px solid var(--line)}
+.workspace-nav{display:flex;flex-direction:column;gap:4px;margin-top:5px}
+.workspace-nav-row{display:flex;align-items:center;gap:3px;min-width:0}
+.workspace-link{flex:1;min-width:0;display:flex;align-items:center;gap:8px;text-align:left}
+.workspace-nav-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workspace-nav-count{font-size:.72rem;color:var(--muted);flex:none}
+.workspace-dialog{width:min(630px,calc(100vw - 24px));max-height:min(90vh,780px);overflow-y:auto}
+.workspace-form{display:flex;flex-direction:column;gap:9px;padding:3px 22px 20px}
+.workspace-form label{font-weight:650;color:var(--text)}
+.workspace-form>input,.workspace-form>textarea{width:100%;border:1px solid var(--line-strong);border-radius:9px;
+  background:var(--surface);color:var(--text);padding:10px 12px;min-height:42px;font:inherit}
+.workspace-form>textarea{resize:vertical;min-height:72px}
+.workspace-member-list{display:grid;gap:6px;max-height:245px;overflow-y:auto;border:1px solid var(--line);
+  border-radius:9px;padding:8px;background:var(--surface-soft)}
+.workspace-member-row{display:flex;gap:9px;align-items:center;border-radius:7px;padding:8px 9px;min-width:0;background:var(--surface)}
+.workspace-member-row input{flex:none;accent-color:var(--accent)}
+.workspace-member-row span{min-width:0;overflow-wrap:anywhere;font-size:.88rem}
+.workspace-member-row small{display:block;font-size:.76rem;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
+.workspace-member-missing{color:var(--danger,#bd5660)}
