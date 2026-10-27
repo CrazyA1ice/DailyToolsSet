@@ -111,7 +111,7 @@ def build_quick_entries(nodes,recent,workspaces):
     The existing authenticated /api/nodes/<id>/open route makes the final
     decision whether a folder, document or website can be opened.
     """
-    resources=[]
+    candidates=[]
     for item in nodes:
         if type(item) is not dict or type(item.get("id")) is not int:
             continue
@@ -126,9 +126,19 @@ def build_quick_entries(nodes,recent,workspaces):
             label=("📄 " if kind=="file" else "🌐 ")+safe_menu_title(item.get("title"),42)
         else:
             continue
-        resources.append({"kind":"folder","target":item["id"],"label":label})
-        if len(resources) >= 8:
+        candidates.append((kind,{"kind":"folder","target":item["id"],"label":label}))
+    # Prefer a small number of each newer resource kind so an existing
+    # collection of dozens of folders cannot hide every saved file/URL.
+    reserved=set()
+    for kind in ("file","url"):
+        reserved.update(index for index,(item_kind,_) in enumerate(candidates)
+                        if item_kind==kind and
+                        sum(1 for prior,_ in candidates[:index] if prior==kind)<2)
+    for index in range(len(candidates)):
+        if len(reserved)>=8:
             break
+        reserved.add(index)
+    resources=[entry for index,(_,entry) in enumerate(candidates) if index in reserved]
     entries=([{"kind":"heading","label":"快速打开资源"}]+resources) if resources else []
     groups=[{"kind":"workspace","target":item["name"],
              "label":safe_menu_title(item["name"])}
