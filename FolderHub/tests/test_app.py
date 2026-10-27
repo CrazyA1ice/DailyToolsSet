@@ -376,13 +376,13 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.request("POST",endpoint,{"name":"科研"},
                                       origin="https://evil.example")[0],403)
         self.assertEqual(self.request("POST",endpoint,{"name":"Unknown"})[0],400)
-        self.assertEqual(self.request("POST",endpoint,{"name":"科研","ids":[root]})[0],200)
         called=[]
         def run(node):
             called.append(node["id"])
             if node["id"]==web:raise app.UserError("目标网页暂时无法启动")
         with patch.object(app,"open_saved_resource",side_effect=run):
-            status,body=self.request("POST",endpoint,{"name":"科研"})
+            status,body=self.request("POST",endpoint,{"name":"科研","ids":[root],
+                                                     "command":"dangerous"})
         self.assertEqual(status,200)
         self.assertEqual(body["attempted"],2)
         self.assertEqual(body["succeeded"],1)
