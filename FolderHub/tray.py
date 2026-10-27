@@ -106,12 +106,36 @@ def safe_menu_title(value, limit=46):
 
 
 def build_quick_entries(nodes,recent,workspaces):
-    """Directory and workspace launch only; ignore usage/favorite metadata."""
-    folders=[{"kind":"folder","target":item["id"],
-              "label":safe_menu_title(item.get("title"))}
-             for item in nodes if type(item) is dict and type(item.get("id")) is int
-             and item.get("folder_path")][:8]
-    entries=([{"kind":"heading","label":"文件夹导航"}]+folders) if folders else []
+    """Bounded unified navigation. Only IDs, never raw targets, leave this layer.
+
+    The existing authenticated /api/nodes/<id>/open route makes the final
+    decision whether a folder, document or website can be opened.
+    """
+    # Keep at most eight candidates per type even with a 20,000-node
+    # library: bounded memory, one scan, and only eight Win32 menu entries.
+    buckets={"folder":[],"file":[],"url":[]}
+    for position,item in enumerate(nodes):
+        if type(item) is not dict or type(item.get("id")) is not int:
+            continue
+        kind=item.get("resource_kind","folder")
+        bucket=buckets.get(kind)
+        if bucket is None or len(bucket)>=8:
+            continue
+        if kind=="folder":
+            if not item.get("folder_path"):
+                continue
+            label=safe_menu_title(item.get("title"))
+        elif item.get("node_type")=="leaf" and item.get("resource_target"):
+            label=("📄 " if kind=="file" else "🌐 ")+safe_menu_title(item.get("title"),42)
+        else:
+            continue
+        bucket.append((position,{"kind":"folder","target":item["id"],"label":label}))
+    featured=buckets["file"][:2]+buckets["url"][:2]
+    remainder=sorted(buckets["folder"]+buckets["file"][2:]+buckets["url"][2:],
+                     key=lambda pair:pair[0])
+    selected=sorted(featured+remainder[:8-len(featured)],key=lambda pair:pair[0])
+    resources=[item for _,item in selected]
+    entries=([{"kind":"heading","label":"快速打开资源"}]+resources) if resources else []
     groups=[{"kind":"workspace","target":item["name"],
              "label":safe_menu_title(item["name"])}
             for item in workspaces[:8] if type(item) is dict

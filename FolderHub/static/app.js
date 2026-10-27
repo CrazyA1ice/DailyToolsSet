@@ -1974,17 +1974,24 @@ async function runEverythingSearch(event){
   try{
     const result=await api("/api/everything/search?q="+encodeURIComponent(query));
     everythingItems=result.items||[];
-    $("#everythingStatus").textContent="找到 "+everythingItems.length+" 项；搜索结果不会自动打开。";
-    $("#everythingResults").innerHTML=everythingItems.map((item,index)=>
-      '<div class="everything-result"><span title="'+h(item.path)+'"><strong>'+h(item.name)+'</strong>'
-      +'<small>'+h(item.path)+'</small></span><button type="button" data-everything-add="'+index+'">＋ 加入导航</button></div>').join("");
+    const skipped=Number(result.unavailable||0);
+    $("#everythingStatus").textContent="找到 "+everythingItems.length+" 项"
+      +(skipped?"，跳过 "+skipped+" 个当前无法访问的路径":"")
+      +"；搜索结果不会自动打开。";
+    $("#everythingResults").innerHTML=everythingItems.map((item,index)=>{
+      const supported=item.supported!==false;
+      return '<div class="everything-result"><span title="'+h(item.path)+'"><strong>'+h(item.name)+'</strong>'
+        +'<small>'+h(item.path)+'</small></span><button type="button" data-everything-add="'+index+'"'
+        +(supported?'':' disabled title="当前文件类型不支持加入导航"')
+        +'>'+(supported?'＋ 加入导航':'文件类型不支持')+'</button></div>';
+    }).join("");
   }catch(error){
     everythingItems=[];
     $("#everythingStatus").textContent=error.message;
   }finally{button.disabled=false}
 }
 function chooseEverythingResult(index){
-  const item=everythingItems[index];if(!item)return;
+  const item=everythingItems[index];if(!item||item.supported===false)return;
   const parent=state.nodes.find(node=>node.node_type==="root");
   if(!parent){toast("请先建立一个根分类，再添加 Everything 搜索结果",true);return}
   closeEverything();

@@ -24,6 +24,13 @@ class AdminUiContractTests(unittest.TestCase):
         cls.js = (STATIC / "app.js").read_text(encoding="utf-8")
         cls.css = (STATIC / "styles.css").read_text(encoding="utf-8")
 
+    def test_v51_search_prevents_unsupported_file_imports(self):
+        self.assertIn('item.supported!==false',self.js)
+        self.assertIn('item.supported===false',self.js)
+        self.assertIn('result.unavailable||0',self.js)
+        self.assertIn('当前文件类型不支持加入导航',self.js)
+        self.assertIn('.everything-result button:disabled',self.css)
+
     def test_everything_search_is_optional_local_and_explicit(self):
         for control in ("everythingBtn","everythingLayer","everythingForm",
                         "everythingQuery","everythingResults","everythingStatus","everythingClose"):

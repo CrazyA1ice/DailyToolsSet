@@ -48,6 +48,7 @@ def search(query, *, run=None, executable=None):
         raise EverythingUnavailable(
             "Everything 无法查询：请确认 Everything 已运行，且 es.exe 与之兼容")
     paths, seen = [], set()
+    unavailable = 0
     for row in result.stdout.splitlines():
         path = row.strip()
         key = ntpath.normcase(ntpath.normpath(path))
@@ -55,8 +56,18 @@ def search(query, *, run=None, executable=None):
                 or len(path) > 2048 or key in seen):
             continue
         seen.add(key)
+        # Everything can still have stale, disconnected or offline index
+        # entries. Do not misclassify a missing directory as a file.
+        if os.path.isdir(path):
+            kind = "folder"
+        elif os.path.isfile(path):
+            kind = "file"
+        else:
+            unavailable += 1
+            continue
         paths.append({"path": path, "name": ntpath.basename(path) or path,
-                      "kind": "folder" if os.path.isdir(path) else "file"})
+                      "kind": kind})
         if len(paths) == MAX_RESULTS:
             break
-    return {"items": paths, "source": "Everything", "limit": MAX_RESULTS}
+    return {"items": paths, "source": "Everything", "limit": MAX_RESULTS,
+            "unavailable": unavailable}

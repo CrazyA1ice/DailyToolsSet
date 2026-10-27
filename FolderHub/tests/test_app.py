@@ -36,6 +36,72 @@ class StoreTests(unittest.TestCase):
         self.store.delete(child)
         self.assertEqual([n["id"] for n in self.store.all()],[root])
 
+    def test_v51_upgrade_legacy_v4_sqlite_preserves_nodes_and_recycle(self):
+        legacy=Path(self.tmp.name)/"legacy-v4.db"
+        with sqlite3.connect(legacy) as db:
+            db.executescript("""
+                CREATE TABLE nodes(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    parent_id INTEGER REFERENCES nodes(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    folder_path TEXT,
+                    node_type TEXT NOT NULL DEFAULT 'group',
+                    icon TEXT NOT NULL DEFAULT 'folder',
+                    favorite INTEGER NOT NULL DEFAULT 0,
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE trash_batches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    deleted_at TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    selected_count INTEGER NOT NULL,
+                    item_count INTEGER NOT NULL
+                );
+                CREATE TABLE trash_nodes (
+                    batch_id INTEGER NOT NULL REFERENCES trash_batches(id) ON DELETE CASCADE,
+                    node_id INTEGER NOT NULL,
+                    parent_id INTEGER,
+                    title TEXT NOT NULL,
+                    folder_path TEXT,
+                    node_type TEXT NOT NULL,
+                    icon TEXT NOT NULL,
+                    favorite INTEGER NOT NULL,
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    sort_order INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    image_mime TEXT,
+                    image_path TEXT,
+                    PRIMARY KEY(batch_id,node_id)
+                );
+            """)
+            db.execute("""INSERT INTO nodes
+                (id,parent_id,title,folder_path,node_type,created_at,updated_at)
+                VALUES(1,NULL,'旧根模块',NULL,'root','old','old')""")
+            db.execute("INSERT INTO trash_batches VALUES(1,'old','旧叶子模块',1,1)")
+            db.execute("""INSERT INTO trash_nodes VALUES
+                (1,2,1,'旧文件夹','D:\\Legacy','leaf','folder',0,'[]',0,'old','old',NULL,NULL)""")
+        upgraded=app.Store(legacy)
+        with upgraded.connect() as db:
+            for table in ("nodes","trash_nodes"):
+                columns={r["name"] for r in db.execute("PRAGMA table_info("+table+")")}
+                self.assertIn("resource_kind",columns)
+                self.assertIn("resource_target",columns)
+        self.assertEqual(upgraded.all()[0]["resource_kind"],"folder")
+        self.assertIsNone(upgraded.all()[0]["resource_target"])
+        self.assertEqual(upgraded.restore_trash(1)["restored"],1)
+        restored={node["id"]:node for node in upgraded.all()}
+        self.assertEqual(restored[2]["folder_path"],r"D:\Legacy")
+        self.assertEqual(restored[2]["resource_kind"],"folder")
+        new_id=upgraded.create({"title":"新网页","node_type":"leaf","parent_id":1,
+                                "resource_kind":"url",
+                                "resource_target":"https://example.org/"})
+        self.assertEqual(next(n for n in upgraded.all() if n["id"]==new_id)
+                         ["resource_kind"],"url")
+
     def test_v50_mixed_resource_roundtrip_and_recycle(self):
         root=self.store.create({"title":"项目","node_type":"root"})
         file_id=self.store.create({
@@ -301,8 +367,24 @@ class HttpTests(unittest.TestCase):
             code,response=self.request("GET","/api/everything/search?q=report")
             self.assertEqual((code,response),(200,payload))
             search.assert_called_once_with("report")
+        self.assertTrue(response["items"][0]["supported"])
         self.assertEqual(self.request("GET","/api/everything/search?q=a")[0],400)
         self.assertEqual(self.request("GET","/api/everything/search")[0],400)
+
+    def test_v51_everything_marks_executable_results_unavailable_for_import(self):
+        payload={"items":[{"name":"installer.exe","path":r"C:\Tools\installer.exe",
+                            "kind":"file"},
+                           {"name":"研究报告.pdf","path":r"C:\Docs\研究报告.pdf",
+                            "kind":"file"},
+                           {"name":"资料目录","path":r"C:\Docs",
+                            "kind":"folder"}],"source":"Everything","limit":30}
+        with patch.object(app.everything_search,"search",return_value=payload):
+            code,body=self.request("GET","/api/everything/search?q=report")
+        self.assertEqual(code,200)
+        self.assertEqual([item["supported"] for item in body["items"]],
+                         [False,True,True])
+        self.assertTrue(all(item["path"]==payload["items"][i]["path"]
+                            for i,item in enumerate(body["items"])))
 
     def test_static_and_crud(self):
         status,page=self.request("GET","/")
