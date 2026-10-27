@@ -88,31 +88,31 @@ class TrayServiceTests(TestCase):
         items=tray.build_quick_entries(nodes,[{'node_id':i} for i in range(1,41)],
                                       [{'name':str(i)} for i in range(20)])
         commands=[x for x in items if x['kind']!='heading']
-        self.assertEqual(len(commands),24)
+        self.assertEqual(len(commands),16)
         self.assertEqual([x['target'] for x in commands[:8]],list(range(1,9)))
-        self.assertEqual([x['target'] for x in commands[8:16]],list(range(9,17)))
         self.assertEqual(len([x for x in commands if x['kind']=='workspace']),8)
         self.assertEqual(nodes[0]['title'],'1')
         self.assertLessEqual(len(tray.safe_menu_title('&'*200)),47)
 
     def test_hotkey_register_unregister_and_collision_tolerance(self):
-        window=tray.WindowsTray.__new__(tray.WindowsTray)
-        window.hwnd=123
-        window.user32=MagicMock()
-        window.user32.RegisterHotKey.return_value=1
-        window.hotkey_registered=False
-        window._register_hotkey()
-        window.user32.RegisterHotKey.assert_called_once_with(
-            123,tray.HOTKEY_ID,tray.HOTKEY_MODIFIERS|window.MOD_NOREPEAT,
-            tray.HOTKEY_VK)
-        window._remove_hotkey()
-        window.user32.UnregisterHotKey.assert_called_once_with(123,tray.HOTKEY_ID)
-        self.assertFalse(window.hotkey_registered)
-        window.user32.RegisterHotKey.return_value=0
-        window._register_hotkey()
-        self.assertFalse(window.hotkey_registered)
-        window._remove_hotkey()
-        self.assertEqual(window.user32.UnregisterHotKey.call_count,1)
+        with tempfile.TemporaryDirectory() as folder:
+            service=tray.ServiceController(data_dir=Path(folder))
+            window=tray.WindowsTray.__new__(tray.WindowsTray)
+            window.hwnd=123
+            window.controller=service
+            window.user32=MagicMock()
+            window.user32.RegisterHotKey.return_value=1
+            window.hotkey_registered=False
+            window._register_hotkey()
+            window.user32.RegisterHotKey.assert_called_once_with(
+                123,tray.HOTKEY_ID,tray.HOTKEY_MODIFIERS|window.MOD_NOREPEAT,
+                tray.HOTKEY_VK)
+            window._remove_hotkey()
+            window.user32.UnregisterHotKey.assert_called_once_with(123,tray.HOTKEY_ID)
+            window.user32.RegisterHotKey.return_value=0
+            window._register_hotkey()
+            self.assertFalse(window.hotkey_registered)
+            self.assertEqual(window.user32.UnregisterHotKey.call_count,1)
 
     def test_quick_folder_open_uses_existing_authorized_node_api(self):
         svc=tray.ServiceController(port=9876)
@@ -177,7 +177,7 @@ class TrayServiceTests(TestCase):
             items=svc.quick_entries()
         self.assertEqual([x['kind'] for x in items],
                          ['heading','folder','heading','workspace'])
-        self.assertEqual(len(calls),3)
+        self.assertEqual(len(calls),2)
         self.assertTrue(all('/api/' in url for url in calls))
 
     def test_windows_message_handler_routes_global_hotkey(self):
@@ -242,7 +242,7 @@ class TrayServiceTests(TestCase):
             self.assertEqual(request.get_method(),'POST')
             self.assertEqual(request.get_header('X-folderhub-token'),'valid-token')
             self.assertEqual(json.loads(request.data.decode('utf-8')),{'folder_path':folder})
-            return BytesIO(b'{"id":17,"created":true,"favorite":true}')
+            return BytesIO(b'{"id":17,"created":true}')
         with patch.object(tray,'urlopen',side_effect=mocked_urlopen):
             result=controller.capture_current_directory(folder)
         self.assertEqual(result['id'],17)
@@ -268,31 +268,47 @@ class TrayServiceTests(TestCase):
         window._capture_current_folder()
         window.controller.capture_current_directory.assert_called_once_with(r'C:\Work\Project')
 
-    def test_capture_hotkey_cleanup_does_not_remove_navigation_hotkey(self):
+    def test_single_configurable_shortcut_is_persistent(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target=Path(folder)/'hotkey.json'
+            self.assertEqual(tray.read_hotkey(target),tray.DEFAULT_HOTKEY)
+            tray.save_hotkey(target,'Ctrl+Alt+Shift+Q')
+            self.assertEqual(tray.read_hotkey(target),'Ctrl+Alt+Shift+Q')
+            with self.assertRaises(ValueError):
+                tray.save_hotkey(target,'Win+X')
+            self.assertEqual(tray.read_hotkey(target),'Ctrl+Alt+Shift+Q')
+            target.write_text('{bad}',encoding='utf-8')
+            self.assertEqual(tray.read_hotkey(target),tray.DEFAULT_HOTKEY)
+
+    def test_config_change_re_registers_only_one_global_hotkey(self):
+        with tempfile.TemporaryDirectory() as folder:
+            window=tray.WindowsTray.__new__(tray.WindowsTray)
+            window.hwnd=123
+            window.controller=tray.ServiceController(data_dir=Path(folder))
+            window.user32=MagicMock()
+            window.user32.RegisterHotKey.return_value=1
+            window.hotkey_registered=False
+            window._message=MagicMock()
+            window._register_hotkey()
+            window._set_hotkey('Ctrl+Alt+Shift+S')
+            self.assertEqual(window.hotkey_choice,'Ctrl+Alt+Shift+S')
+            self.assertEqual(tray.read_hotkey(window.controller.hotkey_file),
+                             'Ctrl+Alt+Shift+S')
+            self.assertEqual(window.user32.UnregisterHotKey.call_count,1)
+            self.assertEqual(window.user32.RegisterHotKey.call_count,2)
+            self.assertNotIn('CAPTURE_HOTKEY_ID',Path(tray.__file__).read_text(encoding='utf-8'))
+
+    def test_single_hotkey_shows_action_list_and_capture_is_explicit(self):
         window=tray.WindowsTray.__new__(tray.WindowsTray)
         window.hwnd=123
+        window.controller=MagicMock()
+        window.controller.quick_entries.return_value=[]
         window.user32=MagicMock()
-        window.hotkey_registered=True
-        window.capture_hotkey_registered=False
-        window.user32.RegisterHotKey.return_value=1
-        window._register_capture_hotkey()
-        self.assertTrue(window.capture_hotkey_registered)
-        window.user32.RegisterHotKey.assert_called_once_with(
-            123,tray.CAPTURE_HOTKEY_ID,
-            tray.HOTKEY_MODIFIERS|window.MOD_NOREPEAT,tray.CAPTURE_HOTKEY_VK)
-        window._remove_capture_hotkey()
-        window.user32.UnregisterHotKey.assert_called_once_with(123,tray.CAPTURE_HOTKEY_ID)
-        self.assertTrue(window.hotkey_registered)
-        window.user32.RegisterHotKey.return_value=0
-        window._register_capture_hotkey()
-        self.assertFalse(window.capture_hotkey_registered)
-
-    def test_capture_hotkey_message_dispatch_is_separate_from_quick_nav(self):
-        window=tray.WindowsTray.__new__(tray.WindowsTray)
-        window.taskbar_created=99
+        window.user32.GetForegroundWindow.return_value=234
+        window.user32.CreatePopupMenu.return_value=55
+        window.user32.TrackPopupMenu.return_value=tray.MENU_CAPTURE
         window._capture_current_folder=MagicMock()
-        window._show_quick_menu=MagicMock()
-        window.user32=MagicMock()
-        self.assertEqual(window._window_proc(123,window.WM_HOTKEY,tray.CAPTURE_HOTKEY_ID,0),0)
-        window._capture_current_folder.assert_called_once_with()
-        window._show_quick_menu.assert_not_called()
+        window._show_quick_menu()
+        window._capture_current_folder.assert_called_once_with(234)
+        self.assertIn('MB_TOPMOST',Path(tray.__file__).read_text(encoding='utf-8'))
+        self.assertIn('MB_SETFOREGROUND',Path(tray.__file__).read_text(encoding='utf-8'))
