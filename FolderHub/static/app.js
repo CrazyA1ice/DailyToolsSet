@@ -87,7 +87,7 @@ function routeFromLocation(){
     {view,id:null}:{view:"all",id:null};
 }
 function routeUrl(view,id=null){
-  const suffix=view==="node"?`#node/${id}`:view==="workspace"?`#workspace/${encodeURIComponent(id||"")}`:view==="all"?"":`#${view}`;
+  const suffix=view==="node"?`#node/${id}`:view==="workspace"?`#workspace/${encodeURIComponent(id??state.activeWorkspace??"")}`:view==="all"?"":`#${view}`;
   return window.location.pathname+window.location.search+suffix;
 }
 function navigationSnapshot(){
@@ -764,7 +764,12 @@ function render(skipNav=false){
   $("#sectionHeading").hidden=state.view==="all"&&!searching;
   $("#sectionTitle").textContent=sectionTitle;
   $("#sectionMeta").textContent=state.view==="workspace"&&!searching?
-    (state.workspaces.find(item=>item.name===state.activeWorkspace)?.description||"项目工作区 · 集中浏览，不会自动打开多个文件夹"):
+    (()=>{
+      const item=state.workspaces.find(w=>w.name===state.activeWorkspace);
+      const missing=item.members.length-display.length;
+      return (item.description||"项目工作区 · 集中浏览，不会自动打开多个文件夹")+
+        (missing?" · "+missing+" 个成员已删除，请编辑工作区修复":"");
+    })():
     state.view==="tags"&&!searching?
     `跨目录匹配 ${display.length} 个模块 · 包含 ${state.tagSelection.length} 个，排除 ${state.tagExcluded.length} 个标签（${state.tagMatchMode==="all"?"AND":"OR"}）` :
     state.view==="recent"&&!searching?
