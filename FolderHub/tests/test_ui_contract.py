@@ -360,6 +360,28 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('grid-row:3;',responsive)
         self.assertIn('flex-wrap:wrap;',responsive)
 
+    def test_v52_memoized_ancestor_chains_and_search_cache(self):
+        self.assertIn('function buildSearchRecords(nodes,lookup)',self.js)
+        self.assertIn('const chainCache=new Map();',self.js)
+        self.assertIn('const pending=[],visited=new Set();',self.js)
+        self.assertIn('searchRecords=buildSearchRecords(state.nodes,nodeById);',self.js)
+        self.assertIn('indexedTagCount=tagNames.size;',self.js)
+        self.assertIn('$("#tagCount").textContent=indexedTagCount;',self.js)
+        self.assertIn('cachedSearch=null;',self.js)
+        self.assertIn('if(cachedSearch?.query===query)return cachedSearch.result;',self.js)
+        self.assertIn('cachedSearch={query,result};',self.js)
+
+    def test_v52_coalesces_search_keystrokes_without_rebuilding_sidebar(self):
+        self.assertIn('function queueSearchRender()',self.js)
+        self.assertIn('function flushSearchRender()',self.js)
+        self.assertIn('requestAnimationFrame(()=>{',self.js)
+        self.assertIn('cancelAnimationFrame(searchRenderFrame);',self.js)
+        self.assertIn('state.renderLimit=100;queueSearchRender();',self.js)
+        self.assertIn('flushSearchRender();return;',self.js)
+        self.assertIn('if(!skipNav)renderNav();',self.js)
+        self.assertIn('renderSavedViews(); // Invalidate selected saved-view state',self.js)
+        self.assertNotIn('else {renderSavedViews();renderFolderGroups();renderWorkspaces()}',self.js)
+
     def test_indexed_navigation_progressive_render_and_focus(self):
         self.assertIn('function rebuildNodeIndex()',self.js)
         self.assertIn('const byId = id => nodeById.get(id)',self.js)
@@ -370,7 +392,9 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('state.visibleIds=page.map(n=>n.id)',self.js)
         self.assertIn('data-action="load-more"',self.js)
         self.assertIn('case "load-more":',self.js)
-        self.assertIn('state.renderLimit=Math.ceil((state.searchKeyboardIndex+1)/100)*100',self.js)
+        self.assertIn('const visibleCount=Math.min(results.length,state.renderLimit);',self.js)
+        self.assertIn('old<0?visibleCount-1:',self.js)
+        self.assertNotIn('state.renderLimit=Math.ceil((state.searchKeyboardIndex+1)/100)*100',self.js)
         self.assertIn('render(true);',self.js)
         self.assertIn('.entries .load-more',self.css)
         self.assertIn('entry-card:focus-visible',self.css)
@@ -495,7 +519,9 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('const restoredSmartView=fromHistory&&view==="tags"?',self.js)
         self.assertIn('const keepTag=tag=>typeof tag==="string"',self.js)
         self.assertIn('state.activeSmartView=restoredSmartView?.name||null;',self.js)
-        self.assertIn('else {renderSavedViews();renderFolderGroups();renderWorkspaces()}',self.js)
+        self.assertIn('if(!skipNav)renderNav();',self.js)
+        self.assertIn('renderSavedViews(); // Invalidate selected saved-view state',self.js)
+        self.assertNotIn('else {renderSavedViews();renderFolderGroups();renderWorkspaces()}',self.js)
         self.assertIn('const rewritten=state.savedViews.map(view=>{',self.js)
         self.assertIn('state.savedViews=rewritten;',self.js)
 
@@ -505,9 +531,9 @@ class AdminUiContractTests(unittest.TestCase):
 
     def test_quick_palette_is_lightweight_and_bounded(self):
         self.assertIn('function quickCandidates(query="")',self.js)
-        self.assertIn('const seen=new Set();',self.js)
-        self.assertIn('return candidates.filter(node=>{',self.js)
-        self.assertIn('}).slice(0,12).map(node=>({node}));',self.js)
+        self.assertIn('const result=[],seen=new Set();',self.js)
+        self.assertIn('if(result.length>=12)break;',self.js)
+        self.assertIn('if(node.folder_path||node.resource_target)collect(node);',self.js)
         self.assertNotIn('state.recent',self.js)
         self.assertNotIn('state.frequent',self.js)
         self.assertNotIn('state.trash',self.js)

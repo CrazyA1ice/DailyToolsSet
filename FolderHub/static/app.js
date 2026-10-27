@@ -270,23 +270,53 @@ let toastTimer;
 let nodeById = new Map();
 let childrenByParent = new Map();
 let searchRecords = [];
+let indexedTagCount = 0;
+let cachedSearch = null;
 const byId = id => nodeById.get(id);
 const sorted = nodes => [...nodes].sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
 const children = id => childrenByParent.get(id??null) || [];
+
+// Cache each ancestor chain once instead of recomputing its prefix for
+// every descendant in large/deep navigation trees. Cycles are bounded.
+function buildSearchRecords(nodes,lookup){
+  const chainCache=new Map();
+  function lineage(node){
+    if(chainCache.has(node.id))return chainCache.get(node.id);
+    const pending=[],visited=new Set();
+    let cursor=node;
+    while(cursor&&!chainCache.has(cursor.id)&&!visited.has(cursor.id)){
+      pending.push(cursor);
+      visited.add(cursor.id);
+      cursor=lookup.get(cursor.parent_id);
+    }
+    let prefix=cursor&&chainCache.has(cursor.id)?chainCache.get(cursor.id):"";
+    while(pending.length){
+      const part=pending.pop();
+      prefix=prefix?prefix+" /"+part.title:part.title;
+      chainCache.set(part.id,prefix);
+    }
+    return chainCache.get(node.id)||"";
+  }
+  return nodes.map(node=>{
+    const own=(node.title+" "+(node.folder_path||node.resource_target||"")).toLocaleLowerCase();
+    const full=lineage(node).toLocaleLowerCase();
+    return {node,own,body:own+" "+full+" "+(node.tags||[]).join(" ").toLocaleLowerCase()};
+  });
+}
 function rebuildNodeIndex(){
   nodeById = new Map(state.nodes.map(node=>[node.id,node]));
   childrenByParent = new Map();
+  const tagNames=new Set();
   for(const node of state.nodes){
     const parent = node.parent_id??null;
     if(!childrenByParent.has(parent))childrenByParent.set(parent,[]);
     childrenByParent.get(parent).push(node);
+    for(const tag of node.tags||[])tagNames.add(tag);
   }
+  indexedTagCount=tagNames.size;
   for(const nodes of childrenByParent.values())nodes.sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
-  searchRecords=state.nodes.map(node=>{
-    const own=(node.title+" "+(node.folder_path||node.resource_target||"")).toLocaleLowerCase();
-    const full=ancestors(node.id).map(entry=>entry.title).join(" /").toLocaleLowerCase();
-    return {node,own,body:own+" "+full+" "+(node.tags||[]).join(" ").toLocaleLowerCase()};
-  });
+  searchRecords=buildSearchRecords(state.nodes,nodeById);
+  cachedSearch=null;
 }
 
 function toast(message, error=false, action=null) {
@@ -359,6 +389,12 @@ function ancestors(id) {
   return result;
 }
 function setView(view,id=null,{fromHistory=false,saved=null}={}){
+  // A pending search frame would otherwise redraw a view that was just
+  // replaced by navigation within the same event-loop turn.
+  if(searchRenderFrame!==null){
+    cancelAnimationFrame(searchRenderFrame);
+    searchRenderFrame=null;
+  }
   if(!fromHistory)rememberNavigation();
   closeCardMenu();exitSelectMode();
   if(view==="node"&&!byId(id)){view="all";id=null}
@@ -429,7 +465,7 @@ function toggleBranch(id){
 function renderNav(){
   const roots=children(null);
   $("#rootCount").textContent=roots.length;
-  $("#tagCount").textContent=new Set(state.nodes.flatMap(n=>n.tags||[])).size;
+  $("#tagCount").textContent=indexedTagCount;
   document.querySelectorAll("#specialNav [data-view]").forEach(el=>el.classList.toggle("active",state.view===el.dataset.view));
   const walk=(nodes) => nodes.map(n=>{
     const sub=children(n.id), expand=sub.length>0 && state.expanded.has(n.id), isLeaf=n.node_type==="leaf";
@@ -562,6 +598,7 @@ function chooseTag(tag){
   }
   state.activeTag=state.tagSelection.length===1?state.tagSelection[0]:null;
   state.renderLimit=100;state.searchKeyboardIndex=-1;
+  renderSavedViews(); // Invalidate selected saved-view state, not entire sidebar.
   render(true);rememberNavigation();
 }
 function updateTagFilterMode(mode,value){
@@ -570,6 +607,7 @@ function updateTagFilterMode(mode,value){
   if(mode==="match" && ["any","all"].includes(value))state.tagMatchMode=value;
   if(mode==="pick" && ["include","exclude"].includes(value))state.tagPickMode=value;
   state.renderLimit=100;state.searchKeyboardIndex=-1;
+  renderSavedViews();
   render(true);rememberNavigation();
 }
 
@@ -740,15 +778,36 @@ function emptyView(){
     <p>${searching?'换个名称或路径关键词试试':'点击“新建模块”，建立你的第一层文件夹导航。'}</p>
     ${searching?'':`<button class="primary-btn" data-action="empty-create">＋ 创建模块</button>`}</div>`;
 }
+// Coalesce bursts of browser input events into one frame. Keyboard navigation
+// can flush the pending frame synchronously, preserving its focus semantics.
+let searchRenderFrame=null;
+function flushSearchRender(){
+  if(searchRenderFrame!==null){
+    cancelAnimationFrame(searchRenderFrame);
+    searchRenderFrame=null;
+  }
+  render(true);rememberNavigation();
+}
+function queueSearchRender(){
+  if(searchRenderFrame!==null)return;
+  searchRenderFrame=requestAnimationFrame(()=>{
+    searchRenderFrame=null;
+    render(true);rememberNavigation();
+  });
+}
 function searchAll(term){
-  const words=term.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  if(!words.length)return [];
-  return searchRecords.filter(item=>words.every(word=>item.body.includes(word)))
+  const query=String(term).trim().toLocaleLowerCase();
+  if(!query)return [];
+  if(cachedSearch?.query===query)return cachedSearch.result;
+  const words=query.split(/\s+/).filter(Boolean);
+  const result=searchRecords.filter(item=>words.every(word=>item.body.includes(word)))
     .sort((a,b)=>{
       const aOwn=words.every(word=>a.own.includes(word))?0:1;
       const bOwn=words.every(word=>b.own.includes(word))?0:1;
       return aOwn-bOwn || a.node.title.localeCompare(b.node.title,"zh-CN");
     }).map(item=>item.node);
+  cachedSearch={query,result};
+  return result;
 }
 function render(skipNav=false){
   if((state.view==="node" && !byId(state.selected)) ||
@@ -756,8 +815,8 @@ function render(skipNav=false){
     state.view="all";state.selected=null;state.activeWorkspace=null;
     if(navigationReady)window.history.replaceState(navigationSnapshot(),"",routeUrl("all"));
   }
+  // Selection, layout and keystrokes change cards, not side navigation.
   if(!skipNav)renderNav();
-  else {renderSavedViews();renderFolderGroups();renderWorkspaces()}
   renderCrumb();
   renderWorkspaceResources();
   renderTagFilters();
@@ -1838,13 +1897,30 @@ function fallbackCopy(url){const input=document.createElement("textarea");input.
 const quickPalette={open:false,items:[],selected:0,returnFocus:null};
 function quickCandidates(query=""){
   const term=String(query).trim();
-  const candidates=term?searchAll(term):
-    [...children(null),...state.nodes.filter(node=>Boolean(node.folder_path||node.resource_target))];
-  const seen=new Set();
-  return candidates.filter(node=>{
-    if(seen.has(node.id))return false;
-    seen.add(node.id);return true;
-  }).slice(0,12).map(node=>({node}));
+  const result=[],seen=new Set();
+  const collect=node=>{
+    if(result.length>=12||seen.has(node.id))return;
+    seen.add(node.id);
+    result.push({node});
+  };
+  if(term){
+    for(const node of searchAll(term)){
+      collect(node);
+      if(result.length>=12)break;
+    }
+  }else{
+    for(const node of children(null)){
+      collect(node);
+      if(result.length>=12)break;
+    }
+    if(result.length<12){
+      for(const node of state.nodes){
+        if(node.folder_path||node.resource_target)collect(node);
+        if(result.length>=12)break;
+      }
+    }
+  }
+  return result;
 }
 function renderQuickPalette(){
   const term=$("#quickInput").value;
@@ -1858,7 +1934,7 @@ function renderQuickPalette(){
   }
   quickPalette.selected=0;
   results.innerHTML=quickPalette.items.map(({node},index)=>{
-    const path=node.folder_path||ancestors(node.id).map(n=>n.title).join(" / ");
+    const path=node.folder_path||node.resource_target||ancestors(node.id).map(n=>n.title).join(" / ");
     const label=(node.tags||[]).length?path+" · 标签："+node.tags.join("、"):path;
     const suffix=node.node_type==="leaf"?(node.resource_kind==="url"?"网页":node.resource_kind==="file"?"文件":"文件夹"):"模块";
     return `<button type="button" class="quick-result" id="quick-option-${index}" role="option" aria-selected="false" data-quick-index="${index}">
@@ -2182,12 +2258,15 @@ function bind(){
   $("#sectionOperations").addEventListener("click",e=>{const btn=e.target.closest("[data-action]");if(btn)act(btn.dataset.action,state.selected)});
   $("#addRoot").addEventListener("click",()=>editDialog(null,null));
   $("#newBtn").addEventListener("click",()=>editDialog());
-  $("#search").addEventListener("input",e=>{closeCardMenu();state.selectedIds.clear();state.search=e.target.value;state.searchKeyboardIndex=-1;state.renderLimit=100;render(true);rememberNavigation()});
+  $("#search").addEventListener("input",e=>{
+    closeCardMenu();state.selectedIds.clear();state.search=e.target.value;
+    state.searchKeyboardIndex=-1;state.renderLimit=100;queueSearchRender();
+  });
   $("#search").addEventListener("keydown",async e=>{
     if(!state.search.trim())return;
     if(e.key==="Escape"){
       e.preventDefault();e.stopPropagation();state.search="";state.searchKeyboardIndex=-1;
-      $("#search").value="";state.renderLimit=100;render(true);rememberNavigation();return;
+      $("#search").value="";state.renderLimit=100;flushSearchRender();return;
     }
     if(!["ArrowDown","ArrowUp","Enter"].includes(e.key))return;
     const results=searchAll(state.search);
@@ -2195,15 +2274,21 @@ function bind(){
     if(state.selectMode && e.key==="Enter")return;
     e.preventDefault();e.stopPropagation();
     if(e.key==="Enter"){
+      if(searchRenderFrame!==null){
+        cancelAnimationFrame(searchRenderFrame);
+        searchRenderFrame=null;
+      }
       const index=state.searchKeyboardIndex<0?0:Math.min(state.searchKeyboardIndex,results.length-1);
       await act("primary",results[index].id);return;
     }
+    // Navigate only cards that are currently rendered. Previously ArrowUp
+    // from the first search state jumped to the last of 20k results and
+    // immediately built up to 20k DOM cards just to move keyboard focus.
+    const visibleCount=Math.min(results.length,state.renderLimit);
     const old=state.searchKeyboardIndex;
-    state.searchKeyboardIndex=e.key==="ArrowDown"?(old+1)%results.length:
-      old<0?results.length-1:(old-1+results.length)%results.length;
-    if(state.searchKeyboardIndex>=state.renderLimit)
-      state.renderLimit=Math.ceil((state.searchKeyboardIndex+1)/100)*100;
-    render(true);rememberNavigation();
+    state.searchKeyboardIndex=e.key==="ArrowDown"?(old+1)%visibleCount:
+      old<0?visibleCount-1:(old-1+visibleCount)%visibleCount;
+    flushSearchRender();
     document.getElementById(`folderhub-entry-${results[state.searchKeyboardIndex].id}`)?.scrollIntoView({block:"nearest"});
   });
   $("#layoutBtn").addEventListener("click",()=>{
