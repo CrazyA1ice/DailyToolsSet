@@ -13,3 +13,6 @@ backup*.json
 # Portable runtime state; never publish local paths, SQLite data or covers.
 /data/
 /uploads/
+/test-results/
+/tmp/
+*.tmp
