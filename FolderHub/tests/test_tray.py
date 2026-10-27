@@ -104,6 +104,25 @@ class TrayServiceTests(TestCase):
                             for item in entries))
         self.assertFalse(any("https://" in item["label"] for item in entries))
 
+    def test_v51_large_folder_library_keeps_document_and_web_shortcuts_visible(self):
+        nodes=[{"id":n,"title":"Folder "+str(n),"folder_path":r"C:\Data",
+                "resource_kind":"folder"} for n in range(1,101)]
+        nodes.extend([
+            {"id":101,"title":"Main PDF","node_type":"leaf",
+             "resource_kind":"file","resource_target":r"C:\Data\report.pdf"},
+            {"id":102,"title":"Notes","node_type":"leaf",
+             "resource_kind":"file","resource_target":r"C:\Data\notes.txt"},
+            {"id":103,"title":"Wiki","node_type":"leaf",
+             "resource_kind":"url","resource_target":"https://example.org/"},
+        ])
+        entries=tray.build_quick_entries(nodes,[],[])
+        ids=[item["target"] for item in entries if item["kind"]=="folder"]
+        self.assertEqual(len(ids),8)
+        self.assertEqual(ids[:5],[1,2,3,4,5])
+        self.assertEqual(ids[-3:],[101,102,103])
+        self.assertEqual(len(ids),len(set(ids)))
+        self.assertEqual(len(nodes),103)
+
     def test_quick_entry_limits_and_does_not_mutate_input(self):
         nodes=[{'id':i,'title':str(i),'folder_path':'C:/X','favorite':i<=12}
                for i in range(1,41)]
