@@ -134,6 +134,8 @@ let projectSettingsReady=false;
 let pendingSettings=null;
 let settingsWriteInFlight=false;
 let settingsWritePromise=null;
+let preferencesRevision=null;
+let preferencesConflict=false;
 const WORKSPACE_STATUS_NAMES={planning:"筹备中",active:"进行中",paused:"已暂停",done:"已完成"};
 function copyWorkspaceRecord(item){
   return {name:item.name,description:item.description,members:[...item.members],
@@ -159,6 +161,10 @@ function collectProjectSettings(){
 }
 async function persistProjectSettings(){
   if(!projectSettingsReady)return true;
+  if(preferencesConflict){
+    toast("其他页面已保存更新；本页停止写入，请记录未保存的修改后刷新页面",true);
+    return false;
+  }
   pendingSettings=collectProjectSettings();
   if(settingsWriteInFlight)return settingsWritePromise;
   settingsWriteInFlight=true;
@@ -167,8 +173,20 @@ async function persistProjectSettings(){
     try{
       while(pendingSettings){
         const snapshot=pendingSettings;pendingSettings=null;
-        try{await mutate("PUT","/api/preferences",{settings:snapshot})}
-        catch(e){success=false;toast("保存项目个性化设置失败："+e.message,true)}
+        try{
+          const saved=await mutate("PUT","/api/preferences",
+            {settings:snapshot,expected_revision:preferencesRevision});
+          preferencesRevision=saved.revision;
+        }catch(e){
+          success=false;
+          if(e.code==="preferences_conflict"||e.status===409){
+            preferencesConflict=true;
+            pendingSettings=null;
+            toast("其他页面已修改设置，已阻止旧配置覆盖。请先记录本页未保存的内容，再刷新页面。",true);
+            break;
+          }
+          toast("保存项目个性化设置失败："+e.message,true);
+        }
       }
     }finally{settingsWriteInFlight=false;settingsWritePromise=null}
     return success;
@@ -188,6 +206,8 @@ async function loadProjectSettings(){
     // POST is a write-once import: another browser's already saved preferences win.
     payload=await mutate("POST","/api/preferences",{settings:legacyBrowserSettings()});
   }
+  preferencesRevision=payload.revision??null;
+  preferencesConflict=false;
   const saved=payload.settings||{};
   preferences={...PREF_DEFAULTS};
   for(const [key,values] of Object.entries(PREF_ALLOWED))
@@ -291,7 +311,12 @@ async function api(path, options={}) {
   catch(e) {throw new Error("本地服务连接失败，请启动 FolderHub 后刷新页面");}
   let data;
   try {data=await response.json()} catch(e){throw new Error("服务器响应无效")}
-  if(!response.ok) throw new Error(data.error||`操作失败 (${response.status})`);
+  if(!response.ok){
+    const error=new Error(data.error||`操作失败 (${response.status})`);
+    error.status=response.status;
+    error.code=data.code||null;
+    throw error;
+  }
   return data;
 }
 const mutate = (method,path,data={}) => api(path,{method,body:JSON.stringify(data)});
