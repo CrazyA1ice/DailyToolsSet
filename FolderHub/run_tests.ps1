@@ -1,10 +1,13 @@
-# Run from anywhere: outputs always remain under DailyToolsSet/FolderHub.
+# FolderHub unittest runner: ASCII-only for Windows PowerShell 5.1 codepages.
+# All logs, temp captures, and Python scratch files stay under FolderHub.
 $ErrorActionPreference = "Stop"
 $Project = $PSScriptRoot
 $Output = Join-Path $Project "test-results"
+$Scratch = Join-Path $Project "tmp"
 New-Item -ItemType Directory -Path $Output -Force | Out-Null
-# V4.8 and earlier instructions created logs at repository root.
-# Move only known FolderHub unittest logs into this project's test-results.
+New-Item -ItemType Directory -Path $Scratch -Force | Out-Null
+
+# Move only legacy FolderHub test logs from the repository root.
 $RepositoryRoot = Split-Path -Parent $Project
 Get-ChildItem -LiteralPath $RepositoryRoot -File -Filter "folderhub-tests-*.txt" -ErrorAction SilentlyContinue | ForEach-Object {
     $Destination = Join-Path $Output $_.Name
@@ -13,58 +16,63 @@ Get-ChildItem -LiteralPath $RepositoryRoot -File -Filter "folderhub-tests-*.txt"
     }
     Move-Item -LiteralPath $_.FullName -Destination $Destination -ErrorAction SilentlyContinue
 }
-$Log = Join-Path $Output ("folderhub-tests-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".txt")
-$Scratch = Join-Path $Project "tmp"
-New-Item -ItemType Directory -Path $Scratch -Force | Out-Null
+
+$Log = Join-Path $Output ("folderhub-tests-" + (Get-Date -Format "yyyyMMdd-HHmmss-fff") + ".txt")
+$RunId = [guid]::NewGuid().ToString("N")
+$StdoutFile = Join-Path $Scratch ("unittest-stdout-" + $RunId + ".tmp")
+$StderrFile = Join-Path $Scratch ("unittest-stderr-" + $RunId + ".tmp")
 $PreviousTemp = $env:TEMP
 $PreviousTmp = $env:TMP
 $PreviousTmpDir = $env:TMPDIR
 $PreviousPythonIOEncoding = $env:PYTHONIOENCODING
-# Standard unittest progress ("test_... ... ok") goes to stderr, even on
-# success. With ErrorActionPreference=Stop, Windows PowerShell 5.1 can turn
-# native stderr redirected by *>&1 into a terminating NativeCommandError.
-# Redirect both native streams to files without going through the PS pipeline.
-$RunId = [guid]::NewGuid().ToString("N")
-$StdoutFile = Join-Path $Scratch ("unittest-stdout-" + $RunId + ".tmp")
-$StderrFile = Join-Path $Scratch ("unittest-stderr-" + $RunId + ".tmp")
 $ExitCode = 1
+
 Push-Location $Project
 try {
-    # Python tempfile and temporary capture streams stay inside FolderHub/tmp.
     $env:TEMP = $Scratch
     $env:TMP = $Scratch
     $env:TMPDIR = $Scratch
-    # Ensure unicode test messages survive Windows console code pages.
     $env:PYTHONIOENCODING = "utf-8"
-    # Multiple Python installations may match PATH. In Windows PowerShell 5.1
-    # (Get-Command ...).Source becomes an Object[] in that case; Start-Process
-    # needs one executable path string, not the list of all matches.
-    $PythonCommand = Get-Command python -CommandType Application -ErrorAction Stop |
-        Select-Object -First 1
+
+    # Several Python installations can appear in PATH. Select one string.
+    $PythonCommand = Get-Command python -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $Python = [string]$PythonCommand.Source
     if ([string]::IsNullOrWhiteSpace($Python)) {
-        throw "未找到可用于运行测试的 Python 可执行文件"
+        throw "Python executable was not found."
     }
-    $Process = Start-Process -FilePath $Python `
-        -ArgumentList @("-m", "unittest", "discover", "-s", "tests", "-t", ".", "-v") `
-        -WorkingDirectory $Project -NoNewWindow -Wait -PassThru `
-        -RedirectStandardOutput $StdoutFile -RedirectStandardError $StderrFile
-    $ExitCode = $Process.ExitCode
 
-    # Python unittest writes normal test status and the final OK/FAILED line
-    # to stderr; preserve both streams without treating either as PS errors.
-    $StdoutText = if (Test-Path -LiteralPath $StdoutFile) {
-        [System.IO.File]::ReadAllText($StdoutFile, [System.Text.Encoding]::UTF8)
-    } else { "" }
-    $StderrText = if (Test-Path -LiteralPath $StderrFile) {
-        [System.IO.File]::ReadAllText($StderrFile, [System.Text.Encoding]::UTF8)
-    } else { "" }
-    $Separator = if ($StdoutText.Length -gt 0 -and $StderrText.Length -gt 0 -and
-                    -not $StdoutText.EndsWith("`n")) { [Environment]::NewLine } else { "" }
-    [System.IO.File]::WriteAllText(
-        $Log, $StdoutText + $Separator + $StderrText,
-        [System.Text.UTF8Encoding]::new($false))
-} finally {
+    # Do not pipe native stderr into PowerShell. unittest -v reports normal
+    # progress to stderr; PS 5.1 may turn it into NativeCommandError.
+    # Splatting also avoids fragile backtick line continuations.
+    $RunOptions = @{
+        FilePath = $Python
+        ArgumentList = @("-m", "unittest", "discover", "-s", "tests", "-t", ".", "-v")
+        WorkingDirectory = $Project
+        NoNewWindow = $true
+        Wait = $true
+        PassThru = $true
+        RedirectStandardOutput = $StdoutFile
+        RedirectStandardError = $StderrFile
+    }
+    $Process = Start-Process @RunOptions
+    $ExitCode = [int]$Process.ExitCode
+
+    $StdoutText = ""
+    $StderrText = ""
+    if (Test-Path -LiteralPath $StdoutFile) {
+        $StdoutText = [System.IO.File]::ReadAllText($StdoutFile, [System.Text.Encoding]::UTF8)
+    }
+    if (Test-Path -LiteralPath $StderrFile) {
+        $StderrText = [System.IO.File]::ReadAllText($StderrFile, [System.Text.Encoding]::UTF8)
+    }
+    $Separator = ""
+    if ($StdoutText.Length -gt 0 -and $StderrText.Length -gt 0 -and -not $StdoutText.EndsWith("`n")) {
+        $Separator = [Environment]::NewLine
+    }
+    $LogText = $StdoutText + $Separator + $StderrText
+    [System.IO.File]::WriteAllText($Log, $LogText, [System.Text.UTF8Encoding]::new($false))
+}
+finally {
     $env:TEMP = $PreviousTemp
     $env:TMP = $PreviousTmp
     $env:TMPDIR = $PreviousTmpDir
@@ -72,6 +80,7 @@ try {
     Remove-Item -LiteralPath $StdoutFile, $StderrFile -Force -ErrorAction SilentlyContinue
     Pop-Location
 }
-Write-Host ("测试结果: " + $Log)
+
+Write-Host ("Test log: " + $Log)
 Select-String -CaseSensitive -Path $Log -Pattern "Ran \d+ tests", "^OK$", "^FAILED", "^ERROR:", "^FAIL:" | ForEach-Object { $_.Line }
-if ($ExitCode -ne 0) { exit $ExitCode }
+exit $ExitCode
