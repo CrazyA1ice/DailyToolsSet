@@ -200,6 +200,26 @@ class PortablePreferencesTests(unittest.TestCase):
                 self.prefs.save({'workspaces': [entry]})
             self.assertEqual((self.root / 'data' / 'preferences.json').read_bytes(), before)
 
+    def test_workspace_resource_order_survives_roundtrip_and_zip(self):
+        resources = [
+            {'name': '论文', 'url': 'https://example.org/paper'},
+            {'name': '仓库', 'url': 'https://example.org/repo'},
+            {'name': '资料', 'url': 'https://example.org/docs'},
+        ]
+        record = {'name':'项目排序', 'description':'资源顺序保留',
+                  'members':[1,2], 'status':'active', 'links':resources}
+        self.prefs.save({'workspaces':[record]})
+        reopened = PreferencesStore(self.root / 'data' / 'preferences.json')
+        saved = reopened.get()['settings']['workspaces'][0]
+        self.assertEqual(saved['links'], resources)
+        archive = self.store.make_portable_backup()
+        try:
+            with zipfile.ZipFile(archive) as zipped:
+                settings = json.loads(zipped.read('data/preferences.json'))['settings']
+                self.assertEqual(settings['workspaces'][0]['links'], resources)
+        finally:
+            archive.unlink(missing_ok=True)
+
     def test_workspace_member_order_survives_reopen_and_backup(self):
         original = [{'name': '排序验证', 'description': '',
                      'members': [7, 3, 11, 2]}]

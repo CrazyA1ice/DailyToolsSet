@@ -151,6 +151,41 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('.workspace-member-list',self.css)
         self.assertIn('.workspace-nav',self.css)
 
+    def test_workspace_v44_status_counts_and_fast_switch_contract(self):
+        self.assertIn('function workspaceOverviewCounts(item)', self.js)
+        self.assertIn('function renderWorkspaceResources()', self.js)
+        self.assertIn('data-workspace-switch', self.js)
+        self.assertIn('id="workspaceSwitcher"', self.js)
+        self.assertIn('for="workspaceSwitcher"', self.js)
+        self.assertIn('item.members.map(id=>byId(id))', self.js)
+        self.assertIn('state.workspaces.some(item=>item.name===destination)', self.js)
+        self.assertIn('setView("workspace",destination)', self.js)
+        self.assertIn('workspace-overview-metrics', self.js)
+        self.assertIn('.workspace-overview-metrics', self.css)
+        self.assertIn('.workspace-quick-switch', self.css)
+
+    def test_workspace_v44_reorder_links_only_in_draft(self):
+        self.assertIn('function movedWorkspaceLinkItems(links,index,direction)', self.js)
+        self.assertIn('function moveWorkspaceDraftLink(index,direction)', self.js)
+        self.assertIn('data-workspace-link-move=', self.js)
+        self.assertIn('data-workspace-step="-1"', self.js)
+        self.assertIn('data-workspace-step="1"', self.js)
+        self.assertIn('workspaceDraftLinks=next;', self.js)
+        begin = self.js.index('function moveWorkspaceDraftLink(index,direction)')
+        end = self.js.index('function renderWorkspaceLinkEditor()', begin)
+        self.assertNotIn('persistProjectSettings()', self.js[begin:end])
+        self.assertIn('.workspace-link-order', self.css)
+
+    def test_workspace_v44_resources_remain_safe_external_links(self):
+        begin = self.js.index('function renderWorkspaceResources()')
+        end = self.js.index('function renderCrumb()', begin)
+        segment = self.js[begin:end]
+        self.assertIn('h(link.name)', segment)
+        self.assertIn('h(validWorkspaceUrl(link.url))', segment)
+        self.assertIn('target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer"',segment)
+        self.assertNotIn('fetch(', segment)
+        self.assertIn('box.classList.toggle("hidden",!item);', segment)
+
     def test_workspace_resource_editor_and_portable_schema(self):
         for widget in ('workspaceResources', 'workspaceStatus', 'workspaceLinkAdd',
                        'workspaceLinkList'):
