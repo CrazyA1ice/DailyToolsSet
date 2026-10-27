@@ -63,6 +63,58 @@ function savePreferences(){
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
 const state = {openingIds:new Set(),nodes:[],trash:[],recent:[], renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+
+/* V3.0 — Native browser history for modules and special views.
+   Search text is stored in the current tab's history.state, never in the URL. */
+let navigationReady=false;
+function routeFromLocation(){
+  const hash=window.location.hash;
+  if(!hash || hash==="#home")return {view:"all",id:null};
+  const match=/^#node\/([1-9]\d*)$/.exec(hash);
+  if(match){
+    const id=Number(match[1]);
+    return Number.isSafeInteger(id)?{view:"node",id}:{view:"all",id:null};
+  }
+  const view=hash.slice(1);
+  return ["favorites","recent","trash"].includes(view)?
+    {view,id:null}:{view:"all",id:null};
+}
+function routeUrl(view,id=null){
+  const suffix=view==="node"?`#node/${id}`:view==="all"?"":`#${view}`;
+  return window.location.pathname+window.location.search+suffix;
+}
+function navigationSnapshot(){
+  return {folderhubRoute:1,view:state.view,
+    id:state.view==="node"?state.selected:null,
+    search:state.search,renderLimit:state.renderLimit,
+    scrollY:Math.max(0,Math.round(window.scrollY||0))};
+}
+function rememberNavigation(){
+  if(!navigationReady)return;
+  window.history.replaceState(navigationSnapshot(),"",routeUrl(state.view,state.selected));
+}
+function restoredEntry(route){
+  const entry=window.history.state;
+  return entry?.folderhubRoute===1 && entry.view===route.view &&
+    (entry.id??null)===(route.id??null)?entry:null;
+}
+function restoreBrowserNavigation(){
+  if(!navigationReady)return;
+  const route=routeFromLocation(),saved=restoredEntry(route);
+  setView(route.view,route.id,{fromHistory:true,saved});
+  if(route.view!==state.view || (route.id??null)!==(state.selected??null))
+    window.history.replaceState(navigationSnapshot(),"",routeUrl(state.view,state.selected));
+}
+function startBrowserNavigation(){
+  if("scrollRestoration" in window.history)window.history.scrollRestoration="manual";
+  const route=routeFromLocation(),saved=restoredEntry(route);
+  navigationReady=true;
+  setView(route.view,route.id,{fromHistory:true,saved});
+  const preservedY=Number.isFinite(saved?.scrollY)?saved.scrollY:0;
+  window.history.replaceState({...navigationSnapshot(),scrollY:preservedY},"",
+    routeUrl(state.view,state.selected));
+}
+
 // The server is authoritative. localStorage is read ONLY to migrate a legacy browser once.
 let initialExpanded=null;
 let projectSettingsReady=false;
@@ -233,12 +285,26 @@ function ancestors(id) {
   while(current && !visited.has(current.id)){result.unshift(current);visited.add(current.id);current=byId(current.parent_id)}
   return result;
 }
-function setView(view,id=null){
+function setView(view,id=null,{fromHistory=false,saved=null}={}){
+  if(!fromHistory)rememberNavigation();
   closeCardMenu();exitSelectMode();
-  state.view=view;state.selected=id;
-  state.search="";state.searchKeyboardIndex=-1;state.renderLimit=100;$("#search").value="";
+  if(view==="node"&&!byId(id)){view="all";id=null}
+  state.view=view;state.selected=view==="node"?id:null;
+  state.search=fromHistory&&typeof saved?.search==="string"?saved.search.slice(0,300):"";
+  state.searchKeyboardIndex=-1;
+  state.renderLimit=fromHistory&&Number.isSafeInteger(saved?.renderLimit)?
+    Math.min(20000,Math.max(100,saved.renderLimit)):100;
+  $("#search").value=state.search;
   if(view==="node"&&id!==null)expandLineage(id);
   render();
+  if(!navigationReady)return;
+  if(fromHistory){
+    const y=Number.isFinite(saved?.scrollY)?Math.max(0,Math.min(10000000,saved.scrollY)):0;
+    requestAnimationFrame(()=>window.scrollTo({top:y,behavior:"instant"}));
+  }else{
+    window.history.pushState({...navigationSnapshot(),scrollY:0},"",routeUrl(state.view,state.selected));
+    window.scrollTo({top:0,behavior:"instant"});
+  }
 }
 
 function locateNode(id){
@@ -249,7 +315,7 @@ function locateNode(id){
   if(index<0)return;
   const limit=Math.ceil((index+1)/100)*100;
   setView(parent===null?"all":"node",parent);
-  if(limit>state.renderLimit){state.renderLimit=limit;render(true)}
+  if(limit>state.renderLimit){state.renderLimit=limit;render(true);rememberNavigation()}
   requestAnimationFrame(()=>{
     const card=document.getElementById(`folderhub-entry-${id}`);
     if(!card)return;
@@ -380,7 +446,10 @@ function trashCard(item){
   </article>`;
 }
 function render(skipNav=false){
-  if(state.view==="node" && !byId(state.selected)){state.view="all";state.selected=null}
+  if(state.view==="node" && !byId(state.selected)){
+    state.view="all";state.selected=null;
+    if(navigationReady)window.history.replaceState(navigationSnapshot(),"",routeUrl("all"));
+  }
   if(!skipNav)renderNav();
   renderCrumb();
   const trashView=state.view==="trash"&&!state.search.trim();
@@ -683,7 +752,7 @@ async function act(action,id){
     case "load-more":{
       const previous=state.visibleIds.length;
       state.renderLimit+=100;
-      render(true);
+      render(true);rememberNavigation();
       const firstNew=state.visibleIds[previous];
       if(firstNew!==undefined)
         document.getElementById(`folderhub-entry-${firstNew}`)?.querySelector(".card-primary")?.focus({preventScroll:true});
@@ -974,6 +1043,7 @@ function fallbackCopy(url){const input=document.createElement("textarea");input.
 
 function bind(){
   bindSorting();
+  window.addEventListener("popstate",restoreBrowserNavigation);
   $("#selectModeBtn").addEventListener("click",()=>{if(state.batchBusy)return;state.selectMode=!state.selectMode;state.selectedIds.clear();closeCardMenu();render(true)});
   $("#bulkCancel").addEventListener("click",()=>{exitSelectMode();render(true)});
   $("#bulkSelectAll").addEventListener("click",()=>{if(state.batchBusy)return;const ids=state.visibleIds;if(ids.length>200){toast("已显示模块超过 200 项，请缩小搜索范围",true);return}state.selectedIds=new Set(ids);render(true)});
@@ -1007,12 +1077,12 @@ function bind(){
   $("#sectionOperations").addEventListener("click",e=>{const btn=e.target.closest("[data-action]");if(btn)act(btn.dataset.action,state.selected)});
   $("#addRoot").addEventListener("click",()=>editDialog(null,null));
   $("#newBtn").addEventListener("click",()=>editDialog());
-  $("#search").addEventListener("input",e=>{closeCardMenu();state.selectedIds.clear();state.search=e.target.value;state.searchKeyboardIndex=-1;state.renderLimit=100;render(true)});
+  $("#search").addEventListener("input",e=>{closeCardMenu();state.selectedIds.clear();state.search=e.target.value;state.searchKeyboardIndex=-1;state.renderLimit=100;render(true);rememberNavigation()});
   $("#search").addEventListener("keydown",async e=>{
     if(!state.search.trim())return;
     if(e.key==="Escape"){
       e.preventDefault();e.stopPropagation();state.search="";state.searchKeyboardIndex=-1;
-      $("#search").value="";state.renderLimit=100;render(true);return;
+      $("#search").value="";state.renderLimit=100;render(true);rememberNavigation();return;
     }
     if(!["ArrowDown","ArrowUp","Enter"].includes(e.key))return;
     const results=searchAll(state.search);
@@ -1028,7 +1098,7 @@ function bind(){
       old<0?results.length-1:(old-1+results.length)%results.length;
     if(state.searchKeyboardIndex>=state.renderLimit)
       state.renderLimit=Math.ceil((state.searchKeyboardIndex+1)/100)*100;
-    render(true);
+    render(true);rememberNavigation();
     document.getElementById(`folderhub-entry-${results[state.searchKeyboardIndex].id}`)?.scrollIntoView({block:"nearest"});
   });
   $("#layoutBtn").addEventListener("click",()=>{
@@ -1095,6 +1165,7 @@ async function init(){
     const c=await api("/api/config");state.token=c.token;
     await loadProjectSettings();
     await refresh();
+    startBrowserNavigation();
     if(c.platform!=="win32")toast("当前非 Windows 系统，浏览和打开资源管理器功能不可用",true);
   }
   catch(e){toast(e.message,true);$("#entries").innerHTML=`<div class="empty-state"><h3>本地服务无法连接</h3><p>${h(e.message)}</p></div>`}

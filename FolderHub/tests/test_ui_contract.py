@@ -207,6 +207,25 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn(".entry-card.is-located",self.css)
         self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
 
+    def test_browser_history_and_deep_link_navigation(self):
+        self.assertIn('function routeFromLocation()',self.js)
+        self.assertIn('function routeUrl(view,id=null)',self.js)
+        self.assertIn('function navigationSnapshot()',self.js)
+        self.assertIn('function rememberNavigation()',self.js)
+        self.assertIn('function startBrowserNavigation()',self.js)
+        self.assertIn('function restoreBrowserNavigation()',self.js)
+        self.assertIn('window.addEventListener("popstate",restoreBrowserNavigation)',self.js)
+        self.assertIn('startBrowserNavigation();',self.js)
+        self.assertIn('window.history.pushState(',self.js)
+        self.assertIn('window.history.replaceState(',self.js)
+        self.assertIn('window.history.scrollRestoration="manual"',self.js)
+        self.assertIn('if(view==="node"&&!byId(id)){view="all";id=null}',self.js)
+        self.assertIn('if(!fromHistory)rememberNavigation()',self.js)
+        self.assertIn('state.search=fromHistory&&typeof saved?.search==="string"',self.js)
+        self.assertIn('render(true);rememberNavigation();',self.js)
+        self.assertNotIn('encodeURIComponent(state.search)',self.js)
+        self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)
