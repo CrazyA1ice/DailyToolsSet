@@ -449,9 +449,15 @@ class WindowsTray:
     def _set_hotkey(self,choice):
         previous=self.hotkey_choice
         if choice==previous and self.hotkey_registered:return
-        self._remove_hotkey()
+        # Persist before releasing the currently working registration.
         save_hotkey(self.controller.hotkey_file,choice)
-        self._register_hotkey()
+        self._remove_hotkey()
+        try:
+            self._register_hotkey()
+        except Exception:
+            save_hotkey(self.controller.hotkey_file,previous)
+            self._register_hotkey()
+            raise
         if not self.hotkey_registered:
             save_hotkey(self.controller.hotkey_file,previous)
             self._register_hotkey()
