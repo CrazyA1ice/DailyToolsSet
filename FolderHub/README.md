@@ -679,3 +679,13 @@ powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1
 - **资源安全范围不变**：Everything 仍仅手动触发，最多返回30项；实际导入仍走原有文件/目录白名单与编辑确认，不会自动打开或添加文件。取消的是浏览器请求与前端显示，**已开始运行的服务端 ES 子进程可能继续执行，最多受原有4秒超时限制**。
 - **静默启动日志归位**：`start_silent.pyw` 捕捉到错误时，将诊断写入 `FolderHub/data/startup-error.log`（Git 忽略），不再写到用户主目录 `FolderHub-startup-error.log`。过去生成的旧日志不会擅自删除。
 - **测试**：增加搜索过期响应静态契约与 Node.js 异步模拟测试（Node.js 未安装则跳过，不是运行依赖），以及静默启动异常的便携日志回归。运行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`，测试日志及临时目录仍留在 `FolderHub/test-results/`、`FolderHub/tmp/`。Windows 真机还应确认 Everything 运行中的连续搜索、关闭重开，以及异常日志目录权限。
+
+## V5.6：全局快捷菜单的有界数据读取
+
+这轮只优化既有全局快捷键弹出的导航菜单，不增加新的快捷键、栏目或启动方式：
+
+- **从整树改为少量查询**：后端新增 `Store.quick_menu_nodes()`，按文件夹、文件、网页三种资源类型分别读取**最多 8 条已绑定记录**；使用 `(resource_kind, sort_order, id)` SQLite 索引并按原有全局排序组合。构建快捷菜单时最多处理 24 条候选，最终仍只显示原有的最多 8 个资源快捷项和 8 个工作区。
+- **减少独立服务模式的网络与 JSON 负担**：新增仅本机访问的只读 `GET /api/quick-menu`，一个响应直接返回不超过 24 条最小资源元数据和 8 个工作区名称，替代此前每次分别请求完整 `/api/nodes` 与 `/api/preferences`。托盘仍保留原有 `/api/config` 身份确认，最终打开仍通过受授权的模块 ID 接口。
+- **保护路径隐私与兼容性**：新接口不包含真实文件夹路径或网页目标 URL，只提供经检查已绑定的 `has_target` 标记；不会预打开资源。托盘连接仍运行 V5.5 或更老版本的独立服务时，如果新接口返回 404，则回退到旧读取方式；其他 HTTP 错误不静默吞掉。
+- **现有行为不变**：原本资源类型预留规则、排序、Windows 单全局快捷键及“显式点击才打开资源”的规则全部保留。首次升级只增加 SQLite 索引，不修改、迁移或删除任何用户导航记录。
+- **回归验收**：测试包含 1,600 个文件夹与混合文档、网页，核对新旧菜单结果相同、最多 24 条候选、最小接口不泄露路径、旧服务兼容及普通 GET 不写入数据。可运行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`，日志仍位于 `FolderHub/test-results/`。性能收益来自有界 SQL 读取与减少响应大小；**尚未在用户 Windows 设备上进行真实耗时基准测试**。
