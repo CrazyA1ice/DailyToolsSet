@@ -830,3 +830,66 @@ class TagMaintenanceTests(unittest.TestCase):
         self.assertEqual(call("/api/tags/rename",{"source":"整理","target":"归档"},False)[0],403)
         self.assertEqual(call("/api/tags/rename",{"source":"整理","target":"归档"})[0],200)
         self.assertIn("归档",self.tags(self.a))
+
+
+class FrequentUsageTests(unittest.TestCase):
+    """Frequency-ranked folder shortcuts reuse the existing bounded visit table."""
+
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store=app.Store(Path(self.tmp.name)/"folderhub.db")
+        root=self.store.create({"title":"项目","node_type":"root"})
+        self.a=self.store.create({"title":"A","node_type":"leaf","parent_id":root,"folder_path":r"D:\\A"})
+        self.b=self.store.create({"title":"B","node_type":"leaf","parent_id":root,"folder_path":r"D:\\B"})
+        self.c=self.store.create({"title":"C","node_type":"leaf","parent_id":root,"folder_path":r"D:\\C"})
+
+    def test_count_ranking_is_distinct_from_recency_and_pinning(self):
+        for _ in range(5):
+            self.store.record_open(self.a)
+        for _ in range(3):
+            self.store.record_open(self.b)
+        self.store.record_open(self.c)
+        self.assertEqual([row["node_id"] for row in self.store.frequent()],
+                         [self.a,self.b,self.c])
+        self.assertEqual([row["open_count"] for row in self.store.frequent()],
+                         [5,3,1])
+        self.assertEqual([row["node_id"] for row in self.store.recent()],
+                         [self.c,self.b,self.a])
+        self.store.set_recent_pin(self.c,True)
+        self.assertEqual(self.store.frequent()[0]["node_id"],self.a)
+        self.assertEqual([row["node_id"] for row in self.store.frequent(limit=1)],[self.a])
+
+    def test_bad_limits_deletion_and_history_clear(self):
+        for bad in (True,False,0,-1,201,"30",None):
+            with self.subTest(bad=bad),self.assertRaises(app.UserError):
+                self.store.frequent(bad)
+        self.store.record_open(self.a)
+        self.store.record_open(self.b)
+        self.store.delete(self.a)
+        self.assertEqual([row["node_id"] for row in self.store.frequent()],[self.b])
+        self.store.clear_recent()
+        self.assertEqual(self.store.frequent(),[])
+
+    def test_read_only_http_endpoint(self):
+        server=app.FolderServer(("127.0.0.1",0),self.store)
+        worker=threading.Thread(target=server.serve_forever,daemon=True)
+        worker.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.store.record_open(self.a)
+        conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=5)
+        conn.request("GET","/api/frequent",
+                     headers={"Host":f"127.0.0.1:{server.server_port}"})
+        response=conn.getresponse()
+        self.assertEqual(response.status,200)
+        self.assertEqual(json.loads(response.read())["items"][0]["node_id"],self.a)
+        conn.close()
+        conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=5)
+        conn.request("POST","/api/frequent",body="{}",headers={
+            "Host":f"127.0.0.1:{server.server_port}",
+            "X-FolderHub-Token":server.token,"Content-Type":"application/json"})
+        response=conn.getresponse()
+        self.assertEqual(response.status,405)
+        response.read()
+        conn.close()
