@@ -1227,6 +1227,57 @@ async function deleteWorkspace(index){
   if(state.view==="workspace"&&state.activeWorkspace===item.name)setView("all");
   render();toast("工作区已删除，文件夹和模块均未删除");
 }
+/* V4.2 quick-add reuses the saved workspace IDs; it never accepts paths. */
+let workspacePickerNodeId=null;
+function closeWorkspacePicker(){
+  if(workspaceSaving)return;
+  $("#workspacePickerLayer").classList.add("hidden");
+  workspacePickerNodeId=null;
+}
+function openWorkspacePicker(nodeId){
+  const node=byId(nodeId);
+  if(!node||workspaceSaving)return;
+  closeCardMenu();
+  if(!state.workspaces.length){
+    openWorkspaceDialog(-1,[nodeId]);
+    toast("尚无工作区，已为你预选该模块，请先新建工作区");
+    return;
+  }
+  workspacePickerNodeId=nodeId;
+  $("#workspacePickerSummary").textContent="将「"+node.title+"」加入哪个项目工作区？仅增加模块引用，不修改电脑中的文件。";
+  $("#workspacePickerList").innerHTML=state.workspaces.map((item,index)=>{
+    const exists=item.members.includes(nodeId),full=item.members.length>=30;
+    const status=exists?"已关联":full?"已满（30项）":item.members.length+"/30项";
+    return '<button type="button" class="workspace-picker-option" data-workspace-append="'+index+'" '+(exists||full?"disabled":"")+'>'
+      +'<span>'+h(item.name)+'</span><small>'+h(status)+'</small></button>';
+  }).join("");
+  $("#workspacePickerLayer").classList.remove("hidden");
+  $("#workspacePickerList").querySelector("button:not(:disabled)")?.focus()
+    ||$("#workspacePickerClose").focus();
+}
+async function addNodeToWorkspace(index){
+  const nodeId=workspacePickerNodeId,item=state.workspaces[index];
+  if(!item||!byId(nodeId)||workspaceSaving||item.members.includes(nodeId)||item.members.length>=30)return;
+  const before=state.workspaces;
+  const after=before.map((w,i)=>i===index?
+    {name:w.name,description:w.description,members:[...w.members,nodeId]}:
+    {name:w.name,description:w.description,members:[...w.members]});
+  workspaceSaving=true;
+  state.workspaces=after;
+  try{
+    if(!await persistProjectSettings()){
+      state.workspaces=before;
+      toast("加入工作区失败，原配置未变更",true);return;
+    }
+    workspaceSaving=false;
+    closeWorkspacePicker();
+    render();
+    toast("已将模块加入「"+item.name+"」");
+  }catch(error){
+    state.workspaces=before;
+    toast("加入工作区失败："+error.message,true);
+  }finally{workspaceSaving=false;render()}
+}
 /* V3.8 — named groups of existing linked modules; nothing touches real folders. */
 function validateFolderGroupName(value){
   if(typeof value!=="string"||!value.trim()||value.trim().length>40||
@@ -1439,7 +1490,7 @@ function openCardMenu(id,x,y){
   const actions=[];
   if(n.node_type==="leaf"||n.folder_path)actions.push(["open","在资源管理器中打开"]);
   if(n.node_type!=="leaf")actions.push(["enter","进入模块"]);
-  actions.push(["edit","编辑模块"],["favorite",n.favorite?"取消收藏":"添加到收藏"]);
+  actions.push(["edit","编辑模块"],["favorite",n.favorite?"取消收藏":"添加到收藏"],["workspace-add","加入项目工作区…"]);
   if(n.node_type!=="leaf")actions.push(["child","新建子模块"]);
   if(n.folder_path)actions.push(["copy-path","复制文件夹路径"]);
   actions.push(["delete","移除导航记录"]);
@@ -1478,6 +1529,7 @@ async function copyFolderPath(id){
 async function contextAction(action,id){
   const n=byId(id);closeCardMenu();if(!n)return;
   if(action==="copy-path")await copyFolderPath(id);
+  else if(action==="workspace-add")openWorkspacePicker(id);
   else await act(action,id);
 }
 async function exportBackup(){
@@ -1964,6 +2016,23 @@ function bind(){
     if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
     else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
   });
+  $("#workspacePickerClose").addEventListener("click",closeWorkspacePicker);
+  $("#workspacePickerCancel").addEventListener("click",closeWorkspacePicker);
+  $("#workspacePickerLayer").addEventListener("click",e=>{if(e.target===$("#workspacePickerLayer"))closeWorkspacePicker()});
+  $("#workspacePickerList").addEventListener("click",e=>{
+    const btn=e.target.closest("[data-workspace-append]");
+    if(btn&&!btn.disabled)addNodeToWorkspace(Number(btn.dataset.workspaceAppend));
+  });
+  $("#workspacePickerLayer").addEventListener("keydown",e=>{
+    if(e.key==="Escape"){e.preventDefault();e.stopPropagation();closeWorkspacePicker();return}
+    if(e.key!=="Tab")return;
+    const controls=[...$("#workspacePickerLayer").querySelectorAll("button")]
+      .filter(el=>!el.disabled&&el.offsetParent!==null);
+    if(!controls.length)return;
+    const first=controls[0],last=controls.at(-1);
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
+  });
   $("#workspaceClose").addEventListener("click",closeWorkspaceDialog);
   $("#workspaceCancel").addEventListener("click",closeWorkspaceDialog);
   $("#workspaceLayer").addEventListener("click",e=>{if(e.target===$("#workspaceLayer"))closeWorkspaceDialog()});
@@ -2110,6 +2179,9 @@ function bind(){
       return;
     }
     if(quickPalette.open)return;
+    if(e.key==="Escape"&&!$("#workspacePickerLayer").classList.contains("hidden")){
+      closeWorkspacePicker();return;
+    }
     if(e.key==="Escape"&&!$("#workspaceLayer").classList.contains("hidden")){
       closeWorkspaceDialog();return;
     }
