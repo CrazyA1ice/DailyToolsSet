@@ -14,7 +14,9 @@ import os
 from pathlib import Path
 import sys
 from threading import Thread
-from urllib.request import urlopen
+from urllib.parse import quote
+from urllib.request import urlopen, Request
+from urllib.error import HTTPError, URLError
 import webbrowser
 
 import app
@@ -24,6 +26,12 @@ SINGLE_INSTANCE = "Local\\DailyToolsSet.FolderHub.Tray.V1"
 MENU_OPEN = 1001
 MENU_RESTART = 1002
 MENU_EXIT = 1003
+MENU_QUICK = 1004
+QUICK_ENTRY_BASE = 2000
+HOTKEY_ID = 46
+HOTKEY_MODIFIERS = 0x0001 | 0x0002 | 0x0004  # Alt + Ctrl + Shift
+HOTKEY_VK = ord("F")
+HOTKEY_LABEL = "Ctrl+Alt+Shift+F"
 
 
 def server_is_folderhub(port=PORT):
@@ -35,6 +43,52 @@ def server_is_folderhub(port=PORT):
                     and payload.get("platform") == "win32")
     except (OSError, ValueError, TimeoutError):
         return False
+
+
+def safe_menu_title(value, limit=46):
+    """Never treat saved resource names as Win32 menu mnemonics or new lines."""
+    text = "".join(char if char.isprintable() and char not in "\r\n" else " "
+                   for char in str(value or ""))
+    text = " ".join(text.split()).replace("&", "&&")
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def build_quick_entries(nodes, recent, workspaces):
+    """Bounded, path-free native menu contents from trusted local API records."""
+    by_id = {node["id"]: node for node in nodes
+             if type(node) is dict and type(node.get("id")) is int}
+    favorites = [node for node in nodes
+                 if type(node) is dict and node.get("favorite") and
+                 node.get("folder_path") and type(node.get("id")) is int][:8]
+    favorite_ids = {node["id"] for node in favorites}
+    recent_nodes, seen = [], set(favorite_ids)
+    for row in recent:
+        ident = row.get("node_id") if type(row) is dict else None
+        node = by_id.get(ident)
+        if node and node.get("folder_path") and ident not in seen:
+            recent_nodes.append(node)
+            seen.add(ident)
+        if len(recent_nodes) >= 8:
+            break
+    entries = []
+    if favorites:
+        entries.append({"kind": "heading", "label": "★ 收藏目录"})
+        entries.extend({"kind": "folder", "target": n["id"],
+                        "label": safe_menu_title(n.get("title"))}
+                       for n in favorites)
+    if recent_nodes:
+        entries.append({"kind": "heading", "label": "◷ 最近打开"})
+        entries.extend({"kind": "folder", "target": n["id"],
+                        "label": safe_menu_title(n.get("title"))}
+                       for n in recent_nodes)
+    if type(workspaces) is list and workspaces:
+        entries.append({"kind": "heading", "label": "▣ 项目工作区"})
+        entries.extend({"kind": "workspace", "target": workspace["name"],
+                        "label": safe_menu_title(workspace["name"])}
+                       for workspace in workspaces[:8]
+                       if type(workspace) is dict and type(workspace.get("name")) is str
+                       and workspace["name"])
+    return entries
 
 
 class ServiceController:
@@ -55,6 +109,57 @@ class ServiceController:
     def status(self):
         return "已连接独立运行的服务" if self.external else (
             "运行中" if self.server is not None else "已停止")
+
+    def quick_entries(self):
+        if self.server is not None:
+            store = self.server.store
+            return build_quick_entries(
+                store.all(), store.recent(),
+                store.preferences.get()["settings"]["workspaces"])
+        # The tray must not take ownership of or restart an external service.
+        if not self.external:
+            raise RuntimeError("FolderHub 本地服务尚未启动")
+        if not server_is_folderhub(self.port):
+            raise RuntimeError("独立 FolderHub 服务未响应，请检查服务状态")
+        def get(path):
+            with urlopen(f"{self.url.rstrip('/')}{path}", timeout=1.5) as reply:
+                return json.load(reply)
+        return build_quick_entries(
+            get("/api/nodes")["nodes"],
+            get("/api/recent")["items"],
+            get("/api/preferences")["settings"]["workspaces"])
+
+    def open_quick_folder(self, node_id):
+        """Use the existing authenticated node ID endpoint, never shell a path."""
+        if type(node_id) is not int or node_id <= 0:
+            raise ValueError("模块 ID 无效")
+        with urlopen(f"{self.url.rstrip('/')}/api/config", timeout=1.5) as reply:
+            config = json.load(reply)
+        if not (type(config) is dict and config.get("platform") == "win32" and
+                isinstance(config.get("token"), str) and config["token"]):
+            raise RuntimeError("未能确认 FolderHub 本地服务")
+        request = Request(
+            f"{self.url.rstrip('/')}/api/nodes/{node_id}/open", data=b"{}",
+            headers={"Content-Type": "application/json",
+                     "X-FolderHub-Token": config["token"]},
+            method="POST")
+        try:
+            with urlopen(request, timeout=3) as reply:
+                result = json.load(reply)
+        except HTTPError as error:
+            try:
+                detail = json.load(error).get("error", str(error))
+            except (ValueError, OSError):
+                detail = str(error)
+            raise RuntimeError(detail) from error
+        if not result.get("ok"):
+            raise RuntimeError("文件夹打开请求未成功")
+        return result
+
+    def open_quick_workspace(self, name):
+        if type(name) is not str or not name:
+            raise ValueError("工作区名称无效")
+        webbrowser.open(self.url + "#workspace/" + quote(name, safe=""))
 
     def start(self):
         if self.server is not None:
@@ -104,6 +209,8 @@ class WindowsTray:
     WM_LBUTTONDBLCLK = 0x0203
     WM_RBUTTONUP = 0x0205
     WM_CONTEXTMENU = 0x007B
+    WM_HOTKEY = 0x0312
+    MOD_NOREPEAT = 0x4000
     NIM_ADD = 0
     NIM_DELETE = 2
     NIF_MESSAGE = 1
@@ -120,6 +227,7 @@ class WindowsTray:
         self._setup_windows_types()
         self.hwnd = None
         self.icon_added = False
+        self.hotkey_registered = False
         self._callback = self.WNDPROC(self._window_proc)  # Hold callback for whole loop.
         self.taskbar_created = self.user32.RegisterWindowMessageW("TaskbarCreated")
 
@@ -181,6 +289,10 @@ class WindowsTray:
         u.SetForegroundWindow.argtypes = [wintypes.HWND]
         u.PostMessageW.argtypes = [
             wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        u.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+        u.RegisterHotKey.restype = wintypes.BOOL
+        u.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+        u.UnregisterHotKey.restype = wintypes.BOOL
         s.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
         s.Shell_NotifyIconW.restype = wintypes.BOOL
         k.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
@@ -205,6 +317,19 @@ class WindowsTray:
             raise OSError("无法在 Windows 系统托盘中创建 FolderHub 图标")
         self.icon_added = True
 
+    def _register_hotkey(self):
+        # Failure must not prevent the tray and ordinary navigation from working.
+        self.hotkey_registered = bool(self.user32.RegisterHotKey(
+            self.hwnd, HOTKEY_ID, HOTKEY_MODIFIERS | self.MOD_NOREPEAT, HOTKEY_VK))
+        if not self.hotkey_registered:
+            print("[FolderHub] global shortcut unavailable (already in use or blocked)",
+                  file=sys.stderr)
+
+    def _remove_hotkey(self):
+        if self.hotkey_registered and self.hwnd:
+            self.user32.UnregisterHotKey(self.hwnd, HOTKEY_ID)
+            self.hotkey_registered = False
+
     def _remove_icon(self):
         if self.icon_added and self.hwnd:
             self.shell32.Shell_NotifyIconW(self.NIM_DELETE, ctypes.byref(self._icon_data()))
@@ -221,6 +346,9 @@ class WindowsTray:
             self.user32.AppendMenuW(menu, 0x0001 | 0x0002, 0, self.controller.status)
             self.user32.AppendMenuW(menu, 0x0800, 0, None)  # MF_SEPARATOR
             self.user32.AppendMenuW(menu, 0, MENU_OPEN, "打开 FolderHub")
+            self.user32.AppendMenuW(menu, 0, MENU_QUICK,
+                                    "快捷导航 (" + HOTKEY_LABEL + ")"
+                                    if self.hotkey_registered else "快捷导航（快捷键不可用）")
             self.user32.AppendMenuW(menu, 0x0001 if self.controller.external else 0,
                                     MENU_RESTART, "重启服务")
             self.user32.AppendMenuW(menu, 0x0800, 0, None)
@@ -235,6 +363,8 @@ class WindowsTray:
             self.user32.PostMessageW(self.hwnd, 0, 0, 0)
             if selection == MENU_OPEN:
                 webbrowser.open(self.controller.url)
+            elif selection == MENU_QUICK:
+                self._show_quick_menu()
             elif selection == MENU_RESTART and not self.controller.external:
                 try:
                     self.controller.restart()
@@ -245,8 +375,60 @@ class WindowsTray:
         finally:
             self.user32.DestroyMenu(menu)
 
+    def _show_quick_menu(self):
+        try:
+            entries = self.controller.quick_entries()
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
+            self._message(f"无法读取快捷入口：{error}")
+            return
+        menu = self.user32.CreatePopupMenu()
+        if not menu:
+            return
+        lookup = {}
+        try:
+            self.user32.AppendMenuW(menu, 0x0001 | 0x0002, 0,
+                                    "FolderHub · 快捷导航")
+            self.user32.AppendMenuW(menu, 0x0800, 0, None)
+            for item in entries:
+                if item["kind"] == "heading":
+                    if lookup:
+                        self.user32.AppendMenuW(menu, 0x0800, 0, None)
+                    self.user32.AppendMenuW(menu, 0x0001 | 0x0002, 0, item["label"])
+                    continue
+                command = QUICK_ENTRY_BASE + len(lookup)
+                lookup[command] = item
+                self.user32.AppendMenuW(menu, 0, command, item["label"])
+            if not lookup:
+                self.user32.AppendMenuW(menu, 0x0001 | 0x0002, 0,
+                                        "暂无可用的收藏、最近目录或工作区")
+            self.user32.AppendMenuW(menu, 0x0800, 0, None)
+            self.user32.AppendMenuW(menu, 0, MENU_OPEN, "打开完整工作台…")
+            position = wintypes.POINT()
+            self.user32.GetCursorPos(ctypes.byref(position))
+            self.user32.SetForegroundWindow(self.hwnd)
+            choice = self.user32.TrackPopupMenu(
+                menu, 0x0100 | 0x0002, position.x, position.y, 0,
+                self.hwnd, None)
+            self.user32.PostMessageW(self.hwnd, 0, 0, 0)
+            if choice == MENU_OPEN:
+                webbrowser.open(self.controller.url)
+            elif choice in lookup:
+                selected = lookup[choice]
+                try:
+                    if selected["kind"] == "folder":
+                        self.controller.open_quick_folder(selected["target"])
+                    elif selected["kind"] == "workspace":
+                        self.controller.open_quick_workspace(selected["target"])
+                except (OSError, ValueError, RuntimeError, URLError) as error:
+                    self._message(f"快捷入口打开失败：{error}")
+        finally:
+            self.user32.DestroyMenu(menu)
+
     def _window_proc(self, hwnd, msg, wparam, lparam):
         try:
+            if msg == self.WM_HOTKEY and wparam == HOTKEY_ID:
+                self._show_quick_menu()
+                return 0
             if msg == self.WM_TRAY:
                 if lparam == self.WM_LBUTTONDBLCLK:
                     webbrowser.open(self.controller.url)
@@ -289,6 +471,7 @@ class WindowsTray:
         try:
             self.controller.start()
             self._add_icon()
+            self._register_hotkey()
             if open_browser:
                 webbrowser.open(self.controller.url)
             message = wintypes.MSG()
@@ -301,6 +484,7 @@ class WindowsTray:
                 u.TranslateMessage(ctypes.byref(message))
                 u.DispatchMessageW(ctypes.byref(message))
         finally:
+            self._remove_hotkey()
             self._remove_icon()
             self.controller.stop()
             u.DestroyWindow(self.hwnd)
