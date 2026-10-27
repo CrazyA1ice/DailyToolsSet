@@ -938,6 +938,29 @@ class FolderGroupOpenTests(unittest.TestCase):
             with self.subTest(name=name),self.assertRaises(app.UserError):
                 self.store.open_folder_group(name)
 
+    def test_second_group_open_request_is_rejected_while_busy(self):
+        server=app.FolderServer(("127.0.0.1",0),self.store)
+        thread=threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        def post():
+            conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=5)
+            headers={"Host":f"127.0.0.1:{server.server_port}",
+                     "Content-Type":"application/json",
+                     "X-FolderHub-Token":server.token}
+            conn.request("POST","/api/groups/open",json.dumps({"name":"量化研究"}),headers)
+            resp=conn.getresponse();status=resp.status;payload=json.loads(resp.read())
+            conn.close();return status,payload
+        with (server._group_open_lock,
+              patch.object(app,"open_in_explorer",return_value=None) as launched):
+            status,payload=post()
+            self.assertEqual(status,400)
+            self.assertIn("正在打开",payload["error"])
+            launched.assert_not_called()
+        with patch.object(app,"open_in_explorer",return_value=None):
+            self.assertEqual(post()[0],200)
+
     def test_group_endpoint_is_authenticated_and_rejects_raw_paths(self):
         server=app.FolderServer(("127.0.0.1",0),self.store)
         thread=threading.Thread(target=server.serve_forever,daemon=True)

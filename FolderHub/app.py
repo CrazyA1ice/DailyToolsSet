@@ -11,7 +11,7 @@ import hashlib
 import re
 import shutil
 import tempfile
-from threading import RLock
+from threading import Lock, RLock
 from time import monotonic
 import ntpath
 import os
@@ -967,6 +967,7 @@ class FolderServer(ThreadingHTTPServer):
         self.store = store
         self.token = secrets.token_urlsafe(32)
         self._backup_ticket_lock = RLock()
+        self._group_open_lock = Lock()
         self._backup_ticket = None
         self._backup_ticket_until = 0.0
 
@@ -1099,7 +1100,13 @@ class Handler(BaseHTTPRequestHandler):
             if path=="/api/groups/open":
                 if method=="POST":
                     data=self.request_json()
-                    return self.reply(200,self.server.store.open_folder_group(data.get("name")))
+                    if not self.server._group_open_lock.acquire(blocking=False):
+                        raise UserError("已有工作组正在打开，请完成后再尝试")
+                    try:
+                        result=self.server.store.open_folder_group(data.get("name"))
+                    finally:
+                        self.server._group_open_lock.release()
+                    return self.reply(200,result)
                 return self.reply(405,{"error":"不支持的请求方法"})
             if path=="/api/frequent":
                 if method=="GET":
