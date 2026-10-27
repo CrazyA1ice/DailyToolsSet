@@ -259,6 +259,19 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('.tag-choice.active',self.css)
         self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
 
+    def test_tag_maintenance_controls_and_api_calls(self):
+        self.assertIn('id="bulkTagAdd"',self.html)
+        self.assertIn('id="bulkTagRemove"',self.html)
+        self.assertIn('function parseBulkTags(text)',self.js)
+        self.assertIn('async function batchTags(action)',self.js)
+        self.assertIn('async function renameCurrentTag()',self.js)
+        self.assertIn('data-tag-rename="1"',self.js)
+        self.assertIn('"/api/tags/batch"',self.js)
+        self.assertIn('"/api/tags/rename"',self.js)
+        self.assertIn('state.activeTag=target',self.js)
+        self.assertIn('bulkTagAdd","bulkTagRemove"',self.js)
+        self.assertIn('.tag-filters .tag-manage',self.css)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)

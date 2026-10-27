@@ -392,6 +392,8 @@ function renderTagFilters(){
   }
   box.innerHTML=`<button type="button" class="tag-choice ${state.activeTag?"":"active"}" data-tag-filter="" aria-pressed="${!state.activeTag}">全部标签</button>`+
     subset.map(([tag,n])=>`<button type="button" class="tag-choice ${state.activeTag===tag?"active":""}" data-tag-filter="${h(tag)}" aria-pressed="${state.activeTag===tag}">⌗ ${h(tag)} <span>${n}</span></button>`).join("");
+  if(state.activeTag)
+    box.insertAdjacentHTML("beforeend",'<button type="button" class="tag-choice tag-manage" data-tag-rename="1" title="重命名或合并所选标签">✎ 重命名/合并</button>');
   if(ordered.length>subset.length)box.insertAdjacentHTML("beforeend",'<span class="tag-overflow">其余标签可通过搜索查找</span>');
 }
 function card(n,reorderable=false,keyboardActive=false){
@@ -819,9 +821,55 @@ function updateBatchBar(){
   $("#bulkCount").textContent=`已选择 ${count} 项`;
   $("#selectModeBtn").setAttribute("aria-pressed",String(state.selectMode));
   $("#selectModeBtn").textContent=state.selectMode?"✓ 退出多选":"☑ 多选";
-  for(const id of ["bulkFavorite","bulkUnfavorite","bulkDelete"]){$("#"+id).disabled=state.batchBusy||count===0}
+  for(const id of ["bulkFavorite","bulkUnfavorite","bulkTagAdd","bulkTagRemove","bulkDelete"]){$("#"+id).disabled=state.batchBusy||count===0}
   $("#bulkSelectAll").disabled=state.batchBusy||state.visibleIds.length===0;
   $("#bulkCancel").disabled=state.batchBusy;
+}
+function parseBulkTags(text){
+  const tags=String(text??"").split(/[,，;；\n]+/).map(s=>s.trim()).filter(Boolean);
+  if(!tags.length)throw new Error("请输入至少一个标签");
+  if(tags.length>12||tags.some(t=>t.length>24))
+    throw new Error("最多 12 个标签，每个最长 24 字");
+  if(new Set(tags.map(t=>t.toLocaleLowerCase())).size!==tags.length)
+    throw new Error("不能输入重复标签");
+  return tags;
+}
+async function batchTags(action){
+  if(state.batchBusy||!state.selectedIds.size)return;
+  const ids=[...state.selectedIds];
+  const raw=prompt(action==="add"?
+    `向已选择的 ${ids.length} 个模块添加标签（逗号分隔）：`:
+    `从已选择的 ${ids.length} 个模块移除标签（逗号分隔）：`);
+  if(raw===null)return;
+  let tags;
+  try{tags=parseBulkTags(raw)}catch(e){toast(e.message,true);return}
+  if(!confirm(`确认对 ${ids.length} 个模块${action==="add"?"添加":"移除"}标签 ${tags.join("、")} 吗？\n\n该操作不会移动或修改真实文件夹。`))return;
+  state.batchBusy=true;updateBatchBar();
+  try{
+    const result=await mutate("POST","/api/tags/batch",{action,ids,tags});
+    exitSelectMode();await refresh();
+    toast(`标签${action==="add"?"添加":"移除"}完成：${result.changed} / ${result.selected} 个模块有变化`);
+  }catch(e){toast("批量标签操作失败："+e.message,true)}
+  finally{state.batchBusy=false;updateBatchBar()}
+}
+async function renameCurrentTag(){
+  if(!state.activeTag)return;
+  const old=state.activeTag;
+  const raw=prompt(`将标签「${old}」改名为（输入已有标签将自动合并）：`,old);
+  if(raw===null)return;
+  const target=raw.trim();
+  if(!target||target.length>24||/[,，;；\r\n\t]/.test(target)){
+    toast("标签名必须是 1—24 字，且不能包含分隔符或控制字符",true);
+    return;
+  }
+  if(target===old)return;
+  if(!confirm(`将「${old}」重命名/合并为「${target}」？\n\n所有模块和回收站的同名标签都会更新，不会更改真实文件夹。`))return;
+  try{
+    const result=await mutate("POST","/api/tags/rename",{source:old,target});
+    state.activeTag=target;
+    await refresh();rememberNavigation();
+    toast(`已更新 ${result.changed} 条标签记录`);
+  }catch(e){toast("重命名失败："+e.message,true)}
 }
 async function batchAction(action){
   if(state.batchBusy||!state.selectedIds.size)return;
@@ -1228,6 +1276,8 @@ function bind(){
   $("#bulkSelectAll").addEventListener("click",()=>{if(state.batchBusy)return;const ids=state.visibleIds;if(ids.length>200){toast("已显示模块超过 200 项，请缩小搜索范围",true);return}state.selectedIds=new Set(ids);render(true)});
   $("#bulkFavorite").addEventListener("click",()=>batchAction("favorite"));
   $("#bulkUnfavorite").addEventListener("click",()=>batchAction("unfavorite"));
+  $("#bulkTagAdd").addEventListener("click",()=>batchTags("add"));
+  $("#bulkTagRemove").addEventListener("click",()=>batchTags("remove"));
   $("#bulkDelete").addEventListener("click",()=>batchAction("delete"));
   $("#cardContextMenu").addEventListener("click",e=>{const btn=e.target.closest("[data-menu-action]");if(btn&&state.contextId!==null)contextAction(btn.dataset.menuAction,state.contextId)});
   $("#entries").addEventListener("contextmenu",e=>{const card=e.target.closest(".entry-card");if(!card||e.target.closest("input,textarea"))return;e.preventDefault();openCardMenu(Number(card.dataset.id),e.clientX,e.clientY)});
@@ -1235,6 +1285,7 @@ function bind(){
   document.addEventListener("pointerdown",e=>{if(!e.target.closest("#cardContextMenu"))closeCardMenu()});
   $("#specialNav").addEventListener("click",e=>{const item=e.target.closest("[data-view]");if(item)setView(item.dataset.view)});
   $("#tagFilters").addEventListener("click",e=>{
+    if(e.target.closest("[data-tag-rename]")){renameCurrentTag();return}
     const btn=e.target.closest("[data-tag-filter]");if(btn)chooseTag(btn.dataset.tagFilter||null);
   });
   $("#treeNav").addEventListener("click",e=>{

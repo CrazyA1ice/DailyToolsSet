@@ -849,3 +849,12 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
 .card-tags{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:4px;width:100%}
 .card-tag{border-radius:6px;background:var(--accent-faint);color:var(--accent);padding:3px 7px;font-size:.74rem;line-height:1.45;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .entries.list .card-tag{padding:2px 6px}
+
+/* V3.3: maintenance action inside the tag chips toolbar. */
+.tag-filters .tag-manage{
+  margin-left:auto;border-style:dashed;color:var(--accent);background:var(--accent-faint);
+  font-weight:650;
+}
+.tag-filters .tag-manage:hover,.tag-filters .tag-manage:focus-visible{
+  border-style:solid;background:color-mix(in srgb,var(--accent) 15%,var(--surface));
+}
