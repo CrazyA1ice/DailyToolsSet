@@ -698,21 +698,9 @@ function card(n,reorderable=false,keyboardActive=false){
   const linked=!!n.folder_path;
   const leaf=n.node_type==="leaf";
   const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
-  const usage=!state.search && state.view==="recent"?
-    state.recent.find(item=>item.node_id===n.id):
-    !state.search && state.view==="frequent"?
-      state.frequent.find(item=>item.node_id===n.id):null;
-  const lastUsed=usage?new Date(usage.last_opened_at):null;
-  const recentText=usage?(state.view==="frequent"?
-    `▥ 累计打开 ${Number(usage.open_count)||0} 次 · 最近使用：${lastUsed && !Number.isNaN(lastUsed.getTime())?lastUsed.toLocaleString("zh-CN"):"未知"}`:
-    `${usage.pinned?"📌 已置顶 · ":""}最近打开：${lastUsed && !Number.isNaN(lastUsed.getTime()) ? lastUsed.toLocaleString("zh-CN") : "未知时间"} · 累计 ${Number(usage.open_count)||0} 次`):"";
-  const contextText=state.search?`所属：${lineage}`:recentText;
-  // List metadata belongs in the primary information column, not the grid's
-  // auxiliary sibling row (which was deliberately hidden in list mode).
+  const contextText=state.search?`所属：${lineage}`:"";
   const listContext=state.layout==="list" && contextText?
-    `<span class="list-card-context" title="${h(contextText)}">${state.search?highlightSearch(contextText,state.search):h(contextText)}</span>`:"";
-  const recentCaption=state.layout!=="list" && recentText?
-    `<div class="entry-lineage">${h(recentText)}</div>`:"";
+    `<span class="list-card-context" title="${h(contextText)}">${highlightSearch(contextText,state.search)}</span>`:"";
   const tags=Array.isArray(n.tags)?n.tags:[];
   const tagChips=tags.length?`<span class="card-tags" title="${h(tags.join("、"))}">${tags.slice(0,3).map(tag=>`<span class="card-tag">⌗ ${state.search?highlightSearch(tag,state.search):h(tag)}</span>`).join("")}${tags.length>3?`<span class="card-tag">+${tags.length-3}</span>`:""}</span>`:"";
   const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
@@ -723,11 +711,9 @@ function card(n,reorderable=false,keyboardActive=false){
     </div>
     <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${h(iconFor(n))}</span>
       <div class="card-actions">
-        ${usage && state.view==="recent" && !state.selectMode?`<button type="button" class="small-action recent-pin ${usage.pinned?"on":""}" title="${usage.pinned?"取消置顶":"置顶到最近使用顶部"}" aria-label="${usage.pinned?"取消置顶":"置顶"} ${h(n.title)}" data-action="pin" data-id="${n.id}">${usage.pinned?"📌":"📍"}</button>`:""}
         ${state.selectMode?`<button type="button" class="card-select" data-action="select" data-id="${n.id}" aria-pressed="${state.selectedIds.has(n.id)}" aria-label="${state.selectedIds.has(n.id)?'取消选择':'选择'} ${h(n.title)}">${state.selectedIds.has(n.id)?'✓':'○'}</button>`:''}
         ${reorderable && !state.selectMode?`<button type="button" class="small-action sort-grip" draggable="true" data-drag="${n.id}" title="拖动调整同级顺序，也可使用上下箭头键" aria-label="移动 ${h(n.title)}：拖动排序或按上下箭头键">⠿</button>`:""}
         ${!state.selectMode?`<button type="button" class="small-action card-more" title="更多操作" aria-label="更多操作：${h(n.title)}" data-action="menu" data-id="${n.id}">⋯</button>`:''}
-        <button title="${n.favorite?'取消收藏':'加入收藏'}" class="small-action ${n.favorite?'on':''}" data-action="favorite" data-id="${n.id}">${n.favorite?'★':'☆'}</button>
         <button title="编辑模块" class="small-action" data-action="edit" data-id="${n.id}">✎</button>
         <button title="移除模块（不会删除真实文件夹）" class="small-action" data-action="delete" data-id="${n.id}">×</button>
       </div>
@@ -737,7 +723,6 @@ function card(n,reorderable=false,keyboardActive=false){
       <span class="path" title="${h(n.folder_path||lineage)}">${state.search?highlightSearch(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`),state.search):h(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`))}</span>
       ${listContext}${tagChips}</button>
     ${state.search && state.layout!=="list"?`<div class="entry-lineage" title="${h(lineage)}">⌁ ${highlightSearch(lineage,state.search)}</div>`:''}
-    ${recentCaption}
     <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?'● 文件夹入口':`${childCount} 个子模块`}</span>
       <div class="card-links">${state.search && !state.selectMode?`<button type="button" data-action="locate" data-id="${n.id}" title="定位到原目录，不打开文件夹">⌖ 定位</button>`:""}${!leaf?`<button data-action="enter" data-id="${n.id}">进入 ›</button>`:''}
         ${linked?`<button data-action="open" data-id="${n.id}">打开 ↗</button>`:''}
@@ -934,7 +919,6 @@ function editDialog(id=null,parentId=undefined){
   $("#dialogTitle").textContent=node?"编辑模块":"新建模块";
   $("#entryName").value=node?.title||"";
   $("#entryPath").value=node?.folder_path||"";
-  $("#entryFavorite").checked=!!node?.favorite;
   $("#entryTags").value=(node?.tags||[]).join("，");
   $("#entryIcon").value=node?.icon||"folder";
   state.pendingCover=null;state.removeCover=false;
@@ -978,7 +962,6 @@ async function submitDialog(event){
   const payload={title:$("#entryName").value,node_type:type,icon:$("#entryIcon").value,
     folder_path:type==="leaf"||(!$("#entryPathRow").classList.contains("hidden"))?$("#entryPath").value:null,
     parent_id:type==="root"?null:($("#entryParent").value?Number($("#entryParent").value):null),
-    favorite:$("#entryFavorite").checked,
     tags:$("#entryTags").value.split(/[,，;；\n]+/).map(x=>x.trim()).filter(Boolean)};
   const button=$("#submitEntry");button.disabled=true;
   try {
@@ -1008,13 +991,6 @@ async function openFolder(id){
   try{
     await mutate("POST",`/api/nodes/${id}/open`);
     toast("已向 Windows 资源管理器发送打开指令，并尝试将窗口置前");
-    try{
-      const [recent,frequent]=await Promise.all([api("/api/recent"),api("/api/frequent")]);
-      state.recent=recent.items;state.frequent=frequent.items;
-      $("#recentCount").textContent=state.recent.length;
-      $("#frequentCount").textContent=state.frequent.length;
-      if(["recent","frequent"].includes(state.view)&&!state.search.trim())render(true);
-    }catch(_){/* opening succeeded even if history refresh fails */}
   }catch(e){toast(e.message,true)}
   finally{
     state.openingIds.delete(id);
@@ -1030,34 +1006,6 @@ async function removeNode(id){
       {label:"撤销",handler:()=>restoreTrash(result.trash_id)})}
   catch(e){toast(e.message,true)}
 }
-async function favoriteNode(id){
-  const n=byId(id);if(!n)return;
-  const hadCardFocus=Number(document.activeElement?.closest(".entry-card")?.dataset.id)===id;
-  try{
-    await mutate("PATCH",`/api/nodes/${id}`,{favorite:!n.favorite});
-    await refresh();
-    if(hadCardFocus)restoreCardFocus(id,"favorite");
-  }catch(e){toast(e.message,true)}
-}
-async function toggleRecentPin(id){
-  const visit=state.recent.find(row=>row.node_id===id);
-  if(!visit)return;
-  const hadCardFocus=Number(document.activeElement?.closest(".entry-card")?.dataset.id)===id;
-  try{
-    await mutate("POST","/api/recent/pin",{node_id:id,pinned:!Boolean(visit.pinned)});
-    state.recent=(await api("/api/recent")).items;
-    render();
-    if(hadCardFocus)restoreCardFocus(id,"pin");
-    toast(visit.pinned?"已取消置顶":"已置顶到最近使用顶部");
-  }catch(e){toast("修改置顶失败："+e.message,true)}
-}
-async function clearRecentHistory(){
-  if(!confirm("确定清空最近使用记录吗？\\n\\n只清除访问时间和次数，不会删除任何模块或电脑中的文件夹。"))return;
-  try{
-    const result=await mutate("DELETE","/api/recent",{});
-    state.recent=[];state.frequent=[];render();toast(`已清空 ${result.cleared} 条访问记录`);
-  }catch(e){toast("清空失败："+e.message,true)}
-}
 async function act(action,id){
   switch(action){
     case "primary":{if(state.selectMode){toggleSelected(id);break}const n=byId(id);if(n?.node_type==="leaf")await openFolder(id);else setView("node",id);break}
@@ -1070,7 +1018,6 @@ async function act(action,id){
     case "child":if(byId(id)?.node_type!=="leaf")editDialog(null,id);else toast("叶子模块不能拥有子模块",true);break;
     case "edit":editDialog(id);break;
     case "delete":await removeNode(id);break;
-    case "favorite":await favoriteNode(id);break;
     case "empty-create":editDialog();break;
     case "edit-current":editDialog(state.selected);break;
     case "edit-workspace":openWorkspaceDialog(state.workspaces.findIndex(item=>item.name===state.activeWorkspace));break;
@@ -1084,8 +1031,6 @@ async function act(action,id){
         document.getElementById(`folderhub-entry-${firstNew}`)?.querySelector(".card-primary")?.focus({preventScroll:true});
       break;
     }
-    case "clear-recent":await clearRecentHistory();break;
-    case "pin":await toggleRecentPin(id);break;
   }
 }
 // Bulk selection is limited to the current visible list, including search results.
@@ -1460,7 +1405,7 @@ function updateBatchBar(){
   $("#bulkCount").textContent=`已选择 ${count} 项`;
   $("#selectModeBtn").setAttribute("aria-pressed",String(state.selectMode));
   $("#selectModeBtn").textContent=state.selectMode?"✓ 退出多选":"☑ 多选";
-  for(const id of ["bulkFavorite","bulkUnfavorite","bulkTagAdd","bulkTagRemove","bulkDelete"]){$("#"+id).disabled=state.batchBusy||count===0}
+  for(const id of ["bulkTagAdd","bulkTagRemove","bulkDelete"]){$("#"+id).disabled=state.batchBusy||count===0}
   $("#bulkSaveGroup").disabled=state.batchBusy||state.groupBusy||count<2||count>8;
   $("#bulkSaveWorkspace").disabled=state.batchBusy||count<1||count>30;
   $("#bulkSelectAll").disabled=state.batchBusy||state.visibleIds.length===0;
@@ -1543,20 +1488,6 @@ async function batchAction(action){
     else toast(`已更新 ${result.changed} 个模块的收藏状态`);
   }catch(e){toast(e.message,true)}finally{state.batchBusy=false;updateBatchBar()}
 }
-async function restoreTrash(id){
-  try{
-    const result=await mutate("POST",`/api/trash/${id}/restore`);
-    await refresh();
-    toast(`已恢复 ${result.restored} 条导航记录及对应封面`);
-  }catch(e){toast("恢复失败："+e.message,true)}
-}
-async function purgeTrash(id){
-  const item=state.trash.find(x=>x.id===id);
-  if(!item)return;
-  if(!confirm(`永久清除「${item.title}」的回收站备份吗？\n\n清除后无法从回收站恢复导航记录和封面；电脑中的真实文件不受影响。`))return;
-  try{await mutate("DELETE",`/api/trash/${id}`);await refresh();toast("回收站记录已永久清除（真实文件未受影响）")}
-  catch(e){toast("清除失败："+e.message,true)}
-}
 function openCardMenu(id,x,y){
   closeCardMenu();
   const n=byId(id),menu=$("#cardContextMenu");
@@ -1565,7 +1496,7 @@ function openCardMenu(id,x,y){
   const actions=[];
   if(n.node_type==="leaf"||n.folder_path)actions.push(["open","在资源管理器中打开"]);
   if(n.node_type!=="leaf")actions.push(["enter","进入模块"]);
-  actions.push(["edit","编辑模块"],["favorite",n.favorite?"取消收藏":"添加到收藏"],["workspace-add","加入项目工作区…"]);
+  actions.push(["edit","编辑模块"],["workspace-add","加入项目工作区…"]);
   if(n.node_type!=="leaf")actions.push(["child","新建子模块"]);
   if(n.folder_path)actions.push(["copy-path","复制文件夹路径"]);
   actions.push(["delete","移除导航记录"]);
@@ -2046,8 +1977,6 @@ function bind(){
   $("#selectModeBtn").addEventListener("click",()=>{if(state.batchBusy)return;state.selectMode=!state.selectMode;state.selectedIds.clear();closeCardMenu();render(true)});
   $("#bulkCancel").addEventListener("click",()=>{exitSelectMode();render(true)});
   $("#bulkSelectAll").addEventListener("click",()=>{if(state.batchBusy)return;const ids=state.visibleIds;if(ids.length>200){toast("已显示模块超过 200 项，请缩小搜索范围",true);return}state.selectedIds=new Set(ids);render(true)});
-  $("#bulkFavorite").addEventListener("click",()=>batchAction("favorite"));
-  $("#bulkUnfavorite").addEventListener("click",()=>batchAction("unfavorite"));
   $("#bulkTagAdd").addEventListener("click",()=>batchTags("add"));
   $("#bulkTagRemove").addEventListener("click",()=>batchTags("remove"));
   $("#bulkSaveGroup").addEventListener("click",saveSelectedFolderGroup);
@@ -2194,13 +2123,6 @@ function bind(){
   });
   $("#breadcrumb").addEventListener("click",e=>{const item=e.target.closest("[data-crumb]");if(item)item.dataset.crumb==="all"?setView("all"):setView("node",Number(item.dataset.crumb))});
   $("#entries").addEventListener("click",e=>{
-    const trashButton=e.target.closest("[data-trash-action]");
-    if(trashButton){
-      const id=Number(trashButton.dataset.trashId);
-      if(trashButton.dataset.trashAction==="restore")restoreTrash(id);
-      else if(trashButton.dataset.trashAction==="purge")purgeTrash(id);
-      return;
-    }
     const btn=e.target.closest("[data-action]");
     if(btn)act(btn.dataset.action,Number(btn.dataset.id));
   });
