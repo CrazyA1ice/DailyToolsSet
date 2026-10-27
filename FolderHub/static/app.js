@@ -283,7 +283,7 @@ function rebuildNodeIndex(){
   }
   for(const nodes of childrenByParent.values())nodes.sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
   searchRecords=state.nodes.map(node=>{
-    const own=(node.title+" "+(node.folder_path||"")).toLocaleLowerCase();
+    const own=(node.title+" "+(node.folder_path||node.resource_target||"")).toLocaleLowerCase();
     const full=ancestors(node.id).map(entry=>entry.title).join(" /").toLocaleLowerCase();
     return {node,own,body:own+" "+full+" "+(node.tags||[]).join(" ").toLocaleLowerCase()};
   });
@@ -695,7 +695,10 @@ function renderTagFilters(){
 }
 function card(n,reorderable=false,keyboardActive=false){
   const childCount=children(n.id).length;
-  const linked=!!n.folder_path;
+  const resourceKind=n.resource_kind||'folder';
+  const resourceTarget=resourceKind==='folder'?n.folder_path:n.resource_target;
+  const resourceLabel=resourceKind==='file'?'文件':resourceKind==='url'?'网页':'文件夹';
+  const linked=!!resourceTarget;
   const leaf=n.node_type==="leaf";
   const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
   const contextText=state.search?`所属：${lineage}`:"";
@@ -703,11 +706,11 @@ function card(n,reorderable=false,keyboardActive=false){
     `<span class="list-card-context" title="${h(contextText)}">${highlightSearch(contextText,state.search)}</span>`:"";
   const tags=Array.isArray(n.tags)?n.tags:[];
   const tagChips=tags.length?`<span class="card-tags" title="${h(tags.join("、"))}">${tags.slice(0,3).map(tag=>`<span class="card-tag">⌗ ${state.search?highlightSearch(tag,state.search):h(tag)}</span>`).join("")}${tags.length>3?`<span class="card-tag">+${tags.length-3}</span>`:""}</span>`:"";
-  const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
+  const primaryTitle=leaf?"打开资源":"进入此模块";
   return `<article class="entry-card ${leaf?"is-leaf":"is-container"} ${state.openingIds.has(n.id)?"is-opening":""} ${state.selectedIds.has(n.id)?"is-selected":""} ${keyboardActive?"keyboard-active":""}" id="folderhub-entry-${n.id}" data-id="${n.id}" tabindex="0" aria-label="${h(n.title)}，右键打开快捷菜单">
     <div class="card-cover tone-${n.id%6} ${n.has_image?'with-image':'with-icon'}" aria-hidden="true">
       ${n.has_image?`<img class="cover-image" src="${coverUrl(n)}" loading="lazy" alt="">`:`<span class="cover-emoji">${h(iconFor(n))}</span><span class="cover-decoration"></span>`}
-      <span class="cover-type">${TYPE_LABEL[n.node_type]||"模块"}</span>
+      <span class="cover-type">${(leaf?resourceLabel:TYPE_LABEL[n.node_type]||"模块")}</span>
     </div>
     <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${h(iconFor(n))}</span>
       <div class="card-actions">
@@ -719,14 +722,14 @@ function card(n,reorderable=false,keyboardActive=false){
       </div>
     </div>
     <button type="button" class="card-primary" data-action="primary" data-id="${n.id}" title="${primaryTitle}">
-      <strong>${state.search?highlightSearch(n.title,state.search):h(n.title)}</strong><span class="type-chip ${n.node_type}">${TYPE_LABEL[n.node_type]||'模块'}</span>
-      <span class="path" title="${h(n.folder_path||lineage)}">${state.search?highlightSearch(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`),state.search):h(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`))}</span>
+      <strong>${state.search?highlightSearch(n.title,state.search):h(n.title)}</strong><span class="type-chip ${n.node_type}">${(leaf?resourceLabel:TYPE_LABEL[n.node_type]||'模块')}</span>
+      <span class="path" title="${h(resourceTarget||lineage)}">${state.search?highlightSearch(linked?resourceTarget:(leaf?'未设置有效资源':`${childCount} 个子模块`),state.search):h(linked?resourceTarget:(leaf?'未设置有效资源':`${childCount} 个子模块`))}</span>
       ${listContext}${tagChips}</button>
     ${state.search && state.layout!=="list"?`<div class="entry-lineage" title="${h(lineage)}">⌁ ${highlightSearch(lineage,state.search)}</div>`:''}
-    <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?'● 文件夹入口':`${childCount} 个子模块`}</span>
+    <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?'● ${resourceLabel}入口':`${childCount} 个子模块`}</span>
       <div class="card-links">${state.search && !state.selectMode?`<button type="button" data-action="locate" data-id="${n.id}" title="定位到原目录，不打开文件夹">⌖ 定位</button>`:""}${!leaf?`<button data-action="enter" data-id="${n.id}">进入 ›</button>`:''}
         ${linked?`<button data-action="open" data-id="${n.id}">打开 ↗</button>`:''}
-        ${linked && state.layout==="list"?`<button type="button" data-action="copy-path" data-id="${n.id}" title="复制关联的文件夹路径">复制路径</button>`:''}
+        ${linked && state.layout==="list"?`<button type="button" data-action="copy-path" data-id="${n.id}" title="复制资源地址">复制地址</button>`:''}
         ${!leaf?`<button data-action="child" data-id="${n.id}">＋ 子模块</button>`:''}
       </div></div>
   </article>`;
