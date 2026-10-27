@@ -227,8 +227,19 @@ class ServiceController:
             raise RuntimeError("FolderHub 本地服务尚未启动")
         if not server_is_folderhub(self.port):
             raise RuntimeError("独立 FolderHub 服务未响应，请检查服务状态")
-        with urlopen(f"{self.url.rstrip('/')}/api/quick-menu", timeout=1.5) as reply:
-            snapshot = json.load(reply)
+        try:
+            with urlopen(f"{self.url.rstrip('/')}/api/quick-menu", timeout=1.5) as reply:
+                snapshot = json.load(reply)
+        except HTTPError as error:
+            if error.code != 404:
+                raise
+            # A tray may connect to a separately running pre-V5.6 server.
+            # Preserve old-version navigation until that process is restarted.
+            with urlopen(f"{self.url.rstrip('/')}/api/nodes", timeout=1.5) as reply:
+                nodes = json.load(reply)["nodes"]
+            with urlopen(f"{self.url.rstrip('/')}/api/preferences", timeout=1.5) as reply:
+                workspaces = json.load(reply)["settings"]["workspaces"]
+            return build_quick_entries(nodes, [], workspaces)
         return build_quick_entries(
             snapshot["nodes"], [], snapshot["workspaces"])
 
