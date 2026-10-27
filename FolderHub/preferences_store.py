@@ -292,7 +292,7 @@ class PreferencesStore:
                          or not expected_revision.startswith('sha256:'))):
                     raise PreferenceError('个性化设置版本格式无效')
                 if expected_revision != settings_revision(existing):
-                    raise PreferenceConflict('其他页面已修改个性化设置，请先备份当前内容并刷新页面，再重新操作')
+                    raise PreferenceConflict('其他页面已修改个性化设置；已拒绝旧版本覆盖，请记录本页尚未保存的内容并刷新后重试')
             checked = validate(settings)
             self._write(checked)
             return {'configured': True, 'settings': checked,
