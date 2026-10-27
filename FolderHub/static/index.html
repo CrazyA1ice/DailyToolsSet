@@ -41,7 +41,7 @@
       <div class="topbar-leading"><button id="sidebarToggle" type="button" class="icon-button sidebar-trigger" title="展开或收起侧边栏" aria-label="展开或收起侧边栏" aria-expanded="true">☰</button><div class="crumb" id="breadcrumb"></div></div>
       <div class="search-wrap topbar-search" role="search"><span class="search-icon">⌕</span><input id="search" type="search" aria-controls="entries" aria-keyshortcuts="Control+K Meta+K" placeholder="全局搜索：模块名、完整分类路径、文件夹路径..." autocomplete="off" aria-label="搜索所有层级模块"><span id="searchHint">Ctrl K</span></div>
       <div class="top-actions">
-        <div class="tool-buttons"><button id="selectModeBtn" type="button" class="outline-btn" aria-pressed="false" title="批量选择模块">☑ 多选</button><button id="layoutBtn" type="button" class="icon-button square" title="切换网格和列表" aria-label="切换网格和列表">▦</button><button id="quickOpenBtn" type="button" class="icon-button square" aria-haspopup="dialog" aria-controls="quickLayer" aria-keyshortcuts="Control+Shift+P" title="快速打开模块（Ctrl+Shift+P）" aria-label="快速打开模块">⚡</button><button id="newBtn" type="button" class="primary-btn">＋ <span id="newBtnText">新建模块</span></button></div>
+        <div class="tool-buttons"><button id="selectModeBtn" type="button" class="outline-btn" aria-pressed="false" title="批量选择模块">☑ 多选</button><button id="layoutBtn" type="button" class="icon-button square" title="切换网格和列表" aria-label="切换网格和列表">▦</button><button id="quickOpenBtn" type="button" class="icon-button square" aria-haspopup="dialog" aria-controls="quickLayer" aria-keyshortcuts="Control+Shift+P" title="快速打开模块（Ctrl+Shift+P）" aria-label="快速打开模块">⚡</button><button id="everythingBtn" type="button" class="outline-btn" title="使用本机 Everything 搜索未收录的文件和文件夹">全盘搜索</button><button id="newBtn" type="button" class="primary-btn">＋ <span id="newBtnText">新建模块</span></button></div>
         <button id="themeBtn" type="button" class="text-btn accent-action" title="主题换肤">◐ <span>换肤</span></button>
         <button id="settingsBtn" type="button" class="text-btn" title="设置开机启动和首页">⚙ <span>设置</span></button>
         <button id="backupBtn" type="button" class="text-btn" title="导出 JSON 配置">⇩ <span>备份</span></button>
@@ -117,6 +117,17 @@
     <div id="groupResultSummary" class="group-report-summary" role="status"></div>
     <div id="groupResultRows" class="group-report-rows" aria-label="工作组各目录打开状态"></div>
     <div class="dialog-footer"><button id="groupResultDone" type="button" class="primary-btn">完成</button></div>
+  </div>
+</div>
+<div id="everythingLayer" class="quick-layer hidden" role="presentation">
+  <div class="quick-dialog" role="dialog" aria-modal="true" aria-labelledby="everythingTitle">
+    <div class="quick-heading"><div><small>LOCAL INDEX SEARCH</small><h2 id="everythingTitle">Everything 全盘搜索</h2></div>
+      <button id="everythingClose" class="icon-button" aria-label="关闭 Everything 搜索">✕</button></div>
+    <form id="everythingForm" class="everything-search-form"><input id="everythingQuery" type="search" maxlength="100" minlength="2" required placeholder="输入文件或目录关键词">
+      <button type="submit" class="primary-btn" id="everythingSubmit">搜索</button></form>
+    <p id="everythingStatus" class="settings-note" role="status">需要本机安装并运行 Everything，且 es.exe 可用。</p>
+    <div id="everythingResults" class="quick-results" aria-label="Everything 搜索结果"></div>
+    <p class="settings-note">仅列出最多30项，点击「加入导航」后可进一步选择分类并保存。</p>
   </div>
 </div>
 <div id="quickLayer" class="quick-layer hidden" role="presentation">
@@ -241,6 +252,11 @@
         <input id="entryCoverFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
       </div>
       <div id="entryParentRow"><label for="entryParent">上级模块</label><select id="entryParent"></select></div>
+      <div id="entryKindRow" class="hidden"><label for="entryResourceKind">资源类型</label>
+        <select id="entryResourceKind"><option value="folder">📁 文件夹</option><option value="file">📄 文件</option><option value="url">🔗 网页</option></select></div>
+      <div id="entryTargetRow" class="hidden"><label for="entryResourceTarget" id="entryTargetLabel">资源地址</label>
+        <input id="entryResourceTarget" type="text" maxlength="2048" placeholder="文件绝对路径或 https:// 网页地址">
+        <small class="help-text" id="entryTargetHint">仅支持常见文档或 HTTP/HTTPS 网页，不执行程序命令。</small></div>
       <div id="entryPathRow"><label for="entryPath">绑定文件夹 <span class="optional" id="entryPathRequired">（必填）</span></label>
         <div class="path-field"><input id="entryPath" type="text" placeholder="例如：D:\Research\Paper2026_1"><button id="pickFolder" type="button" class="outline-btn" title="打开 Windows 文件夹选择窗口">浏览...</button></div>
         <small class="help-text">叶子模块直接映射到一个文件夹，点击即可用 Windows 文件资源管理器打开。</small>
