@@ -301,6 +301,14 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('.saved-view-section',self.css)
         self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
 
+    def test_saved_views_survive_history_and_tag_rename(self):
+        self.assertIn('const restoredSmartView=fromHistory&&view==="tags"?',self.js)
+        self.assertIn('const keepTag=tag=>typeof tag==="string"',self.js)
+        self.assertIn('state.activeSmartView=restoredSmartView?.name||null;',self.js)
+        self.assertIn('else renderSavedViews();',self.js)
+        self.assertIn('const rewritten=state.savedViews.map(view=>{',self.js)
+        self.assertIn('state.savedViews=rewritten;',self.js)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)

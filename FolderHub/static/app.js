@@ -308,17 +308,23 @@ function setView(view,id=null,{fromHistory=false,saved=null}={}){
   if(view==="node"&&!byId(id)){view="all";id=null}
   state.view=view;state.selected=view==="node"?id:null;
   const available=new Set(state.nodes.flatMap(n=>n.tags||[]));
-  const previousIncludes=Array.isArray(saved?.tagSelection)?saved.tagSelection:
+  const restoredSmartView=fromHistory&&view==="tags"?
+    state.savedViews.find(item=>item.name===saved?.smartView):null;
+  const previousIncludes=restoredSmartView?restoredSmartView.includes:
+    Array.isArray(saved?.tagSelection)?saved.tagSelection:
     (saved?.tag?[saved.tag]:[]);
+  const previousExcludes=restoredSmartView?restoredSmartView.excludes:
+    (Array.isArray(saved?.tagExcluded)?saved.tagExcluded:[]);
+  const keepTag=tag=>typeof tag==="string"&&(Boolean(restoredSmartView)||available.has(tag));
   state.tagSelection=view==="tags"&&fromHistory?
-    [...new Set(previousIncludes.filter(t=>typeof t==="string"&&available.has(t)))].slice(0,30):[];
-  state.tagExcluded=view==="tags"&&fromHistory&&Array.isArray(saved?.tagExcluded)?
-    [...new Set(saved.tagExcluded.filter(t=>typeof t==="string"&&available.has(t)&&!state.tagSelection.includes(t)))].slice(0,30):[];
-  state.tagMatchMode=fromHistory&&saved?.tagMatchMode==="all"?"all":"any";
+    [...new Set(previousIncludes.filter(keepTag))].slice(0,30):[];
+  state.tagExcluded=view==="tags"&&fromHistory?
+    [...new Set(previousExcludes.filter(tag=>keepTag(tag)&&!state.tagSelection.includes(tag)))].slice(0,30):[];
+  state.tagMatchMode=restoredSmartView?restoredSmartView.mode:
+    fromHistory&&saved?.tagMatchMode==="all"?"all":"any";
   state.tagPickMode=fromHistory&&saved?.tagPickMode==="exclude"?"exclude":"include";
   state.activeTag=view==="tags"&&state.tagSelection.length===1?state.tagSelection[0]:null;
-  state.activeSmartView=view==="tags"&&fromHistory&&
-    state.savedViews.some(view=>view.name===saved?.smartView)?saved.smartView:null;
+  state.activeSmartView=restoredSmartView?.name||null;
   state.search=fromHistory&&typeof saved?.search==="string"?saved.search.slice(0,300):"";
   state.searchKeyboardIndex=-1;
   state.renderLimit=fromHistory&&Number.isSafeInteger(saved?.renderLimit)?
@@ -653,6 +659,7 @@ function render(skipNav=false){
     if(navigationReady)window.history.replaceState(navigationSnapshot(),"",routeUrl("all"));
   }
   if(!skipNav)renderNav();
+  else renderSavedViews();
   renderCrumb();
   renderTagFilters();
   const trashView=state.view==="trash"&&!state.search.trim();
@@ -1045,6 +1052,17 @@ async function renameCurrentTag(){
     state.tagExcluded=state.tagExcluded.map(tag=>tag===old?target:tag);
     state.tagExcluded=[...new Set(state.tagExcluded)];
     state.activeTag=state.tagSelection.length===1?state.tagSelection[0]:null;
+    // A global label rename must update saved smart filters as well, including
+    // those that are currently inactive. Merge duplicate names on collision.
+    const rewritten=state.savedViews.map(view=>{
+      const includes=[...new Set(view.includes.map(tag=>tag===old?target:tag))];
+      const exclusions=[...new Set(view.excludes.map(tag=>tag===old?target:tag))]
+        .filter(tag=>!includes.includes(tag));
+      return {...view,includes,excludes:exclusions};
+    });
+    state.savedViews=rewritten;
+    if(!await persistProjectSettings())
+      toast("标签已重命名，但智能收藏夹同步保存失败，请检查设置文件并重新保存收藏夹",true);
     await refresh();rememberNavigation();
     toast(`已更新 ${result.changed} 条标签记录`);
   }catch(e){toast("重命名失败："+e.message,true)}

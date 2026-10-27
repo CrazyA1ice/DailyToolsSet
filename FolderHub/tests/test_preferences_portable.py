@@ -84,7 +84,7 @@ class PortablePreferencesTests(unittest.TestCase):
             {'savedViews':[{'name':'dup','includes':['A股'],'excludes':['A股'],'mode':'all'}]},
             {'savedViews':[dict(view,mode='xor')]},
             {'savedViews':[view,dict(view,name=view['name'].upper())]},
-            {'savedViews':[dict(view,name='<bad>\\n')]},
+            {'savedViews':[dict(view,name='<bad>\n')]},
             {'savedViews':[dict(view,includes=['A股','a股'])]},
             {'savedViews':[view] * 25},
             {'savedViews':[dict(view,extra=True)]},
