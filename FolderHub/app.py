@@ -295,10 +295,6 @@ class Store:
                 db.execute("ALTER TABLE nodes ADD COLUMN resource_kind TEXT NOT NULL DEFAULT 'folder'")
             if "resource_target" not in cols:
                 db.execute("ALTER TABLE nodes ADD COLUMN resource_target TEXT")
-            if "resource_kind" not in trash_cols:
-                db.execute("ALTER TABLE trash_nodes ADD COLUMN resource_kind TEXT NOT NULL DEFAULT 'folder'")
-            if "resource_target" not in trash_cols:
-                db.execute("ALTER TABLE trash_nodes ADD COLUMN resource_target TEXT")
             if "tags" not in cols:
                 db.execute("ALTER TABLE nodes ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
             trash_cols = {row["name"] for row in db.execute("PRAGMA table_info(trash_nodes)")}
@@ -315,6 +311,13 @@ class Store:
                     WHEN folder_path IS NOT NULL AND folder_path != '' THEN 'leaf'
                     ELSE 'group' END""")
             self._migrate_legacy_images(db)
+            # Legacy image-data migration can rebuild trash_nodes; add the
+            # resource columns after that migration has finished.
+            final_trash_cols = {r["name"] for r in db.execute("PRAGMA table_info(trash_nodes)")}
+            if "resource_kind" not in final_trash_cols:
+                db.execute("ALTER TABLE trash_nodes ADD COLUMN resource_kind TEXT NOT NULL DEFAULT 'folder'")
+            if "resource_target" not in final_trash_cols:
+                db.execute("ALTER TABLE trash_nodes ADD COLUMN resource_target TEXT")
 
     def _image_file(self, relative_path):
         """Only allow content-addressed filenames under the configured uploads directory."""
