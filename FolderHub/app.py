@@ -748,11 +748,11 @@ class Store:
                 LEFT JOIN node_images i ON i.node_id=n.id
                 WHERE n.id IN ({placeholder})""", chunk).fetchall()
             db.executemany("""INSERT INTO trash_nodes(batch_id,node_id,parent_id,title,folder_path,
-                node_type,icon,favorite,tags,sort_order,created_at,updated_at,image_mime,image_path)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", [
+                node_type,icon,favorite,tags,sort_order,created_at,updated_at,image_mime,image_path,resource_kind,resource_target)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", [
                 (batch_id,r["id"],r["parent_id"],r["title"],r["folder_path"],r["node_type"],
                  r["icon"],r["favorite"],r["tags"],r["sort_order"],r["created_at"],r["updated_at"],
-                 r["image_mime"],r["image_path"]) for r in backups])
+                 r["image_mime"],r["image_path"],r["resource_kind"],r["resource_target"]) for r in backups])
         # Only delete the selected roots: SQLite cascades to descendants/images.
         # Existing children have already been captured in trash_nodes above.
         for start in range(0, len(selected), 300):
@@ -799,10 +799,10 @@ class Store:
                 for node_id in ready:
                     row = pending.pop(node_id)
                     db.execute("""INSERT INTO nodes(id,parent_id,title,folder_path,node_type,icon,
-                        favorite,tags,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                        favorite,tags,sort_order,created_at,updated_at,resource_kind,resource_target) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (row["node_id"],row["parent_id"],row["title"],row["folder_path"],
                          row["node_type"],row["icon"],row["favorite"],row["tags"],row["sort_order"],
-                         row["created_at"],row["updated_at"]))
+                         row["created_at"],row["updated_at"],row["resource_kind"],row["resource_target"]))
                     if row["image_mime"] is not None:
                         self._read_image(row["image_path"])  # Refuse to restore a broken cover.
                         db.execute("""INSERT INTO node_images(node_id,mime_type,image_path,updated_at)
@@ -953,11 +953,11 @@ class Store:
             with self.connect() as db:
                 images={str(row["node_id"]):encode_image(row["mime_type"],self._read_image(row["image_path"]))
                     for row in db.execute("SELECT node_id,mime_type,image_path FROM node_images")}
-            return {"format":"FolderHub","version":4,"exported_at":now(),"nodes":self.all(),"images":images}
+            return {"format":"FolderHub","version":5,"exported_at":now(),"nodes":self.all(),"images":images}
 
     def import_backup(self, payload):
         if (not isinstance(payload,dict) or payload.get("format")!="FolderHub"
-            or payload.get("version") not in (1,2,3,4) or not isinstance(payload.get("nodes"),list)):
+            or payload.get("version") not in (1,2,3,4,5) or not isinstance(payload.get("nodes"),list)):
             raise UserError("不是兼容的 FolderHub 备份文件")
         raw = payload["nodes"]
         if len(raw)>20000:
@@ -974,9 +974,11 @@ class Store:
                 "parent": parent, "title": validate_title(n.get("title")),
                 "path": validate_path(n.get("folder_path")),
                 "favorite": int(bool(n.get("favorite",False))), "order": order,
-                "type": n.get("node_type") if payload["version"] in (2,3,4) else None,
+                "type": n.get("node_type") if payload["version"] in (2,3,4,5) else None,
                 "icon": validate_icon(n.get("icon", "folder")),
-                "tags": validate_tags(n.get("tags", []) if payload["version"] == 4 else [])
+                "tags": validate_tags(n.get("tags", []) if payload["version"] >= 4 else []),
+                "kind": n.get("resource_kind", "folder") if payload["version"] >= 5 else "folder",
+                "target": n.get("resource_target") if payload["version"] >= 5 else None
             }
         child_parents = {n["parent"] for n in prepared.values() if n["parent"] is not None}
         for node_id, n in prepared.items():
@@ -993,15 +995,16 @@ class Store:
             if n["type"] is None and payload["version"]==1:
                 n["type"] = inferred_type(n["parent"],n["path"],node_id in child_parents)
             n["type"] = validate_node_type(n["type"])
-            # Imported legacy categories may retain linked paths, without changing real files.
+            n["target"] = validate_resource(n["kind"],n["target"])
             validate_structure(n["type"],n["parent"],n["path"],existing={
-                "node_type":n["type"], "folder_path":n["path"]})
+                "node_type":n["type"], "folder_path":n["path"]},
+                resource_kind=n["kind"],resource_target=n["target"])
             if n["type"]=="leaf" and node_id in child_parents:
                 raise UserError("备份中叶子模块包含子模块")
             if n["parent"] is not None and prepared[n["parent"]]["type"]=="leaf":
                 raise UserError("备份中叶子模块不能作为上级")
         backup_images={}
-        if payload["version"] in (3,4):
+        if payload["version"] in (3,4,5):
             incoming=payload.get("images",{})
             if not isinstance(incoming,dict) or len(incoming)>len(prepared):
                 raise UserError("备份图片列表无效")
@@ -1025,10 +1028,11 @@ class Store:
                 for node_id, n in list(pending.items()):
                     if n["parent"] is None or n["parent"] not in pending:
                         db.execute("""INSERT INTO nodes
-                            (id,parent_id,title,folder_path,node_type,icon,favorite,tags,sort_order,created_at,updated_at)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?)""", (node_id,n["parent"],n["title"],
+                            (id,parent_id,title,folder_path,node_type,icon,favorite,tags,sort_order,created_at,updated_at,resource_kind,resource_target)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", (node_id,n["parent"],n["title"],
                             n["path"],n["type"],n["icon"],n["favorite"],
-                            json.dumps(n["tags"],ensure_ascii=False),n["order"],now(),now()))
+                            json.dumps(n["tags"],ensure_ascii=False),n["order"],now(),now(),
+                            n["kind"],n["target"]))
                         del pending[node_id]
                         progressed = True
                 if not progressed:
@@ -1036,6 +1040,24 @@ class Store:
             for node_id, (mime, image_path) in prepared_images.items():
                 db.execute("INSERT INTO node_images(node_id,mime_type,image_path,updated_at) VALUES (?,?,?,?)",
                            (node_id,mime,image_path,now()))
+
+
+def open_saved_resource(node):
+    kind = node["resource_kind"]
+    if kind == "folder":
+        if not node["folder_path"]:
+            raise UserError("这个模块尚未绑定文件夹")
+        return open_in_explorer(node["folder_path"])
+    target = validate_resource(kind, node["resource_target"])
+    if kind == "file":
+        if os.name != "nt":
+            raise UserError("本地文件打开仅支持 Windows")
+        if not os.path.isfile(target):
+            raise UserError("文件不存在或无法访问")
+        os.startfile(target)  # Approved document formats only, no shell command.
+        return
+    if not webbrowser.open(target):
+        raise UserError("未能在默认浏览器打开网页")
 
 
 def open_in_explorer(path):
@@ -1329,10 +1351,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.request_json()
                     with self.server.store.connect() as db:
                         node=self.server.store.require(db,node_id)
-                        folder=node["folder_path"]
-                    if not folder:
-                        raise UserError("这个模块尚未绑定文件夹")
-                    open_in_explorer(folder)
+                    open_saved_resource(node)
                     # The folder was handed to Explorer; a history-write failure must
                     # not incorrectly tell the user that opening itself failed.
                     try:
