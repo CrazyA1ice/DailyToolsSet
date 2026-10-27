@@ -134,13 +134,28 @@ let projectSettingsReady=false;
 let pendingSettings=null;
 let settingsWriteInFlight=false;
 let settingsWritePromise=null;
+const WORKSPACE_STATUS_NAMES={planning:"筹备中",active:"进行中",paused:"已暂停",done:"已完成"};
+function copyWorkspaceRecord(item){
+  return {name:item.name,description:item.description,members:[...item.members],
+    status:item.status||"planning",
+    links:Array.isArray(item.links)?item.links.map(link=>({name:link.name,url:link.url})):[]};
+}
+function validWorkspaceUrl(value){
+  if(typeof value!=="string"||!value||value.length>2048||/[\x00-\x20\x7f\\]/.test(value))return null;
+  try{
+    const parsed=new URL(value);
+    if(!["http:","https:"].includes(parsed.protocol)||!parsed.hostname||
+       parsed.username||parsed.password)return null;
+    return parsed.href;
+  }catch(_){return null}
+}
 function collectProjectSettings(){
   return {...preferences,theme:state.theme,layout:state.layout,
     expanded:state.treeInitialized?[...state.expanded]:initialExpanded,
     savedViews:state.savedViews.map(view=>({name:view.name,includes:[...view.includes],
       excludes:[...view.excludes],mode:view.mode})),
     folderGroups:state.folderGroups.map(group=>({name:group.name,members:[...group.members]})),
-    workspaces:state.workspaces.map(item=>({name:item.name,description:item.description,members:[...item.members]}))};
+    workspaces:state.workspaces.map(item=>copyWorkspaceRecord(item))};
 }
 async function persistProjectSettings(){
   if(!projectSettingsReady)return true;
@@ -188,9 +203,8 @@ async function loadProjectSettings(){
   state.folderGroups=Array.isArray(saved.folderGroups)?saved.folderGroups.map(group=>({
     name:group.name,members:[...group.members]
   })):[];
-  state.workspaces=Array.isArray(saved.workspaces)?saved.workspaces.map(item=>({
-    name:item.name,description:item.description,members:[...item.members]
-  })):[];
+  state.workspaces=Array.isArray(saved.workspaces)?
+    saved.workspaces.map(item=>copyWorkspaceRecord(item)):[];
   projectSettingsReady=true;
   document.documentElement.dataset.theme=state.theme;
   $("#layoutBtn").textContent=state.layout==="grid"?"▦":"☷";
@@ -447,6 +461,21 @@ function renderWorkspaces(){
       <button type="button" class="folder-group-command" data-workspace-delete="${index}" aria-label="删除工作区 ${h(item.name)}" title="删除工作区">×</button>
     </div>`;
   }).join("");
+}
+function renderWorkspaceResources(){
+  const box=$("#workspaceResources");
+  const active=state.view==="workspace"&&!state.search.trim();
+  const item=active?state.workspaces.find(w=>w.name===state.activeWorkspace):null;
+  box.classList.toggle("hidden",!item);
+  if(!item){box.replaceChildren();return}
+  const status=WORKSPACE_STATUS_NAMES[item.status]||WORKSPACE_STATUS_NAMES.planning;
+  const links=(item.links||[]).filter(link=>validWorkspaceUrl(link.url));
+  box.innerHTML='<div class="workspace-resource-heading"><strong>项目概况</strong>'
+    +'<span class="workspace-status-badge" data-workspace-status="'+h(item.status||"planning")+'">'+h(status)+'</span>'
+    +'<span class="workspace-resource-empty">'+links.length+' 条资源链接</span></div>'
+    +(links.length?'<nav class="workspace-resource-links" aria-label="项目资源">'
+    +links.map(link=>'<a href="'+h(validWorkspaceUrl(link.url))+'" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" title="'+h(link.url)+'">↗ '+h(link.name)+'</a>').join("")
+    +'</nav>':'<span class="workspace-resource-empty">尚未添加资源链接，可点击「编辑工作区」保存论文、仓库、文档等网页入口。</span>');
 }
 function renderCrumb(){
   const bits=[`<button type="button" data-crumb="all">首页</button>`];
@@ -718,6 +747,7 @@ function render(skipNav=false){
   if(!skipNav)renderNav();
   else {renderSavedViews();renderFolderGroups();renderWorkspaces()}
   renderCrumb();
+  renderWorkspaceResources();
   renderTagFilters();
   const trashView=state.view==="trash"&&!state.search.trim();
   $("#newBtn").hidden=trashView ||
@@ -1087,6 +1117,7 @@ function toggleSelected(id){
    folder groups that bulk-open 2–8 Windows Explorer windows. */
 let editingWorkspaceIndex=-1;
 let workspaceDraftMembers=new Set();
+let workspaceDraftLinks=[];
 let workspaceSaving=false;
 function validateWorkspaceName(value){
   const name=String(value??"").trim();
@@ -1134,6 +1165,28 @@ function renderWorkspaceMembers(){
     +(remaining.length>page.length?'<p class="settings-note">仅显示前 120 个匹配模块，请继续输入关键词缩小范围。</p>':"");
   $("#workspaceMemberSummary").textContent="已选择 "+selected.length+"/30 个模块；可添加候选 "+remaining.length+" 个。";
 }
+function renderWorkspaceLinkEditor(){
+  $("#workspaceLinkAdd").disabled=workspaceDraftLinks.length>=8;
+  $("#workspaceLinkList").innerHTML=workspaceDraftLinks.map((link,index)=>
+    '<div class="workspace-link-row">'
+    +'<input type="text" maxlength="60" data-workspace-link-name="'+index+'" aria-label="资源名称 '+(index+1)+'" placeholder="例如：GitHub项目" value="'+h(link.name)+'">'
+    +'<input type="url" maxlength="2048" data-workspace-link-url="'+index+'" aria-label="资源链接 '+(index+1)+'" placeholder="https://example.com/" value="'+h(link.url)+'">'
+    +'<button type="button" data-workspace-link-remove="'+index+'" aria-label="删除第 '+(index+1)+' 条资源">移除</button></div>').join("");
+}
+function validateWorkspaceDraftLinks(){
+  if(workspaceDraftLinks.length>8)throw new Error("最多添加8条网页资源");
+  const seen=new Set();
+  return workspaceDraftLinks.map((link,index)=>{
+    const name=link.name.trim(),url=link.url.trim();
+    if(!name||Array.from(name).length>60||/[\x00-\x1f\x7f]/.test(name))
+      throw new Error("第"+(index+1)+"条资源名称无效（1—60字）");
+    const safeUrl=validWorkspaceUrl(url);
+    if(!safeUrl)throw new Error("第"+(index+1)+"条资源必须是完整的 HTTP/HTTPS 地址，不能包含空白或账号密码");
+    if(seen.has(safeUrl.toLocaleLowerCase()))throw new Error("资源链接不能重复");
+    seen.add(safeUrl.toLocaleLowerCase());
+    return {name,url:safeUrl};
+  });
+}
 function openWorkspaceDialog(index=-1,initialMembers=null){
   if(workspaceSaving)return;
   const record=index>=0?state.workspaces[index]:null;
@@ -1144,6 +1197,9 @@ function openWorkspaceDialog(index=-1,initialMembers=null){
   $("#workspaceDialogTitle").textContent=record?"编辑项目工作区":"新建项目工作区";
   $("#workspaceName").value=record?.name||"";
   $("#workspaceDescription").value=record?.description||"";
+  $("#workspaceStatus").value=record?.status||"planning";
+  workspaceDraftLinks=(record?.links||[]).map(link=>({...link}));
+  renderWorkspaceLinkEditor();
   $("#workspaceMemberSearch").value="";
   renderWorkspaceMembers();
   $("#workspaceLayer").classList.remove("hidden");
@@ -1154,6 +1210,7 @@ function closeWorkspaceDialog(){
   $("#workspaceLayer").classList.add("hidden");
   editingWorkspaceIndex=-1;
   workspaceDraftMembers=new Set();
+  workspaceDraftLinks=[];
 }
 async function submitWorkspace(event){
   event.preventDefault();
@@ -1174,9 +1231,13 @@ async function submitWorkspace(event){
   if(editingWorkspaceIndex<0&&state.workspaces.length>=20){
     toast("最多保存20个工作区",true);return;
   }
+  const status=$("#workspaceStatus").value;
+  if(!WORKSPACE_STATUS_NAMES[status]){toast("请选择有效的项目状态",true);return}
+  let links;
+  try{links=validateWorkspaceDraftLinks()}catch(error){toast(error.message,true);return}
   const previous=state.workspaces;
-  const updated=previous.map(item=>({name:item.name,description:item.description,members:[...item.members]}));
-  const current={name,description,members:ids};
+  const updated=previous.map(item=>copyWorkspaceRecord(item));
+  const current={name,description,members:ids,status,links};
   if(editingWorkspaceIndex<0)updated.push(current);
   else updated[editingWorkspaceIndex]=current;
   workspaceSaving=true;
@@ -1215,7 +1276,10 @@ function duplicateWorkspace(index){
   $("#workspaceDialogTitle").textContent="复制项目工作区";
   $("#workspaceName").value=name;
   $("#workspaceDescription").value=item.description;
-  toast("已复制工作区内容，请检查名称与模块后点击保存");
+  $("#workspaceStatus").value=item.status||"planning";
+  workspaceDraftLinks=(item.links||[]).map(link=>({...link}));
+  renderWorkspaceLinkEditor();
+  toast("已复制工作区内容，请检查名称、资源与模块后点击保存");
 }
 async function deleteWorkspace(index){
   const item=state.workspaces[index];
@@ -1260,8 +1324,8 @@ async function addNodeToWorkspace(index){
   if(!item||!byId(nodeId)||workspaceSaving||item.members.includes(nodeId)||item.members.length>=30)return;
   const before=state.workspaces;
   const after=before.map((w,i)=>i===index?
-    {name:w.name,description:w.description,members:[...w.members,nodeId]}:
-    {name:w.name,description:w.description,members:[...w.members]});
+    {...copyWorkspaceRecord(w),members:[...w.members,nodeId]}:
+    copyWorkspaceRecord(w));
   workspaceSaving=true;
   state.workspaces=after;
   try{
@@ -1987,6 +2051,32 @@ function bind(){
     if(remove)deleteWorkspace(Number(remove.dataset.workspaceDelete));
   });
   $("#workspaceForm").addEventListener("submit",submitWorkspace);
+  $("#workspaceLinkAdd").addEventListener("click",()=>{
+    if(workspaceDraftLinks.length>=8)return;
+    workspaceDraftLinks.push({name:"",url:""});
+    renderWorkspaceLinkEditor();
+    $("#workspaceLinkList").querySelector('[data-workspace-link-name="'+(workspaceDraftLinks.length-1)+'"]')?.focus();
+  });
+  $("#workspaceLinkList").addEventListener("input",e=>{
+    const target=e.target;
+    if(target.matches("[data-workspace-link-name]")){
+      const index=Number(target.dataset.workspaceLinkName);
+      if(workspaceDraftLinks[index])workspaceDraftLinks[index].name=target.value;
+    }
+    if(target.matches("[data-workspace-link-url]")){
+      const index=Number(target.dataset.workspaceLinkUrl);
+      if(workspaceDraftLinks[index])workspaceDraftLinks[index].url=target.value;
+    }
+  });
+  $("#workspaceLinkList").addEventListener("click",e=>{
+    const button=e.target.closest("[data-workspace-link-remove]");
+    if(!button)return;
+    const index=Number(button.dataset.workspaceLinkRemove);
+    if(!Number.isSafeInteger(index)||index<0||index>=workspaceDraftLinks.length)return;
+    workspaceDraftLinks.splice(index,1);
+    renderWorkspaceLinkEditor();
+    $("#workspaceLinkAdd").focus();
+  });
   $("#workspaceMemberSearch").addEventListener("input",renderWorkspaceMembers);
   $("#workspaceMemberList").addEventListener("click",e=>{
     const button=e.target.closest("[data-workspace-move]");
