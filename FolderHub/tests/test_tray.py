@@ -257,7 +257,9 @@ class TrayServiceTests(TestCase):
                                   if item['kind']=='folder']),8)
             # A completed write must be visible on the very next shortcut.
             first_id=minimal[0]['id']
-            store.update(first_id,{'title':'Renamed shortcut'})
+            with store.connect() as db:
+                db.execute("UPDATE nodes SET title=? WHERE id=?",
+                           ("Renamed shortcut", first_id))
             self.assertEqual(tray.build_quick_entries(
                 store.quick_menu_nodes(),[],[]),
                 tray.build_quick_entries(store.all(),[],[]))
