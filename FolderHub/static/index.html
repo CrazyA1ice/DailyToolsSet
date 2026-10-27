@@ -17,11 +17,7 @@
     <div class="nav-label">快捷导航</div>
     <nav id="specialNav" class="nav-stack">
       <button type="button" class="nav-item active" data-view="all"><span>◫</span> 首页 · 根模块 <span class="nav-count" id="rootCount">0</span></button>
-      <button type="button" class="nav-item" data-view="favorites"><span>★</span> 我的收藏 <span class="nav-count" id="favoriteCount">0</span></button>
-      <button type="button" class="nav-item" data-view="recent" title="最近打开过的文件夹"><span>◷</span> 最近使用 <span class="nav-count" id="recentCount">0</span></button>
-      <button type="button" class="nav-item" data-view="frequent" title="依据 FolderHub 记录的打开次数排列文件夹"><span>▥</span> 常用文件夹 <span class="nav-count" id="frequentCount">0</span></button>
       <button type="button" class="nav-item" data-view="tags" title="跨目录筛选标签"><span>⌗</span> 标签筛选 <span class="nav-count" id="tagCount">0</span></button>
-      <button type="button" class="nav-item" data-view="trash"><span>♻</span> 回收站 <span class="nav-count" id="trashCount">0</span></button>
     </nav>
     <div id="smartViewSection" class="saved-view-section hidden">
       <div class="nav-label">智能收藏夹 <span id="smartViewCount" class="saved-view-count">0</span></div>
@@ -60,8 +56,6 @@
       <div id="bulkBar" class="bulk-bar hidden" role="toolbar" aria-label="批量管理模块">
         <strong id="bulkCount">已选择 0 项</strong>
         <button type="button" id="bulkSelectAll" class="outline-btn">全选已显示模块</button>
-        <button type="button" id="bulkFavorite" class="outline-btn">★ 批量收藏</button>
-        <button type="button" id="bulkUnfavorite" class="outline-btn">☆ 取消收藏</button>
         <button type="button" id="bulkTagAdd" class="outline-btn">⌗ 批量添加标签</button>
         <button type="button" id="bulkTagRemove" class="outline-btn">− 批量移除标签</button>
         <button type="button" id="bulkSaveGroup" class="outline-btn" title="选中 2—8 个已绑定文件夹后保存为工作组">◈ 保存为工作组</button>
@@ -163,6 +157,7 @@
     <section class="settings-section"><div class="setting-heading"><h3>⏻ 开机自启动</h3><p>Windows 登录后使用 pythonw.exe 静默启动系统托盘与本地服务，不显示命令行窗口，也不会主动打开浏览器。</p></div>
       <label class="toggle-row" for="startupToggle"><div><strong>登录 Windows 后自动运行</strong><small id="startupStatus">正在检查启动状态...</small></div><span class="switch"><input type="checkbox" id="startupToggle" disabled><span class="slider"></span></span></label>
       <p class="settings-note">默认关闭。仅操作当前用户的启动项，无需管理员权限；关闭开关不会停止当前服务。手动静默启动可双击 start_silent.pyw；右键系统托盘图标可以重启或退出服务。升级旧版自启动请关闭开关后重新开启；调试时使用 start_windows.bat。</p>
+      <p class="settings-note">全局快捷键只保留一个：右键托盘图标 →「设置全局快捷键」，选择合适的组合。按键会打开功能菜单，可选择快速收藏、文件夹、工作区或主界面。</p>
     </section>
     <section class="settings-section"><div class="setting-heading"><h3>⌂ 设为浏览器启动页</h3><p>先开启开机自启动，再将以下地址设置为浏览器“启动时打开的页面”。</p></div>
       <div class="homepage-row"><code id="homepageUrl">http://127.0.0.1:8765/</code><button type="button" class="outline-btn" id="copyHomepage">复制地址</button></div>
@@ -251,7 +246,6 @@
         <small class="help-text">叶子模块直接映射到一个文件夹，点击即可用 Windows 文件资源管理器打开。</small>
       </div>
       <label for="entryTags">模块标签（可选）</label><input id="entryTags" type="text" maxlength="320" placeholder="例如：A股，论文，开发" autocomplete="off"><small class="help-text">逗号分隔，最多 12 个，每个不超过 24 字；不改变真实文件夹。</small>
-      <label class="check"><input id="entryFavorite" type="checkbox"> <span>加入常用收藏</span></label>
       <div class="dialog-footer"><button id="cancelDialog" type="button" class="outline-btn">取消</button><button type="submit" id="submitEntry" class="primary-btn">保存模块</button></div>
     </form>
   </div>

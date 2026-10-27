@@ -62,7 +62,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {savedViews:[],folderGroups:[],workspaces:[],activeWorkspace:null,groupBusy:false,activeSmartView:null,openingIds:new Set(),nodes:[],trash:[],recent:[],frequent:[], activeTag:null, tagSelection:[], tagExcluded:[], tagMatchMode:"any", tagPickMode:"include", renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+const state = {savedViews:[],folderGroups:[],workspaces:[],activeWorkspace:null,groupBusy:false,activeSmartView:null,openingIds:new Set(),nodes:[], activeTag:null, tagSelection:[], tagExcluded:[], tagMatchMode:"any", tagPickMode:"include", renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
 
 /* V3.0 — Native browser history for modules and special views.
    Search text is stored in the current tab's history.state, never in the URL. */
@@ -83,7 +83,7 @@ function routeFromLocation(){
     return {view:"all",id:null};
   }
   const view=hash.slice(1);
-  return ["favorites","recent","frequent","trash","tags"].includes(view)?
+  return ["tags"].includes(view)?
     {view,id:null}:{view:"all",id:null};
 }
 function routeUrl(view,id=null){
@@ -332,9 +332,8 @@ function expandLineage(id){
   saveTreeState();
 }
 async function refresh(){
-  const [data,bin,usage,frequent]=await Promise.all([
-    api("/api/nodes"),api("/api/trash"),api("/api/recent"),api("/api/frequent")]);
-  state.nodes=data.nodes;state.trash=bin.items;state.recent=usage.items;state.frequent=frequent.items;
+  const data=await api("/api/nodes");
+  state.nodes=data.nodes;
   rebuildNodeIndex();
   if(!state.treeInitialized){
     const saved=initialExpanded;
@@ -428,12 +427,9 @@ function toggleBranch(id){
   saveTreeState();renderNav();
 }
 function renderNav(){
-  const roots=children(null), fav=state.nodes.filter(n=>n.favorite);
-  $("#rootCount").textContent=roots.length;$("#favoriteCount").textContent=fav.length;
-  $("#trashCount").textContent=state.trash.length;
+  const roots=children(null);
+  $("#rootCount").textContent=roots.length;
   $("#tagCount").textContent=new Set(state.nodes.flatMap(n=>n.tags||[])).size;
-  $("#recentCount").textContent=state.recent.length;
-  $("#frequentCount").textContent=state.frequent.length;
   document.querySelectorAll("#specialNav [data-view]").forEach(el=>el.classList.toggle("active",state.view===el.dataset.view));
   const walk=(nodes) => nodes.map(n=>{
     const sub=children(n.id), expand=sub.length>0 && state.expanded.has(n.id), isLeaf=n.node_type==="leaf";
@@ -528,11 +524,7 @@ function renderCrumb(){
     bits.push('<span>›</span><strong>全局搜索</strong>');
     $("#breadcrumb").innerHTML=bits.join("");return;
   }
-  if(state.view==="favorites") bits.push(`<span>›</span><strong>我的收藏</strong>`);
-  if(state.view==="recent") bits.push(`<span>›</span><strong>最近使用</strong>`);
-  if(state.view==="frequent") bits.push(`<span>›</span><strong>常用文件夹</strong>`);
   if(state.view==="tags") bits.push(`<span>›</span><strong>标签筛选${state.activeTag?" · "+h(state.activeTag):""}</strong>`);
-  if(state.view==="trash") bits.push(`<span>›</span><strong>回收站</strong>`);
   if(state.view==="workspace") bits.push(`<span>›</span><strong>项目工作区 · ${h(state.activeWorkspace)}</strong>`);
   if(state.view==="node"){
     for(const n of ancestors(state.selected)){
@@ -706,21 +698,9 @@ function card(n,reorderable=false,keyboardActive=false){
   const linked=!!n.folder_path;
   const leaf=n.node_type==="leaf";
   const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
-  const usage=!state.search && state.view==="recent"?
-    state.recent.find(item=>item.node_id===n.id):
-    !state.search && state.view==="frequent"?
-      state.frequent.find(item=>item.node_id===n.id):null;
-  const lastUsed=usage?new Date(usage.last_opened_at):null;
-  const recentText=usage?(state.view==="frequent"?
-    `▥ 累计打开 ${Number(usage.open_count)||0} 次 · 最近使用：${lastUsed && !Number.isNaN(lastUsed.getTime())?lastUsed.toLocaleString("zh-CN"):"未知"}`:
-    `${usage.pinned?"📌 已置顶 · ":""}最近打开：${lastUsed && !Number.isNaN(lastUsed.getTime()) ? lastUsed.toLocaleString("zh-CN") : "未知时间"} · 累计 ${Number(usage.open_count)||0} 次`):"";
-  const contextText=state.search?`所属：${lineage}`:recentText;
-  // List metadata belongs in the primary information column, not the grid's
-  // auxiliary sibling row (which was deliberately hidden in list mode).
+  const contextText=state.search?`所属：${lineage}`:"";
   const listContext=state.layout==="list" && contextText?
-    `<span class="list-card-context" title="${h(contextText)}">${state.search?highlightSearch(contextText,state.search):h(contextText)}</span>`:"";
-  const recentCaption=state.layout!=="list" && recentText?
-    `<div class="entry-lineage">${h(recentText)}</div>`:"";
+    `<span class="list-card-context" title="${h(contextText)}">${highlightSearch(contextText,state.search)}</span>`:"";
   const tags=Array.isArray(n.tags)?n.tags:[];
   const tagChips=tags.length?`<span class="card-tags" title="${h(tags.join("、"))}">${tags.slice(0,3).map(tag=>`<span class="card-tag">⌗ ${state.search?highlightSearch(tag,state.search):h(tag)}</span>`).join("")}${tags.length>3?`<span class="card-tag">+${tags.length-3}</span>`:""}</span>`:"";
   const primaryTitle=leaf?"在 Windows 资源管理器打开文件夹":"进入此模块";
@@ -731,11 +711,9 @@ function card(n,reorderable=false,keyboardActive=false){
     </div>
     <div class="card-head"><span class="folder-icon ${linked?'':'unlinked'}">${h(iconFor(n))}</span>
       <div class="card-actions">
-        ${usage && state.view==="recent" && !state.selectMode?`<button type="button" class="small-action recent-pin ${usage.pinned?"on":""}" title="${usage.pinned?"取消置顶":"置顶到最近使用顶部"}" aria-label="${usage.pinned?"取消置顶":"置顶"} ${h(n.title)}" data-action="pin" data-id="${n.id}">${usage.pinned?"📌":"📍"}</button>`:""}
         ${state.selectMode?`<button type="button" class="card-select" data-action="select" data-id="${n.id}" aria-pressed="${state.selectedIds.has(n.id)}" aria-label="${state.selectedIds.has(n.id)?'取消选择':'选择'} ${h(n.title)}">${state.selectedIds.has(n.id)?'✓':'○'}</button>`:''}
         ${reorderable && !state.selectMode?`<button type="button" class="small-action sort-grip" draggable="true" data-drag="${n.id}" title="拖动调整同级顺序，也可使用上下箭头键" aria-label="移动 ${h(n.title)}：拖动排序或按上下箭头键">⠿</button>`:""}
         ${!state.selectMode?`<button type="button" class="small-action card-more" title="更多操作" aria-label="更多操作：${h(n.title)}" data-action="menu" data-id="${n.id}">⋯</button>`:''}
-        <button title="${n.favorite?'取消收藏':'加入收藏'}" class="small-action ${n.favorite?'on':''}" data-action="favorite" data-id="${n.id}">${n.favorite?'★':'☆'}</button>
         <button title="编辑模块" class="small-action" data-action="edit" data-id="${n.id}">✎</button>
         <button title="移除模块（不会删除真实文件夹）" class="small-action" data-action="delete" data-id="${n.id}">×</button>
       </div>
@@ -745,7 +723,6 @@ function card(n,reorderable=false,keyboardActive=false){
       <span class="path" title="${h(n.folder_path||lineage)}">${state.search?highlightSearch(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`),state.search):h(linked?n.folder_path:(leaf?'未设置有效文件夹':`${childCount} 个子模块`))}</span>
       ${listContext}${tagChips}</button>
     ${state.search && state.layout!=="list"?`<div class="entry-lineage" title="${h(lineage)}">⌁ ${highlightSearch(lineage,state.search)}</div>`:''}
-    ${recentCaption}
     <div class="card-bottom"><span class="pill ${linked?'linked':''}">${leaf?'● 文件夹入口':`${childCount} 个子模块`}</span>
       <div class="card-links">${state.search && !state.selectMode?`<button type="button" data-action="locate" data-id="${n.id}" title="定位到原目录，不打开文件夹">⌖ 定位</button>`:""}${!leaf?`<button data-action="enter" data-id="${n.id}">进入 ›</button>`:''}
         ${linked?`<button data-action="open" data-id="${n.id}">打开 ↗</button>`:''}
@@ -770,19 +747,6 @@ function searchAll(term){
       return aOwn-bOwn || a.node.title.localeCompare(b.node.title,"zh-CN");
     }).map(item=>item.node);
 }
-function trashCard(item){
-  const date=new Date(item.deleted_at);
-  const dateText=Number.isNaN(date.getTime())?"未知时间":date.toLocaleString("zh-CN");
-  return `<article class="trash-card" data-trash-id="${item.id}">
-    <span class="trash-card-icon" aria-hidden="true">♻</span>
-    <div class="trash-card-content"><strong>${h(item.title)}</strong>
-      <span>${item.item_count} 条导航记录 · ${h(dateText)}</span></div>
-    <div class="trash-card-actions">
-      <button type="button" class="outline-btn" data-trash-action="restore" data-trash-id="${item.id}">恢复</button>
-      <button type="button" class="outline-btn trash-purge" data-trash-action="purge" data-trash-id="${item.id}">永久清除</button>
-    </div>
-  </article>`;
-}
 function render(skipNav=false){
   if((state.view==="node" && !byId(state.selected)) ||
      (state.view==="workspace"&&!state.workspaces.some(item=>item.name===state.activeWorkspace))){
@@ -794,34 +758,11 @@ function render(skipNav=false){
   renderCrumb();
   renderWorkspaceResources();
   renderTagFilters();
-  const trashView=state.view==="trash"&&!state.search.trim();
-  $("#newBtn").hidden=trashView ||
-    (["recent","frequent","workspace"].includes(state.view)&&!state.search.trim());
-  $("#selectModeBtn").hidden=trashView;
-  if(trashView){
-    state.visibleIds=[];
-    $("#sectionHeading").hidden=false;
-    $("#sectionTitle").textContent="导航回收站";
-    $("#sectionMeta").textContent="可恢复误删的模块、子模块及封面；不会触碰电脑中的真实文件夹";
-    $("#sectionOperations").innerHTML="";
-    $("#entries").className="entries trash-list";
-    $("#entries").innerHTML=state.trash.length?state.trash.map(trashCard).join(""):
-      '<div class="trash-empty"><span aria-hidden="true">♻</span><strong>回收站是空的</strong><p>移除的导航模块会暂存在这里，便于恢复。</p></div>';
-    updateBatchBar();
-    return;
-  }
+  $("#newBtn").hidden=state.view==="workspace"&&!state.search.trim();
+  $("#selectModeBtn").hidden=false;
   let display,sectionTitle;
   const searching=state.search.trim();
   if(searching){display=searchAll(searching);sectionTitle="全局搜索结果";}
-  else if(state.view==="favorites"){display=sorted(state.nodes.filter(n=>n.favorite));sectionTitle="常用入口";}
-  else if(state.view==="recent"){
-    display=state.recent.map(item=>byId(item.node_id)).filter(Boolean);
-    sectionTitle="最近打开的文件夹";
-  }
-  else if(state.view==="frequent"){
-    display=state.frequent.map(item=>byId(item.node_id)).filter(Boolean);
-    sectionTitle="常用文件夹 · 按累计打开次数排序";
-  }
   else if(state.view==="tags"){
     display=sorted(filterTaggedNodes(state.nodes,state.tagSelection,state.tagExcluded,state.tagMatchMode));
     sectionTitle=state.tagSelection.length||state.tagExcluded.length?"组合标签筛选":"全部已标记模块";
@@ -847,10 +788,6 @@ function render(skipNav=false){
     })():
     state.view==="tags"&&!searching?
     `跨目录匹配 ${display.length} 个模块 · 包含 ${state.tagSelection.length} 个，排除 ${state.tagExcluded.length} 个标签（${state.tagMatchMode==="all"?"AND":"OR"}）` :
-    state.view==="recent"&&!searching?
-    "置顶项目优先显示，其余按最近打开时间排列 · 只记录通过 FolderHub 打开的文件夹":
-    state.view==="frequent"&&!searching?
-    "累计打开次数降序排列，同次数按最近使用时间排序 · 最多统计当前保留的 200 条访问记录":
     `共 ${display.length} 个项目 · ${searching?'搜索覆盖整个目录树，结果显示完整所属层级':'叶子模块直接打开文件资源管理器'}`;
   const canAddChild=state.view==="node"&&!searching&&byId(state.selected)?.node_type!=="leaf";
   $("#newBtnText").textContent=canAddChild?"新建子模块":"新建根模块";
@@ -859,8 +796,7 @@ function render(skipNav=false){
     '<button type="button" data-action="edit-workspace">编辑工作区</button><button type="button" data-action="copy-workspace">复制工作区</button>':
     state.view==="node"&&!searching?
     `<button data-action="edit-current">编辑当前模块</button>`:
-    state.view==="recent"&&!searching&&state.recent.length?
-      '<button type="button" data-action="clear-recent" title="只清除访问记录，不删除导航模块或实际文件夹">清空访问记录</button>':"";
+    "";
   $("#entries").className="entries"+(state.layout==="list"?" list":"");
   const reorderable=!state.selectMode && !searching && (state.view==="all" || (state.view==="node" && byId(state.selected)?.node_type!=="leaf"));
   const page=display.slice(0,state.renderLimit);
@@ -869,10 +805,6 @@ function render(skipNav=false){
   $("#entries").classList.toggle("selection-mode",state.selectMode);
   $("#entries").innerHTML=display.length?page.map((n,index)=>card(n,reorderable,Boolean(searching)&&index===state.searchKeyboardIndex)).join("")+
     (display.length>page.length?`<div class="load-more"><span>已显示 ${page.length} / ${display.length} 项</span><button type="button" class="outline-btn" data-action="load-more">加载更多模块 ↓</button></div>`:""):
-    state.view==="recent"&&!searching?
-      '<div class="empty-state"><div class="empty-art">◷</div><h3>还没有最近访问记录</h3><p>通过 FolderHub 打开文件夹后，会自动显示在这里。</p></div>':
-    state.view==="frequent"&&!searching?
-      '<div class="empty-state"><div class="empty-art">▥</div><h3>还没有常用文件夹</h3><p>通过 FolderHub 打开文件夹后，会按使用次数自动排列。</p></div>':
       emptyView();
   updateBatchBar();
 }
@@ -987,7 +919,6 @@ function editDialog(id=null,parentId=undefined){
   $("#dialogTitle").textContent=node?"编辑模块":"新建模块";
   $("#entryName").value=node?.title||"";
   $("#entryPath").value=node?.folder_path||"";
-  $("#entryFavorite").checked=!!node?.favorite;
   $("#entryTags").value=(node?.tags||[]).join("，");
   $("#entryIcon").value=node?.icon||"folder";
   state.pendingCover=null;state.removeCover=false;
@@ -1031,7 +962,6 @@ async function submitDialog(event){
   const payload={title:$("#entryName").value,node_type:type,icon:$("#entryIcon").value,
     folder_path:type==="leaf"||(!$("#entryPathRow").classList.contains("hidden"))?$("#entryPath").value:null,
     parent_id:type==="root"?null:($("#entryParent").value?Number($("#entryParent").value):null),
-    favorite:$("#entryFavorite").checked,
     tags:$("#entryTags").value.split(/[,，;；\n]+/).map(x=>x.trim()).filter(Boolean)};
   const button=$("#submitEntry");button.disabled=true;
   try {
@@ -1061,13 +991,6 @@ async function openFolder(id){
   try{
     await mutate("POST",`/api/nodes/${id}/open`);
     toast("已向 Windows 资源管理器发送打开指令，并尝试将窗口置前");
-    try{
-      const [recent,frequent]=await Promise.all([api("/api/recent"),api("/api/frequent")]);
-      state.recent=recent.items;state.frequent=frequent.items;
-      $("#recentCount").textContent=state.recent.length;
-      $("#frequentCount").textContent=state.frequent.length;
-      if(["recent","frequent"].includes(state.view)&&!state.search.trim())render(true);
-    }catch(_){/* opening succeeded even if history refresh fails */}
   }catch(e){toast(e.message,true)}
   finally{
     state.openingIds.delete(id);
@@ -1075,41 +998,15 @@ async function openFolder(id){
   }
 }
 async function removeNode(id){
-  const n=byId(id);if(!n)return;
+  const node=byId(id);if(!node)return;
   const count=descendants(id).size-1;
-  if(!confirm(`确定将「${n.title}」${count?`及其 ${count} 个下级模块`:''}移入导航回收站吗？\n\n真实文件夹不会被移动或删除，可在回收站恢复。`))return;
-  try{const result=await mutate("DELETE",`/api/nodes/${id}`);await refresh();
-    toast(`已移入回收站（共 ${result.deleted} 条导航记录）`,false,
-      {label:"撤销",handler:()=>restoreTrash(result.trash_id)})}
-  catch(e){toast(e.message,true)}
-}
-async function favoriteNode(id){
-  const n=byId(id);if(!n)return;
-  const hadCardFocus=Number(document.activeElement?.closest(".entry-card")?.dataset.id)===id;
+  if(!confirm("从导航中移除「"+node.title+"」"+(count?"及 "+count+" 个子模块":"")+
+    "？\n\n不会影响磁盘文件夹。建议提前下载完整备份。"))return;
   try{
-    await mutate("PATCH",`/api/nodes/${id}`,{favorite:!n.favorite});
+    await mutate("DELETE",`/api/nodes/${id}`);
     await refresh();
-    if(hadCardFocus)restoreCardFocus(id,"favorite");
+    toast("导航记录已移除，磁盘文件未受影响");
   }catch(e){toast(e.message,true)}
-}
-async function toggleRecentPin(id){
-  const visit=state.recent.find(row=>row.node_id===id);
-  if(!visit)return;
-  const hadCardFocus=Number(document.activeElement?.closest(".entry-card")?.dataset.id)===id;
-  try{
-    await mutate("POST","/api/recent/pin",{node_id:id,pinned:!Boolean(visit.pinned)});
-    state.recent=(await api("/api/recent")).items;
-    render();
-    if(hadCardFocus)restoreCardFocus(id,"pin");
-    toast(visit.pinned?"已取消置顶":"已置顶到最近使用顶部");
-  }catch(e){toast("修改置顶失败："+e.message,true)}
-}
-async function clearRecentHistory(){
-  if(!confirm("确定清空最近使用记录吗？\\n\\n只清除访问时间和次数，不会删除任何模块或电脑中的文件夹。"))return;
-  try{
-    const result=await mutate("DELETE","/api/recent",{});
-    state.recent=[];state.frequent=[];render();toast(`已清空 ${result.cleared} 条访问记录`);
-  }catch(e){toast("清空失败："+e.message,true)}
 }
 async function act(action,id){
   switch(action){
@@ -1123,7 +1020,6 @@ async function act(action,id){
     case "child":if(byId(id)?.node_type!=="leaf")editDialog(null,id);else toast("叶子模块不能拥有子模块",true);break;
     case "edit":editDialog(id);break;
     case "delete":await removeNode(id);break;
-    case "favorite":await favoriteNode(id);break;
     case "empty-create":editDialog();break;
     case "edit-current":editDialog(state.selected);break;
     case "edit-workspace":openWorkspaceDialog(state.workspaces.findIndex(item=>item.name===state.activeWorkspace));break;
@@ -1137,8 +1033,6 @@ async function act(action,id){
         document.getElementById(`folderhub-entry-${firstNew}`)?.querySelector(".card-primary")?.focus({preventScroll:true});
       break;
     }
-    case "clear-recent":await clearRecentHistory();break;
-    case "pin":await toggleRecentPin(id);break;
   }
 }
 // Bulk selection is limited to the current visible list, including search results.
@@ -1498,9 +1392,7 @@ async function openFolderGroup(index){
   try{
     const result=await mutate("POST","/api/groups/open",{name:group.name});
     try{
-      const [recent,frequent]=await Promise.all([api("/api/recent"),api("/api/frequent")]);
-      state.recent=recent.items;state.frequent=frequent.items;
-      render();
+      await refresh();
     }catch(_){/* successful Explorer launches should still be reported */}
     showFolderGroupReport(result);
   }catch(error){toast("打开工作组失败："+error.message,true)}
@@ -1513,7 +1405,7 @@ function updateBatchBar(){
   $("#bulkCount").textContent=`已选择 ${count} 项`;
   $("#selectModeBtn").setAttribute("aria-pressed",String(state.selectMode));
   $("#selectModeBtn").textContent=state.selectMode?"✓ 退出多选":"☑ 多选";
-  for(const id of ["bulkFavorite","bulkUnfavorite","bulkTagAdd","bulkTagRemove","bulkDelete"]){$("#"+id).disabled=state.batchBusy||count===0}
+  for(const id of ["bulkTagAdd","bulkTagRemove","bulkDelete"]){$("#"+id).disabled=state.batchBusy||count===0}
   $("#bulkSaveGroup").disabled=state.batchBusy||state.groupBusy||count<2||count>8;
   $("#bulkSaveWorkspace").disabled=state.batchBusy||count<1||count>30;
   $("#bulkSelectAll").disabled=state.batchBusy||state.visibleIds.length===0;
@@ -1581,34 +1473,18 @@ async function renameCurrentTag(){
   }catch(e){toast("重命名失败："+e.message,true)}
 }
 async function batchAction(action){
-  if(state.batchBusy||!state.selectedIds.size)return;
-  const ids=[...state.selectedIds];
-  if(action==="delete"){
-    const all=new Set();ids.forEach(id=>descendants(id).forEach(x=>all.add(x)));
-    if(!confirm(`确定移除选中的 ${ids.length} 个模块吗？\n其中包含子模块在内，共 ${all.size} 条导航记录。\n\n只删除 FolderHub 的导航记录与封面，不会删除或移动电脑中的真实文件夹。\n建议先备份配置。`))return;
-  }
+  if(action!=="delete"||state.batchBusy||!state.selectedIds.size)return;
+  const ids=[...state.selectedIds],affected=new Set();
+  ids.forEach(id=>descendants(id).forEach(item=>affected.add(item)));
+  if(!confirm("移除 "+ids.length+" 个选中模块及下级共 "+affected.size+
+       " 条导航记录？\n\n磁盘文件不会删除，请提前下载完整备份。"))return;
   state.batchBusy=true;updateBatchBar();
   try{
-    const result=await mutate("POST","/api/batch",{action,ids});
+    await mutate("POST","/api/batch",{action:"delete",ids});
     exitSelectMode();await refresh();
-    if(action==="delete")toast(`已移入回收站（共 ${result.deleted} 条导航记录）`,false,
-      {label:"撤销",handler:()=>restoreTrash(result.trash_id)});
-    else toast(`已更新 ${result.changed} 个模块的收藏状态`);
-  }catch(e){toast(e.message,true)}finally{state.batchBusy=false;updateBatchBar()}
-}
-async function restoreTrash(id){
-  try{
-    const result=await mutate("POST",`/api/trash/${id}/restore`);
-    await refresh();
-    toast(`已恢复 ${result.restored} 条导航记录及对应封面`);
-  }catch(e){toast("恢复失败："+e.message,true)}
-}
-async function purgeTrash(id){
-  const item=state.trash.find(x=>x.id===id);
-  if(!item)return;
-  if(!confirm(`永久清除「${item.title}」的回收站备份吗？\n\n清除后无法从回收站恢复导航记录和封面；电脑中的真实文件不受影响。`))return;
-  try{await mutate("DELETE",`/api/trash/${id}`);await refresh();toast("回收站记录已永久清除（真实文件未受影响）")}
-  catch(e){toast("清除失败："+e.message,true)}
+    toast("已从导航移除选中模块");
+  }catch(e){toast(e.message,true)}
+  finally{state.batchBusy=false;updateBatchBar()}
 }
 function openCardMenu(id,x,y){
   closeCardMenu();
@@ -1618,7 +1494,7 @@ function openCardMenu(id,x,y){
   const actions=[];
   if(n.node_type==="leaf"||n.folder_path)actions.push(["open","在资源管理器中打开"]);
   if(n.node_type!=="leaf")actions.push(["enter","进入模块"]);
-  actions.push(["edit","编辑模块"],["favorite",n.favorite?"取消收藏":"添加到收藏"],["workspace-add","加入项目工作区…"]);
+  actions.push(["edit","编辑模块"],["workspace-add","加入项目工作区…"]);
   if(n.node_type!=="leaf")actions.push(["child","新建子模块"]);
   if(n.folder_path)actions.push(["copy-path","复制文件夹路径"]);
   actions.push(["delete","移除导航记录"]);
@@ -1947,35 +1823,13 @@ function fallbackCopy(url){const input=document.createElement("textarea");input.
 const quickPalette={open:false,items:[],selected:0,returnFocus:null};
 function quickCandidates(query=""){
   const term=String(query).trim();
-  const knownRecent=new Map(state.recent.map((row,index)=>[row.node_id,{...row,index}]));
-  const knownFrequent=new Map(state.frequent.map(row=>[row.node_id,row]));
-  if(term){
-    const lower=term.toLocaleLowerCase();
-    const matches=searchAll(term);
-    return matches.map(node=>{
-      const visit=knownRecent.get(node.id)||knownFrequent.get(node.id);
-      const title=node.title.toLocaleLowerCase();
-      let score=title===lower?0:title.startsWith(lower)?1:2;
-      if(node.favorite)score-=.35;
-      if(visit?.pinned)score-=.45;
-      else if(visit)score-=.12;
-      if(knownFrequent.has(node.id))
-        score-=Math.min(.25,Math.log2(1+Number(knownFrequent.get(node.id).open_count||0))*.045);
-      return {node,visit,score};
-    }).sort((a,b)=>a.score-b.score||a.node.title.localeCompare(b.node.title,"zh-CN")).slice(0,12);
-  }
-  const seen=new Set(),results=[];
-  const add=node=>{
-    if(!node||seen.has(node.id))return;
-    seen.add(node.id);results.push({node,visit:knownRecent.get(node.id)||knownFrequent.get(node.id)||null});
-  };
-  // Pinned and explicit favorites first; frequently used, then recent items.
-  for(const visit of state.recent)if(visit.pinned)add(byId(visit.node_id));
-  for(const node of sorted(state.nodes.filter(n=>n.favorite)))add(node);
-  for(const visit of state.frequent)add(byId(visit.node_id));
-  for(const visit of state.recent)add(byId(visit.node_id));
-  for(const node of children(null))add(node);
-  return results.slice(0,12);
+  const candidates=term?searchAll(term):
+    [...children(null),...state.nodes.filter(node=>Boolean(node.folder_path))];
+  const seen=new Set();
+  return candidates.filter(node=>{
+    if(seen.has(node.id))return false;
+    seen.add(node.id);return true;
+  }).slice(0,12).map(node=>({node}));
 }
 function renderQuickPalette(){
   const term=$("#quickInput").value;
@@ -1983,18 +1837,15 @@ function renderQuickPalette(){
   const results=$("#quickResults");
   if(!quickPalette.items.length){
     quickPalette.selected=-1;
-    results.innerHTML='<div class="quick-empty">没有匹配的模块。可返回首页新建或修改导航模块。</div>';
+    results.innerHTML='<div class="quick-empty">没有匹配的模块。</div>';
     $("#quickInput").removeAttribute("aria-activedescendant");
     return;
   }
   quickPalette.selected=0;
-  results.innerHTML=quickPalette.items.map(({node,visit},index)=>{
+  results.innerHTML=quickPalette.items.map(({node},index)=>{
     const path=node.folder_path||ancestors(node.id).map(n=>n.title).join(" / ");
     const label=(node.tags||[]).length?path+" · 标签："+node.tags.join("、"):path;
-    const kinds=[visit?.pinned?"置顶":null,node.favorite?"收藏":null,
-      knownFrequent.has(node.id)?`常用 ${knownFrequent.get(node.id).open_count} 次`:null,
-      visit&&!visit.pinned&&!knownFrequent.has(node.id)?"最近使用":null].filter(Boolean);
-    const suffix=kinds.length?kinds.join(" · "):node.node_type==="leaf"?"文件夹":"模块";
+    const suffix=node.node_type==="leaf"?"文件夹":"模块";
     return `<button type="button" class="quick-result" id="quick-option-${index}" role="option" aria-selected="false" data-quick-index="${index}">
       <span class="quick-icon" aria-hidden="true">${h(iconFor(node))}</span>
       <span class="quick-details"><strong>${term?highlightSearch(node.title,term):h(node.title)}</strong>
@@ -2099,8 +1950,6 @@ function bind(){
   $("#selectModeBtn").addEventListener("click",()=>{if(state.batchBusy)return;state.selectMode=!state.selectMode;state.selectedIds.clear();closeCardMenu();render(true)});
   $("#bulkCancel").addEventListener("click",()=>{exitSelectMode();render(true)});
   $("#bulkSelectAll").addEventListener("click",()=>{if(state.batchBusy)return;const ids=state.visibleIds;if(ids.length>200){toast("已显示模块超过 200 项，请缩小搜索范围",true);return}state.selectedIds=new Set(ids);render(true)});
-  $("#bulkFavorite").addEventListener("click",()=>batchAction("favorite"));
-  $("#bulkUnfavorite").addEventListener("click",()=>batchAction("unfavorite"));
   $("#bulkTagAdd").addEventListener("click",()=>batchTags("add"));
   $("#bulkTagRemove").addEventListener("click",()=>batchTags("remove"));
   $("#bulkSaveGroup").addEventListener("click",saveSelectedFolderGroup);
@@ -2247,13 +2096,6 @@ function bind(){
   });
   $("#breadcrumb").addEventListener("click",e=>{const item=e.target.closest("[data-crumb]");if(item)item.dataset.crumb==="all"?setView("all"):setView("node",Number(item.dataset.crumb))});
   $("#entries").addEventListener("click",e=>{
-    const trashButton=e.target.closest("[data-trash-action]");
-    if(trashButton){
-      const id=Number(trashButton.dataset.trashId);
-      if(trashButton.dataset.trashAction==="restore")restoreTrash(id);
-      else if(trashButton.dataset.trashAction==="purge")purgeTrash(id);
-      return;
-    }
     const btn=e.target.closest("[data-action]");
     if(btn)act(btn.dataset.action,Number(btn.dataset.id));
   });

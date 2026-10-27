@@ -57,7 +57,7 @@ class AdminUiContractTests(unittest.TestCase):
 
     def test_bulk_and_context_menu_contracts(self):
         for name in ("selectModeBtn","bulkBar","bulkCount","bulkSelectAll",
-                     "bulkFavorite","bulkUnfavorite","bulkDelete","bulkCancel",
+                     "bulkDelete","bulkCancel",
                      "cardContextMenu"):
             self.assertIn(f'id="{name}"',self.html)
             self.assertIn(name,self.js)
@@ -71,19 +71,16 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('.entry-card.is-selected',self.css)
         self.assertIn('.card-context-menu',self.css)
 
-    def test_recycle_bin_and_undo_interface(self):
-        for item in ("trashCount", "specialNav", "entries"):
-            self.assertIn(f'id="{item}"', self.html)
-        self.assertIn('data-view="trash"', self.html)
-        self.assertIn('function restoreTrash(id)', self.js)
-        self.assertIn('function purgeTrash(id)', self.js)
-        self.assertIn('function trashCard(item)', self.js)
-        self.assertIn('"/api/trash"', self.js)
-        self.assertIn('data-trash-action="restore"', self.js)
-        self.assertIn('data-trash-action="purge"', self.js)
-        self.assertIn('toast-action', self.js)
-        self.assertIn('.trash-card', self.css)
-        self.assertIn('.toast-action', self.css)
+    def test_legacy_trash_and_usage_are_not_in_active_navigation(self):
+        for view in ('favorites','recent','frequent','trash'):
+            self.assertNotIn('data-view="'+view+'"',self.html)
+        self.assertIn('id="specialNav"',self.html)
+        self.assertNotIn('"/api/trash"',self.js)
+        self.assertNotIn('"/api/recent"',self.js)
+        self.assertNotIn('"/api/frequent"',self.js)
+        self.assertNotIn('function trashCard(',self.js)
+        self.assertNotIn('function restoreTrash(',self.js)
+        self.assertIn('const data=await api("/api/nodes")',self.js)
 
     def test_cover_personalization_options(self):
         for key in ('coverHeight', 'coverFit'):
@@ -279,26 +276,22 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('$("#pathHealthList").addEventListener("click",actOnPathHealth)', self.js)
         self.assertIn('.path-row-actions', self.css)
 
-    def test_recent_usage_nav_and_controls(self):
-        self.assertIn('data-view="recent"',self.html)
-        self.assertIn('id="recentCount"',self.html)
-        self.assertIn('"/api/recent"',self.js)
-        self.assertIn('function clearRecentHistory()',self.js)
-        self.assertIn('data-action="clear-recent"',self.js)
-        self.assertIn('state.recent.map(item=>byId(item.node_id)).filter(Boolean)',self.js)
+    def test_removed_auxiliary_views_have_no_dom_controls(self):
+        for control in ('trashCount','recentCount','frequentCount','favoriteCount',
+                        'bulkFavorite','bulkUnfavorite','entryFavorite'):
+            self.assertNotIn('id="'+control+'"',self.html)
+        self.assertNotIn('function toggleRecentPin(',self.js)
+        self.assertNotIn('function favoriteNode(',self.js)
         self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
 
-    def test_search_keyboard_and_recent_pin_contracts(self):
-        self.assertIn('aria-keyshortcuts="Control+K Meta+K"', self.html)
+    def test_search_keyboard_without_pinned_usage_contracts(self):
+        self.assertIn('aria-keyshortcuts="Control+K Meta+K"',self.html)
         self.assertIn('state.searchKeyboardIndex',self.js)
         self.assertIn('e.key==="ArrowDown"',self.js)
         self.assertIn('"ArrowUp"',self.js)
         self.assertIn('e.key==="Enter"',self.js)
-        self.assertIn('function toggleRecentPin(id)',self.js)
-        self.assertIn('/api/recent/pin',self.js)
+        self.assertNotIn('data-action="pin"',self.js)
         self.assertIn('keyboard-active',self.css)
-        self.assertIn('data-action="pin"',self.js)
-        self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
 
     def test_list_view_spacing_and_density_controls(self):
         # Covers in compact mode must never use the grid-mode negative margin.
@@ -321,7 +314,6 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('const contextText=state.search?',self.js)
         self.assertIn('const listContext=state.layout==="list" && contextText?',self.js)
         self.assertIn('${listContext}${tagChips}</button>',self.js)
-        self.assertIn('state.layout!=="list" && recentText',self.js)
         self.assertIn('data-action="copy-path"',self.js)
         self.assertIn('async function copyFolderPath(id)',self.js)
         self.assertIn('case "copy-path":await copyFolderPath(id);break;',self.js)
@@ -354,7 +346,7 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('classList.add("is-opening")',body)
         self.assertIn('classList.remove("is-opening")',body)
         self.assertNotIn('state.openingIds.add(id);render()',body)
-        self.assertIn('if(["recent","frequent"].includes(state.view)&&!state.search.trim())render(true)',body)
+        self.assertNotIn('/api/recent',body)
 
     def test_highlight_locate_and_focus_restoration(self):
         self.assertIn("function highlightSearch(value,query)",self.js)
@@ -363,8 +355,6 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn("data-action=\"locate\"",self.js)
         self.assertIn('case "locate":locateNode(id);break;',self.js)
         self.assertIn("const limit=Math.ceil((index+1)/100)*100",self.js)
-        self.assertIn('restoreCardFocus(id,"favorite")',self.js)
-        self.assertIn('restoreCardFocus(id,"pin")',self.js)
         self.assertIn(".search-hit",self.css)
         self.assertIn(".entry-card.is-located",self.css)
         self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
@@ -405,7 +395,7 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('event.key==="ArrowDown"',self.js)
         self.assertIn('event.key==="Enter"',self.js)
         self.assertIn('if(quickPalette.open)return;',self.js)
-        self.assertIn('const seen=new Set(),results=[];',self.js)
+        self.assertIn('const seen=new Set();',self.js)
         self.assertIn('.quick-result.is-active',self.css)
         self.assertIn('.quick-dialog',self.css)
 
@@ -477,16 +467,14 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('const previouslySelected=state.tagSelection.includes(tag)',self.js)
         self.assertIn('subset.push(row||[tag,0]);',self.js)
 
-    def test_frequent_access_is_distinct_from_recent(self):
-        self.assertIn('data-view="frequent"',self.html)
-        self.assertIn('id="frequentCount"',self.html)
-        self.assertIn('"/api/frequent"',self.js)
-        self.assertIn('state.frequent=frequent.items',self.js)
-        self.assertIn('state.frequent.map(item=>byId(item.node_id)).filter(Boolean)',self.js)
-        self.assertIn('sectionTitle="常用文件夹 · 按累计打开次数排序"',self.js)
-        self.assertIn('for(const visit of state.frequent)add(byId(visit.node_id))',self.js)
-        self.assertIn('state.recent=[];state.frequent=[];',self.js)
-        self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
+    def test_quick_palette_is_lightweight_and_bounded(self):
+        self.assertIn('function quickCandidates(query="")',self.js)
+        self.assertIn('const seen=new Set();',self.js)
+        self.assertIn('return candidates.filter(node=>{',self.js)
+        self.assertIn('}).slice(0,12).map(node=>({node}));',self.js)
+        self.assertNotIn('state.recent',self.js)
+        self.assertNotIn('state.frequent',self.js)
+        self.assertNotIn('state.trash',self.js)
 
     def test_saved_folder_groups_and_result_dialog(self):
         for control in ("folderGroupSection","folderGroupNav","folderGroupCount",

@@ -14,6 +14,7 @@ import ctypes
 from ctypes import wintypes
 import json
 import os
+import tempfile
 from pathlib import Path
 import sys
 from threading import Thread
@@ -35,9 +36,47 @@ HOTKEY_ID = 46
 HOTKEY_MODIFIERS = 0x0001 | 0x0002 | 0x0004  # Alt + Ctrl + Shift
 HOTKEY_VK = ord("F")
 HOTKEY_LABEL = "Ctrl+Alt+Shift+F"
-CAPTURE_HOTKEY_ID = 47
-CAPTURE_HOTKEY_VK = ord("A")
-CAPTURE_HOTKEY_LABEL = "Ctrl+Alt+Shift+A"
+MENU_CAPTURE=1006
+MENU_SHORTCUT=1005
+MENU_KEY_BASE=3000
+HOTKEY_OPTIONS=(
+    ("Ctrl+Alt+Shift+F",0x0001|0x0002|0x0004,ord("F")),
+    ("Ctrl+Alt+Shift+Q",0x0001|0x0002|0x0004,ord("Q")),
+    ("Ctrl+Alt+Shift+S",0x0001|0x0002|0x0004,ord("S")),
+    ("Ctrl+Shift+F",0x0002|0x0004,ord("F")),
+    ("Ctrl+Alt+Space",0x0001|0x0002,0x20),
+)
+DEFAULT_HOTKEY=HOTKEY_OPTIONS[0][0]
+MB_TOPMOST=0x40000
+MB_SETFOREGROUND=0x10000
+
+
+def read_hotkey(path):
+    try:
+        data=Path(path).read_bytes()
+        if len(data)>256:return DEFAULT_HOTKEY
+        setting=json.loads(data)
+        key=setting.get("shortcut") if type(setting) is dict else None
+        if key in {row[0] for row in HOTKEY_OPTIONS}:return key
+    except (OSError,ValueError,TypeError):
+        pass
+    return DEFAULT_HOTKEY
+
+
+def save_hotkey(path,choice):
+    if choice not in {row[0] for row in HOTKEY_OPTIONS}:
+        raise ValueError("不支持的快捷键组合")
+    path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
+    tmp=None
+    try:
+        with tempfile.NamedTemporaryFile("w",encoding="utf-8",dir=path.parent,
+                                         prefix=".hotkey-",suffix=".tmp",delete=False) as f:
+            tmp=Path(f.name)
+            json.dump({"shortcut":choice},f)
+            f.flush();os.fsync(f.fileno())
+        os.replace(tmp,path)
+    finally:
+        if tmp is not None:tmp.unlink(missing_ok=True)
 
 
 def server_is_folderhub(port=PORT):
@@ -66,41 +105,20 @@ def safe_menu_title(value, limit=46):
     return "".join(safe) + ("…" if consumed < len(text) else "")
 
 
-def build_quick_entries(nodes, recent, workspaces):
-    """Bounded, path-free native menu contents from trusted local API records."""
-    by_id = {node["id"]: node for node in nodes
-             if type(node) is dict and type(node.get("id")) is int}
-    favorites = [node for node in nodes
-                 if type(node) is dict and node.get("favorite") and
-                 node.get("folder_path") and type(node.get("id")) is int][:8]
-    favorite_ids = {node["id"] for node in favorites}
-    recent_nodes, seen = [], set(favorite_ids)
-    for row in recent:
-        ident = row.get("node_id") if type(row) is dict else None
-        node = by_id.get(ident)
-        if node and node.get("folder_path") and ident not in seen:
-            recent_nodes.append(node)
-            seen.add(ident)
-        if len(recent_nodes) >= 8:
-            break
-    entries = []
-    if favorites:
-        entries.append({"kind": "heading", "label": "★ 收藏目录"})
-        entries.extend({"kind": "folder", "target": n["id"],
-                        "label": safe_menu_title(n.get("title"))}
-                       for n in favorites)
-    if recent_nodes:
-        entries.append({"kind": "heading", "label": "◷ 最近打开"})
-        entries.extend({"kind": "folder", "target": n["id"],
-                        "label": safe_menu_title(n.get("title"))}
-                       for n in recent_nodes)
-    if type(workspaces) is list and workspaces:
-        entries.append({"kind": "heading", "label": "▣ 项目工作区"})
-        entries.extend({"kind": "workspace", "target": workspace["name"],
-                        "label": safe_menu_title(workspace["name"])}
-                       for workspace in workspaces[:8]
-                       if type(workspace) is dict and type(workspace.get("name")) is str
-                       and workspace["name"])
+def build_quick_entries(nodes,recent,workspaces):
+    """Directory and workspace launch only; ignore usage/favorite metadata."""
+    folders=[{"kind":"folder","target":item["id"],
+              "label":safe_menu_title(item.get("title"))}
+             for item in nodes if type(item) is dict and type(item.get("id")) is int
+             and item.get("folder_path")][:8]
+    entries=([{"kind":"heading","label":"文件夹导航"}]+folders) if folders else []
+    groups=[{"kind":"workspace","target":item["name"],
+             "label":safe_menu_title(item["name"])}
+            for item in workspaces[:8] if type(item) is dict
+            and type(item.get("name")) is str and item["name"]]
+    if groups:
+        entries.append({"kind":"heading","label":"项目工作区"})
+        entries.extend(groups)
     return entries
 
 
@@ -170,11 +188,15 @@ class ServiceController:
         return "已连接独立运行的服务" if self.external else (
             "运行中" if self.server is not None else "已停止")
 
+    @property
+    def hotkey_file(self):
+        return (self.data_dir or app.data_directory())/"hotkey.json"
+
     def quick_entries(self):
         if self.server is not None:
             store = self.server.store
             return build_quick_entries(
-                store.all(), store.recent(),
+                store.all(), [],
                 store.preferences.get()["settings"]["workspaces"])
         # The tray must not take ownership of or restart an external service.
         if not self.external:
@@ -186,7 +208,7 @@ class ServiceController:
                 return json.load(reply)
         return build_quick_entries(
             get("/api/nodes")["nodes"],
-            get("/api/recent")["items"],
+            [],
             get("/api/preferences")["settings"]["workspaces"])
 
     def open_quick_folder(self, node_id):
@@ -314,7 +336,7 @@ class WindowsTray:
         self.hwnd = None
         self.icon_added = False
         self.hotkey_registered = False
-        self.capture_hotkey_registered = False
+        self.hotkey_choice=DEFAULT_HOTKEY
         self._callback = self.WNDPROC(self._window_proc)  # Hold callback for whole loop.
         self.taskbar_created = self.user32.RegisterWindowMessageW("TaskbarCreated")
 
@@ -411,33 +433,56 @@ class WindowsTray:
         self.icon_added = True
 
     def _register_hotkey(self):
-        # Failure must not prevent the tray and ordinary navigation from working.
-        self.hotkey_registered = bool(self.user32.RegisterHotKey(
-            self.hwnd, HOTKEY_ID, HOTKEY_MODIFIERS | self.MOD_NOREPEAT, HOTKEY_VK))
+        self.hotkey_choice=read_hotkey(self.controller.hotkey_file)
+        _,modifiers,key=next(item for item in HOTKEY_OPTIONS
+                             if item[0]==self.hotkey_choice)
+        self.hotkey_registered=bool(self.user32.RegisterHotKey(
+            self.hwnd,HOTKEY_ID,modifiers|self.MOD_NOREPEAT,key))
         if not self.hotkey_registered:
-            print("[FolderHub] global shortcut unavailable (already in use or blocked)",
-                  file=sys.stderr)
+            print("[FolderHub] shortcut unavailable:",self.hotkey_choice,file=sys.stderr)
 
     def _remove_hotkey(self):
         if self.hotkey_registered and self.hwnd:
-            self.user32.UnregisterHotKey(self.hwnd, HOTKEY_ID)
-            self.hotkey_registered = False
+            self.user32.UnregisterHotKey(self.hwnd,HOTKEY_ID)
+            self.hotkey_registered=False
 
-    def _register_capture_hotkey(self):
-        self.capture_hotkey_registered = bool(self.user32.RegisterHotKey(
-            self.hwnd, CAPTURE_HOTKEY_ID,
-            HOTKEY_MODIFIERS | self.MOD_NOREPEAT, CAPTURE_HOTKEY_VK))
-        if not self.capture_hotkey_registered:
-            print("[FolderHub] quick-capture shortcut unavailable (already in use or blocked)",
-                  file=sys.stderr)
+    def _set_hotkey(self,choice):
+        previous=self.hotkey_choice
+        if choice==previous and self.hotkey_registered:return
+        # Persist before releasing the currently working registration.
+        save_hotkey(self.controller.hotkey_file,choice)
+        self._remove_hotkey()
+        try:
+            self._register_hotkey()
+        except Exception:
+            save_hotkey(self.controller.hotkey_file,previous)
+            self._register_hotkey()
+            raise
+        if not self.hotkey_registered:
+            save_hotkey(self.controller.hotkey_file,previous)
+            self._register_hotkey()
+            self._message("新快捷键被占用，已尝试恢复之前的快捷键")
 
-    def _remove_capture_hotkey(self):
-        if self.capture_hotkey_registered and self.hwnd:
-            self.user32.UnregisterHotKey(self.hwnd, CAPTURE_HOTKEY_ID)
-            self.capture_hotkey_registered = False
+    def _show_hotkey_settings(self):
+        menu=self.user32.CreatePopupMenu()
+        if not menu:return
+        try:
+            for index,(label,_,_) in enumerate(HOTKEY_OPTIONS):
+                self.user32.AppendMenuW(menu,0,MENU_KEY_BASE+index,
+                    ("✓ " if label==self.hotkey_choice else "　")+label)
+            pos=wintypes.POINT()
+            self.user32.GetCursorPos(ctypes.byref(pos))
+            self.user32.SetForegroundWindow(self.hwnd)
+            choice=self.user32.TrackPopupMenu(menu,0x0100|0x0002,
+                 pos.x,pos.y,0,self.hwnd,None)
+            self.user32.PostMessageW(self.hwnd,0,0,0)
+            if MENU_KEY_BASE<=choice<MENU_KEY_BASE+len(HOTKEY_OPTIONS):
+                self._set_hotkey(HOTKEY_OPTIONS[choice-MENU_KEY_BASE][0])
+        finally:
+            self.user32.DestroyMenu(menu)
 
-    def _capture_explorer_directory(self):
-        foreground=self.user32.GetForegroundWindow()
+    def _capture_explorer_directory(self,foreground=None):
+        if foreground is None:foreground=self.user32.GetForegroundWindow()
         if not foreground:
             raise RuntimeError("请先切换到需要收藏的 Windows 资源管理器窗口")
         name=ctypes.create_unicode_buffer(128)
@@ -446,9 +491,9 @@ class WindowsTray:
             raise RuntimeError("仅支持资源管理器中的当前文件夹，请先激活资源管理器窗口")
         return explorer_directory_for_hwnd(int(foreground))
 
-    def _capture_current_folder(self):
+    def _capture_current_folder(self,foreground=None):
         try:
-            folder=self._capture_explorer_directory()
+            folder=self._capture_explorer_directory(foreground)
         except (OSError, ValueError, RuntimeError) as error:
             self._message(str(error))
             return
@@ -456,18 +501,19 @@ class WindowsTray:
         # where ShellWindows COM may expose a non-active tab for the same HWND.
         reply=self.user32.MessageBoxW(
             self.hwnd,
-            "将以下文件夹添加到 FolderHub 收藏？\n\n" + folder +
+            "将以下文件夹加入 FolderHub 导航？\n\n" + folder +
             "\n\n若与资源管理器当前显示的路径不一致，请选「否」。"
             "\n该操作只添加快捷导航，不会复制或移动实际文件。",
-            "确认快速收藏", 0x00000004 | 0x00000020 | 0x00000100)
+            "确认快速收录", 0x00000004 | 0x00000020 | 0x00000100 |
+            MB_TOPMOST | MB_SETFOREGROUND)
         if reply!=6:  # IDYES; default button is NO.
             return
         try:
             result=self.controller.capture_current_directory(folder)
-            self._message("已加入收藏：" + folder if result.get("created")
-                          else "此目录已在导航中，已设为收藏：" + folder)
+            self._message("已收录目录：" + folder if result.get("created")
+                          else "此目录已在导航中：" + folder)
         except (OSError, ValueError, RuntimeError) as error:
-            self._message("快速收藏失败：" + str(error))
+            self._message("快速收录失败：" + str(error))
 
     def _remove_icon(self):
         if self.icon_added and self.hwnd:
@@ -475,7 +521,8 @@ class WindowsTray:
             self.icon_added = False
 
     def _message(self, message, title="FolderHub"):
-        self.user32.MessageBoxW(self.hwnd, message, title, 0x40)
+        self.user32.MessageBoxW(self.hwnd, message, title,
+                               0x40 | MB_TOPMOST | MB_SETFOREGROUND)
 
     def _show_menu(self):
         menu = self.user32.CreatePopupMenu()
@@ -486,8 +533,9 @@ class WindowsTray:
             self.user32.AppendMenuW(menu, 0x0800, 0, None)  # MF_SEPARATOR
             self.user32.AppendMenuW(menu, 0, MENU_OPEN, "打开 FolderHub")
             self.user32.AppendMenuW(menu, 0, MENU_QUICK,
-                                    "快捷导航 (" + HOTKEY_LABEL + ")"
-                                    if self.hotkey_registered else "快捷导航（快捷键不可用）")
+                                    "功能菜单 (" + self.hotkey_choice + ")"
+                                    if self.hotkey_registered else "功能菜单（快捷键不可用）")
+            self.user32.AppendMenuW(menu,0,MENU_SHORTCUT,"设置全局快捷键…")
             self.user32.AppendMenuW(menu, 0x0001 if self.controller.external else 0,
                                     MENU_RESTART, "重启服务")
             self.user32.AppendMenuW(menu, 0x0800, 0, None)
@@ -504,6 +552,8 @@ class WindowsTray:
                 webbrowser.open(self.controller.url)
             elif selection == MENU_QUICK:
                 self._show_quick_menu()
+            elif selection == MENU_SHORTCUT:
+                self._show_hotkey_settings()
             elif selection == MENU_RESTART and not self.controller.external:
                 try:
                     self.controller.restart()
@@ -515,6 +565,7 @@ class WindowsTray:
             self.user32.DestroyMenu(menu)
 
     def _show_quick_menu(self):
+        capture_hwnd=self.user32.GetForegroundWindow()
         try:
             entries = self.controller.quick_entries()
         except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
@@ -539,8 +590,9 @@ class WindowsTray:
                 self.user32.AppendMenuW(menu, 0, command, item["label"])
             if not lookup:
                 self.user32.AppendMenuW(menu, 0x0001 | 0x0002, 0,
-                                        "暂无可用的收藏、最近目录或工作区")
+                                        "暂无已绑定文件夹或项目工作区")
             self.user32.AppendMenuW(menu, 0x0800, 0, None)
+            self.user32.AppendMenuW(menu,0,MENU_CAPTURE,"＋ 收录当前资源管理器目录…")
             self.user32.AppendMenuW(menu, 0, MENU_OPEN, "打开完整工作台…")
             position = wintypes.POINT()
             self.user32.GetCursorPos(ctypes.byref(position))
@@ -551,6 +603,8 @@ class WindowsTray:
             self.user32.PostMessageW(self.hwnd, 0, 0, 0)
             if choice == MENU_OPEN:
                 webbrowser.open(self.controller.url)
+            elif choice == MENU_CAPTURE:
+                self._capture_current_folder(capture_hwnd)
             elif choice in lookup:
                 selected = lookup[choice]
                 try:
@@ -565,9 +619,6 @@ class WindowsTray:
 
     def _window_proc(self, hwnd, msg, wparam, lparam):
         try:
-            if msg == self.WM_HOTKEY and wparam == CAPTURE_HOTKEY_ID:
-                self._capture_current_folder()
-                return 0
             if msg == self.WM_HOTKEY and wparam == HOTKEY_ID:
                 self._show_quick_menu()
                 return 0
@@ -614,7 +665,6 @@ class WindowsTray:
             self.controller.start()
             self._add_icon()
             self._register_hotkey()
-            self._register_capture_hotkey()
             if open_browser:
                 webbrowser.open(self.controller.url)
             message = wintypes.MSG()
@@ -627,7 +677,6 @@ class WindowsTray:
                 u.TranslateMessage(ctypes.byref(message))
                 u.DispatchMessageW(ctypes.byref(message))
         finally:
-            self._remove_capture_hotkey()
             self._remove_hotkey()
             self._remove_icon()
             self.controller.stop()
