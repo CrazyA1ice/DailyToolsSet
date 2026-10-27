@@ -27,6 +27,17 @@ class PowerShellRunnerContractTests(unittest.TestCase):
         self.assertNotIn('*>&1', self.commands)
         self.assertNotIn('2>&1', self.commands)
 
+    def test_multiple_python_installations_select_one_scalar_path(self):
+        # Get-Command -CommandType Application may enumerate *all* PATH
+        # candidates; .Source on its Object[] crashes Start-Process -FilePath.
+        self.assertIn('Get-Command python -CommandType Application -ErrorAction Stop |',
+                      self.commands)
+        self.assertIn('Select-Object -First 1', self.commands)
+        self.assertIn('$Python = [string]$PythonCommand.Source', self.commands)
+        self.assertIn('[string]::IsNullOrWhiteSpace($Python)', self.commands)
+        self.assertNotIn('(Get-Command python -CommandType Application -ErrorAction Stop).Source',
+                         self.commands)
+
     def test_preserves_real_python_exit_code_and_failure_logs(self):
         self.assertIn('$ExitCode = $Process.ExitCode', self.code)
         self.assertIn('if ($ExitCode -ne 0) { exit $ExitCode }', self.code)
