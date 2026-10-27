@@ -738,3 +738,35 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
     padding-inline:16px;
   }
 }
+
+/* V2.8 — progressive lists and consistent accessible hover/focus feedback. */
+.entries .load-more{
+  grid-column:1/-1;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  gap:9px;
+  padding:23px 15px;
+  border:1px dashed var(--line-strong);
+  border-radius:12px;
+  background:var(--surface);
+  color:var(--muted);
+  font-size:.86rem;
+}
+.entries.list .load-more{width:100%}
+.entries .load-more .outline-btn{min-height:38px}
+.entry-card:focus-visible,
+.entry-card:focus-within{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 13%,transparent);
+}
+.card-primary:focus-visible,
+.card-actions button:focus-visible,
+.card-links button:focus-visible{
+  outline:2px solid var(--accent);
+  outline-offset:3px;
+}
+@media(prefers-reduced-motion:reduce){
+  .entry-card{transform:none!important}
+}

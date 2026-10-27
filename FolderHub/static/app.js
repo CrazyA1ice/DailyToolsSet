@@ -62,7 +62,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {openingIds:new Set(),nodes:[],trash:[],recent:[], searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+const state = {openingIds:new Set(),nodes:[],trash:[],recent:[], renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
 // The server is authoritative. localStorage is read ONLY to migrate a legacy browser once.
 let initialExpanded=null;
 let projectSettingsReady=false;
@@ -117,9 +117,29 @@ applyPreferences();
 const $ = (s) => document.querySelector(s);
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let toastTimer;
-const byId = id => state.nodes.find(n => n.id === id);
+// Rebuilt only after the server returns new node data. Rendering/searching then
+// use O(1) lookups instead of scanning every node for every card/ancestor.
+let nodeById = new Map();
+let childrenByParent = new Map();
+let searchRecords = [];
+const byId = id => nodeById.get(id);
 const sorted = nodes => [...nodes].sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
-const children = id => sorted(state.nodes.filter(n=>n.parent_id===id));
+const children = id => childrenByParent.get(id??null) || [];
+function rebuildNodeIndex(){
+  nodeById = new Map(state.nodes.map(node=>[node.id,node]));
+  childrenByParent = new Map();
+  for(const node of state.nodes){
+    const parent = node.parent_id??null;
+    if(!childrenByParent.has(parent))childrenByParent.set(parent,[]);
+    childrenByParent.get(parent).push(node);
+  }
+  for(const nodes of childrenByParent.values())nodes.sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
+  searchRecords=state.nodes.map(node=>{
+    const own=(node.title+" "+(node.folder_path||"")).toLocaleLowerCase();
+    const full=ancestors(node.id).map(entry=>entry.title).join(" /").toLocaleLowerCase();
+    return {node,own,body:own+" "+full};
+  });
+}
 
 function toast(message, error=false, action=null) {
   const el=$("#toast");
@@ -161,6 +181,7 @@ function expandLineage(id){
 async function refresh(){
   const [data,bin,usage]=await Promise.all([api("/api/nodes"),api("/api/trash"),api("/api/recent")]);
   state.nodes=data.nodes;state.trash=bin.items;state.recent=usage.items;
+  rebuildNodeIndex();
   if(!state.treeInitialized){
     const saved=initialExpanded;
     state.expanded=new Set(Array.isArray(saved)?saved.filter(id=>Number.isInteger(id)):children(null).map(n=>n.id));
@@ -171,9 +192,12 @@ async function refresh(){
 }
 
 function descendants(id) {
-  const found=new Set([id]);
-  let changed=true;
-  while(changed){changed=false;for(const n of state.nodes){if(n.parent_id!==null && found.has(n.parent_id) && !found.has(n.id)){found.add(n.id);changed=true}}}
+  const found=new Set([id]), queue=[id];
+  for(let offset=0;offset<queue.length;offset++){
+    for(const node of children(queue[offset])){
+      if(!found.has(node.id)){found.add(node.id);queue.push(node.id)}
+    }
+  }
   return found;
 }
 function ancestors(id) {
@@ -184,7 +208,7 @@ function ancestors(id) {
 function setView(view,id=null){
   closeCardMenu();exitSelectMode();
   state.view=view;state.selected=id;
-  state.search="";state.searchKeyboardIndex=-1;$("#search").value="";
+  state.search="";state.searchKeyboardIndex=-1;state.renderLimit=100;$("#search").value="";
   if(view==="node"&&id!==null)expandLineage(id);
   render();
 }
@@ -288,13 +312,12 @@ function emptyView(){
 function searchAll(term){
   const words=term.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   if(!words.length)return [];
-  return state.nodes.map(n=>{
-    const own=(n.title+" "+(n.folder_path||"")).toLocaleLowerCase();
-    const full=ancestors(n.id).map(x=>x.title).join(" /").toLocaleLowerCase();
-    const body=own+" "+full;
-    if(!words.every(w=>body.includes(w)))return null;
-    return {node:n,score:words.every(w=>own.includes(w))?0:1};
-  }).filter(Boolean).sort((a,b)=>a.score-b.score||a.node.title.localeCompare(b.node.title,"zh-CN")).map(x=>x.node);
+  return searchRecords.filter(item=>words.every(word=>item.body.includes(word)))
+    .sort((a,b)=>{
+      const aOwn=words.every(word=>a.own.includes(word))?0:1;
+      const bOwn=words.every(word=>b.own.includes(word))?0:1;
+      return aOwn-bOwn || a.node.title.localeCompare(b.node.title,"zh-CN");
+    }).map(item=>item.node);
 }
 function trashCard(item){
   const date=new Date(item.deleted_at);
@@ -309,9 +332,10 @@ function trashCard(item){
     </div>
   </article>`;
 }
-function render(){
+function render(skipNav=false){
   if(state.view==="node" && !byId(state.selected)){state.view="all";state.selected=null}
-  renderNav();renderCrumb();
+  if(!skipNav)renderNav();
+  renderCrumb();
   const trashView=state.view==="trash"&&!state.search.trim();
   $("#newBtn").hidden=trashView || (state.view==="recent"&&!state.search.trim());
   $("#selectModeBtn").hidden=trashView;
@@ -354,10 +378,12 @@ function render(){
       '<button type="button" data-action="clear-recent" title="只清除访问记录，不删除导航模块或实际文件夹">清空访问记录</button>':"";
   $("#entries").className="entries"+(state.layout==="list"?" list":"");
   const reorderable=!state.selectMode && !searching && (state.view==="all" || (state.view==="node" && byId(state.selected)?.node_type!=="leaf"));
-  state.visibleIds=display.map(n=>n.id);
+  const page=display.slice(0,state.renderLimit);
+  state.visibleIds=page.map(n=>n.id);
   if(!searching || state.searchKeyboardIndex >= display.length)state.searchKeyboardIndex=-1;
   $("#entries").classList.toggle("selection-mode",state.selectMode);
-  $("#entries").innerHTML=display.length?display.map((n,index)=>card(n,reorderable,Boolean(searching)&&index===state.searchKeyboardIndex)).join(""):
+  $("#entries").innerHTML=display.length?page.map((n,index)=>card(n,reorderable,Boolean(searching)&&index===state.searchKeyboardIndex)).join("")+
+    (display.length>page.length?`<div class="load-more"><span>已显示 ${page.length} / ${display.length} 项</span><button type="button" class="outline-btn" data-action="load-more">加载更多模块 ↓</button></div>`:""):
     state.view==="recent"&&!searching?
       '<div class="empty-state"><div class="empty-art">◷</div><h3>还没有最近访问记录</h3><p>通过 FolderHub 打开文件夹后，会自动显示在这里。</p></div>':
       emptyView();
@@ -537,13 +563,23 @@ async function submitDialog(event){
 }
 async function openFolder(id){
   if(state.openingIds.has(id))return;
-  state.openingIds.add(id);render();
+  state.openingIds.add(id);
+  // Keep DOM nodes, keyboard focus and scroll position stable while Explorer
+  // launches instead of rebuilding the whole sidebar and card grid twice.
+  document.getElementById(`folderhub-entry-${id}`)?.classList.add("is-opening");
   try{
     await mutate("POST",`/api/nodes/${id}/open`);
     toast("已向 Windows 资源管理器发送打开指令，并尝试将窗口置前");
-    try{state.recent=(await api("/api/recent")).items}catch(_){/* opening succeeded even if history refresh fails */}
+    try{
+      state.recent=(await api("/api/recent")).items;
+      $("#recentCount").textContent=state.recent.length;
+      if(state.view==="recent"&&!state.search.trim())render(true);
+    }catch(_){/* opening succeeded even if history refresh fails */}
   }catch(e){toast(e.message,true)}
-  finally{state.openingIds.delete(id);render()}
+  finally{
+    state.openingIds.delete(id);
+    document.getElementById(`folderhub-entry-${id}`)?.classList.remove("is-opening");
+  }
 }
 async function removeNode(id){
   const n=byId(id);if(!n)return;
@@ -589,6 +625,15 @@ async function act(action,id){
     case "favorite":await favoriteNode(id);break;
     case "empty-create":editDialog();break;
     case "edit-current":editDialog(state.selected);break;
+    case "load-more":{
+      const previous=state.visibleIds.length;
+      state.renderLimit+=100;
+      render(true);
+      const firstNew=state.visibleIds[previous];
+      if(firstNew!==undefined)
+        document.getElementById(`folderhub-entry-${firstNew}`)?.querySelector(".card-primary")?.focus({preventScroll:true});
+      break;
+    }
     case "clear-recent":await clearRecentHistory();break;
     case "pin":await toggleRecentPin(id);break;
   }
@@ -607,7 +652,7 @@ function toggleSelected(id){
   if(state.selectedIds.has(id))state.selectedIds.delete(id);
   else if(state.selectedIds.size>=200){toast("一次最多选择 200 个模块",true);return}
   else state.selectedIds.add(id);
-  render();
+  render(true);
 }
 function updateBatchBar(){
   const bar=$("#bulkBar"),count=state.selectedIds.size;
@@ -874,9 +919,9 @@ function fallbackCopy(url){const input=document.createElement("textarea");input.
 
 function bind(){
   bindSorting();
-  $("#selectModeBtn").addEventListener("click",()=>{if(state.batchBusy)return;state.selectMode=!state.selectMode;state.selectedIds.clear();closeCardMenu();render()});
-  $("#bulkCancel").addEventListener("click",()=>{exitSelectMode();render()});
-  $("#bulkSelectAll").addEventListener("click",()=>{if(state.batchBusy)return;const ids=state.visibleIds;if(ids.length>200){toast("当前结果超过 200 项，请缩小搜索范围",true);return}state.selectedIds=new Set(ids);render()});
+  $("#selectModeBtn").addEventListener("click",()=>{if(state.batchBusy)return;state.selectMode=!state.selectMode;state.selectedIds.clear();closeCardMenu();render(true)});
+  $("#bulkCancel").addEventListener("click",()=>{exitSelectMode();render(true)});
+  $("#bulkSelectAll").addEventListener("click",()=>{if(state.batchBusy)return;const ids=state.visibleIds;if(ids.length>200){toast("已显示模块超过 200 项，请缩小搜索范围",true);return}state.selectedIds=new Set(ids);render(true)});
   $("#bulkFavorite").addEventListener("click",()=>batchAction("favorite"));
   $("#bulkUnfavorite").addEventListener("click",()=>batchAction("unfavorite"));
   $("#bulkDelete").addEventListener("click",()=>batchAction("delete"));
@@ -907,12 +952,12 @@ function bind(){
   $("#sectionOperations").addEventListener("click",e=>{const btn=e.target.closest("[data-action]");if(btn)act(btn.dataset.action,state.selected)});
   $("#addRoot").addEventListener("click",()=>editDialog(null,null));
   $("#newBtn").addEventListener("click",()=>editDialog());
-  $("#search").addEventListener("input",e=>{closeCardMenu();state.selectedIds.clear();state.search=e.target.value;state.searchKeyboardIndex=-1;render()});
+  $("#search").addEventListener("input",e=>{closeCardMenu();state.selectedIds.clear();state.search=e.target.value;state.searchKeyboardIndex=-1;state.renderLimit=100;render(true)});
   $("#search").addEventListener("keydown",async e=>{
     if(!state.search.trim())return;
     if(e.key==="Escape"){
       e.preventDefault();e.stopPropagation();state.search="";state.searchKeyboardIndex=-1;
-      $("#search").value="";render();return;
+      $("#search").value="";state.renderLimit=100;render(true);return;
     }
     if(!["ArrowDown","ArrowUp","Enter"].includes(e.key))return;
     const results=searchAll(state.search);
@@ -926,10 +971,21 @@ function bind(){
     const old=state.searchKeyboardIndex;
     state.searchKeyboardIndex=e.key==="ArrowDown"?(old+1)%results.length:
       old<0?results.length-1:(old-1+results.length)%results.length;
-    render();
+    if(state.searchKeyboardIndex>=state.renderLimit)
+      state.renderLimit=Math.ceil((state.searchKeyboardIndex+1)/100)*100;
+    render(true);
     document.getElementById(`folderhub-entry-${results[state.searchKeyboardIndex].id}`)?.scrollIntoView({block:"nearest"});
   });
-  $("#layoutBtn").addEventListener("click",()=>{state.layout=state.layout==="grid"?"list":"grid";$("#layoutBtn").textContent=state.layout==="grid"?"▦":"☷";render();persistProjectSettings()});
+  $("#layoutBtn").addEventListener("click",()=>{
+    const scrollY=window.scrollY;
+    state.layout=state.layout==="grid"?"list":"grid";
+    $("#layoutBtn").textContent=state.layout==="grid"?"▦":"☷";
+    $("#layoutBtn").setAttribute("aria-label",state.layout==="grid"?"切换到列表模式":"切换到网格模式");
+    render(true);
+    // Preserve the user's vertical position during a layout toggle.
+    window.scrollTo({top:scrollY,behavior:"instant"});
+    persistProjectSettings();
+  });
   $("#backupBtn").addEventListener("click",exportBackup);
   $("#restoreBtn").addEventListener("click",()=>$("#importFile").click());
   $("#themeBtn").addEventListener("click",openSettings);

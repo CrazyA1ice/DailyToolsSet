@@ -170,6 +170,30 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('grid-row:3;',responsive)
         self.assertIn('flex-wrap:wrap;',responsive)
 
+    def test_indexed_navigation_progressive_render_and_focus(self):
+        self.assertIn('function rebuildNodeIndex()',self.js)
+        self.assertIn('const byId = id => nodeById.get(id)',self.js)
+        self.assertIn('const children = id => childrenByParent.get(id??null) || []',self.js)
+        self.assertIn('rebuildNodeIndex();',self.js)
+        self.assertIn('function render(skipNav=false)',self.js)
+        self.assertIn('const page=display.slice(0,state.renderLimit)',self.js)
+        self.assertIn('state.visibleIds=page.map(n=>n.id)',self.js)
+        self.assertIn('data-action="load-more"',self.js)
+        self.assertIn('case "load-more":',self.js)
+        self.assertIn('state.renderLimit=Math.ceil((state.searchKeyboardIndex+1)/100)*100',self.js)
+        self.assertIn('render(true);',self.js)
+        self.assertIn('.entries .load-more',self.css)
+        self.assertIn('entry-card:focus-visible',self.css)
+        self.assertIn('全选已显示模块',self.html)
+
+    def test_open_folder_does_not_rebuild_the_navigation(self):
+        start=self.js.index('async function openFolder(id)')
+        body=self.js[start:self.js.index('\nasync function removeNode(id)',start)]
+        self.assertIn('classList.add("is-opening")',body)
+        self.assertIn('classList.remove("is-opening")',body)
+        self.assertNotIn('state.openingIds.add(id);render()',body)
+        self.assertIn('if(state.view==="recent"&&!state.search.trim())render(true)',body)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)
