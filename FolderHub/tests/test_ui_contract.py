@@ -129,6 +129,39 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertNotIn('await applyPaths(); // Read-only',self.js)
         self.assertIn('.path-suggestion',self.css)
 
+    def test_workspace_navigation_and_portable_settings_contract(self):
+        self.assertIn('id="workspaceSection"',self.html)
+        for control in ('workspaceCount','workspaceNav',
+                        'workspaceNew','workspaceLayer','workspaceForm',
+                        'workspaceName','workspaceDescription','workspaceMemberSearch',
+                        'workspaceMemberList','workspaceMemberSummary','workspaceSave',
+                        'bulkSaveWorkspace','workspaceClose','workspaceCancel'):
+            self.assertIn(f'id="{control}"',self.html)
+            self.assertIn(control,self.js)
+        for symbol in ('function renderWorkspaces()', 'function openWorkspaceDialog(',
+                       'function renderWorkspaceMembers()', 'async function submitWorkspace(',
+                       'async function deleteWorkspace('):
+            self.assertIn(symbol,self.js)
+        self.assertIn('workspaces:state.workspaces.map(',self.js)
+        self.assertIn('state.workspaces=Array.isArray(saved.workspaces)',self.js)
+        self.assertIn('#workspace/',self.js)
+        self.assertIn('data-workspace-open=',self.js)
+        self.assertIn('data-action="edit-workspace"',self.js)
+        self.assertIn('workspaceDraftMembers.size>=30',self.js)
+        self.assertIn('.workspace-member-list',self.css)
+        self.assertIn('.workspace-nav',self.css)
+
+    def test_workspace_is_browsable_not_a_bulk_explorer_launcher(self):
+        start=self.js.index('function renderWorkspaces()')
+        end=self.js.index('function renderCrumb()',start)
+        self.assertNotIn('/api/groups/open',self.js[start:end])
+        start=self.js.index('async function submitWorkspace(event)')
+        end=self.js.index('async function deleteWorkspace(index)',start)
+        self.assertIn('persistProjectSettings()',self.js[start:end])
+        self.assertNotIn('open_in_explorer',self.js[start:end])
+        self.assertIn('display=workspace.members.map(id=>byId(id)).filter(Boolean);',self.js)
+        self.assertIn('case "edit-workspace":',self.js)
+
     def test_path_health_repair_and_export_contract(self):
         self.assertIn('id="pathExport"', self.html)
         self.assertIn('data-path-action="locate"', self.js)

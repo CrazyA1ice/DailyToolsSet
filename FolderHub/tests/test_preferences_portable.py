@@ -100,6 +100,50 @@ class PortablePreferencesTests(unittest.TestCase):
         self.assertEqual(self.prefs.get()['settings']['savedViews'],[])
         self.assertEqual(self.prefs.snapshot_bytes().count(b'"savedViews"'),1)
 
+    def test_workspaces_persist_in_zip_and_reject_invalid_input_atomically(self):
+        valid = [
+            {'name': '论文项目', 'description': '网络流量预测' + chr(10) + '实验与图表',
+             'members': [3, 9, 12]},
+            {'name': '开发', 'description': '', 'members': [5]},
+        ]
+        self.prefs.save({'workspaces': valid, 'theme': 'forest'})
+        reopened = PreferencesStore(self.root / 'data' / 'preferences.json')
+        self.assertEqual(reopened.get()['settings']['workspaces'], valid)
+        backup = self.store.make_portable_backup()
+        try:
+            with zipfile.ZipFile(backup) as archive:
+                data = json.loads(archive.read('data/preferences.json'))['settings']
+                self.assertEqual(data['workspaces'], valid)
+        finally:
+            backup.unlink(missing_ok=True)
+
+        unchanged = (self.root / 'data' / 'preferences.json').read_bytes()
+        fixture = {'name': '项目', 'description': '说明', 'members': [1, 2]}
+        invalid = [
+            {'workspaces': None},
+            {'workspaces': [dict(fixture, members=[])]},
+            {'workspaces': [dict(fixture, members=[1, 1])]},
+            {'workspaces': [dict(fixture, members=[True, 2])]},
+            {'workspaces': [dict(fixture, members=['1'])]},
+            {'workspaces': [dict(fixture, members=list(range(1, 32)))]},
+            {'workspaces': [dict(fixture, name=' A ')]},
+            {'workspaces': [dict(fixture, name='A' + chr(10) + 'B')]},
+            {'workspaces': [dict(fixture, description='A' * 241)]},
+            {'workspaces': [dict(fixture, description='A' + chr(0))]},
+            {'workspaces': [fixture, dict(fixture, name='项目')]},
+            {'workspaces': [fixture] * 21},
+            {'workspaces': [dict(fixture, unexpected=True)]},
+        ]
+        for case in invalid:
+            with self.subTest(case=str(case)[:80]), self.assertRaises(PreferenceError):
+                self.prefs.save(case)
+            self.assertEqual((self.root / 'data' / 'preferences.json').read_bytes(), unchanged)
+
+    def test_workspace_defaults_are_not_shared(self):
+        view = self.prefs.get()['settings']
+        view['workspaces'].append({'name': '临时', 'description': '', 'members': [1]})
+        self.assertEqual(self.prefs.get()['settings']['workspaces'], [])
+
     def test_folder_groups_survive_zip_and_validate_atomically(self):
         groups=[{'name':'量化研究','members':[11,12,13]},
                 {'name':'学习资料','members':[2,7]}]
