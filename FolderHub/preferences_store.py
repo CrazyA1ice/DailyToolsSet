@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from urllib.parse import urlsplit
 from threading import RLock
 
 DEFAULTS = {
@@ -34,6 +35,10 @@ MAX_GROUP_MEMBERS = 8
 MAX_WORKSPACES = 20
 MAX_WORKSPACE_MEMBERS = 30
 MAX_WORKSPACE_DESCRIPTION = 240
+WORKSPACE_STATUSES = frozenset(('planning', 'active', 'paused', 'done'))
+MAX_WORKSPACE_LINKS = 8
+MAX_WORKSPACE_LINK_TITLE = 60
+MAX_WORKSPACE_LINK_URL = 2048
 MAX_BYTES = 128 * 1024
 
 
@@ -103,13 +108,54 @@ def validate_folder_groups(value):
     return result
 
 
+def validate_workspace_links(value):
+    """Only human-entered HTTP(S) references; never local paths or executable URLs."""
+    if not isinstance(value, list) or len(value) > MAX_WORKSPACE_LINKS:
+        raise PreferenceError('每个工作区最多保存 8 条资源链接')
+    result, urls = [], set()
+    for link in value:
+        if not isinstance(link, dict) or set(link) != {'name', 'url'}:
+            raise PreferenceError('工作区资源链接字段无效')
+        name, url = link['name'], link['url']
+        if (not isinstance(name, str) or name != name.strip() or not 1 <= len(name) <= MAX_WORKSPACE_LINK_TITLE
+                or any(ord(c) < 32 or ord(c) == 127 for c in name)):
+            raise PreferenceError('资源名称必须为 1—60 字且不包含控制字符')
+        if (not isinstance(url, str) or not 1 <= len(url) <= MAX_WORKSPACE_LINK_URL
+                or any(ord(c) <= 32 or ord(c) == 127 or c == '\\' for c in url)):
+            raise PreferenceError('资源链接不能包含空白、控制字符或反斜杠')
+        try:
+            parsed = urlsplit(url)
+            valid = (parsed.scheme.lower() in ('http', 'https')
+                     and url.lower().startswith(parsed.scheme.lower() + '://')
+                     and bool(parsed.hostname) and bool(parsed.netloc)
+                     and parsed.username is None and parsed.password is None
+                     and not parsed.netloc.endswith(':')
+                     and (parsed.port is None or 1 <= parsed.port <= 65535))
+        except ValueError:
+            valid = False
+        if not valid:
+            raise PreferenceError('资源链接仅支持完整的 HTTP/HTTPS 地址，不能包含账号密码')
+        if url.casefold() in urls:
+            raise PreferenceError('同一工作区不能添加重复的资源链接')
+        urls.add(url.casefold())
+        result.append({'name': name, 'url': url})
+    return result
+
+
 def validate_workspaces(value):
-    """Saved workspaces contain module IDs only, never filesystem paths."""
+    """Workspaces contain module IDs and optional safe browser links, never executable paths.
+
+    The new status/links keys are optional so existing V4.1/V4.2 files remain
+    valid and the legacy shape stays unchanged until the user edits a workspace.
+    """
     if not isinstance(value, list) or len(value) > MAX_WORKSPACES:
         raise PreferenceError('项目工作区最多保存 20 个')
     result, used_names = [], set()
+    allowed = {'name', 'description', 'members', 'status', 'links'}
+    required = {'name', 'description', 'members'}
     for workspace in value:
-        if not isinstance(workspace, dict) or set(workspace) != {'name', 'description', 'members'}:
+        if (not isinstance(workspace, dict) or not required.issubset(workspace)
+                or set(workspace) - allowed):
             raise PreferenceError('项目工作区字段无效')
         name, description, members = (
             workspace['name'], workspace['description'], workspace['members'])
@@ -128,7 +174,15 @@ def validate_workspaces(value):
                 or any(type(node_id) is not int or node_id < 1 for node_id in members)
                 or len(set(members)) != len(members)):
             raise PreferenceError('工作区需关联 1—30 个不重复的模块 ID')
-        result.append({'name': name, 'description': description, 'members': members[:]})
+        item = {'name': name, 'description': description, 'members': members[:]}
+        if 'status' in workspace:
+            status = workspace['status']
+            if type(status) is not str or status not in WORKSPACE_STATUSES:
+                raise PreferenceError('项目状态必须为筹备中、进行中、已暂停或已完成')
+            item['status'] = status
+        if 'links' in workspace:
+            item['links'] = validate_workspace_links(workspace['links'])
+        result.append(item)
     return result
 
 
