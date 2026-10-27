@@ -3,6 +3,16 @@ $ErrorActionPreference = "Stop"
 $Project = $PSScriptRoot
 $Output = Join-Path $Project "test-results"
 New-Item -ItemType Directory -Path $Output -Force | Out-Null
+# V4.8 and earlier instructions created logs at repository root.
+# Move only known FolderHub unittest logs into this project's test-results.
+$RepositoryRoot = Split-Path -Parent $Project
+Get-ChildItem -LiteralPath $RepositoryRoot -File -Filter "folderhub-tests-*.txt" -ErrorAction SilentlyContinue | ForEach-Object {
+    $Destination = Join-Path $Output $_.Name
+    if (Test-Path -LiteralPath $Destination) {
+        $Destination = Join-Path $Output ($_.BaseName + "-legacy-" + (Get-Date -Format "yyyyMMddHHmmssfff") + ".txt")
+    }
+    Move-Item -LiteralPath $_.FullName -Destination $Destination -ErrorAction SilentlyContinue
+}
 $Log = Join-Path $Output ("folderhub-tests-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".txt")
 Push-Location $Project
 try {
