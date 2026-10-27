@@ -65,6 +65,35 @@ class PortablePreferencesTests(unittest.TestCase):
             self.prefs.save({'listDensity':'oversized'})
         self.assertEqual((self.root/'data'/'preferences.json').read_bytes(),snapshot)
 
+    def test_smart_views_are_portable_and_reject_invalid_changes(self):
+        view={'name':'A股 + Python - 归档','includes':['A股','Python'],
+              'excludes':['归档'],'mode':'all'}
+        self.prefs.save({'savedViews':[view], 'theme':'forest'})
+        reloaded=PreferencesStore(self.root/'data'/'preferences.json')
+        self.assertEqual(reloaded.get()['settings']['savedViews'],[view])
+        archive=self.store.make_portable_backup()
+        try:
+            with zipfile.ZipFile(archive) as zipped:
+                self.assertEqual(json.loads(zipped.read('data/preferences.json'))['settings']['savedViews'],[view])
+        finally:
+            archive.unlink(missing_ok=True)
+        before=(self.root/'data'/'preferences.json').read_bytes()
+        invalid=[
+            {'savedViews':None},
+            {'savedViews':[{'name':'bad','includes':[],'excludes':[],'mode':'all'}]},
+            {'savedViews':[{'name':'dup','includes':['A股'],'excludes':['A股'],'mode':'all'}]},
+            {'savedViews':[dict(view,mode='xor')]},
+            {'savedViews':[view,dict(view,name=view['name'].upper())]},
+            {'savedViews':[dict(view,name='<bad>\\n')]},
+            {'savedViews':[dict(view,includes=['A股','a股'])]},
+            {'savedViews':[view] * 25},
+            {'savedViews':[dict(view,extra=True)]},
+        ]
+        for payload in invalid:
+            with self.subTest(payload=str(payload)[:80]),self.assertRaises(PreferenceError):
+                self.prefs.save(payload)
+            self.assertEqual((self.root/'data'/'preferences.json').read_bytes(),before)
+
     def test_backup_includes_preferences_even_when_not_created(self):
         archive=self.store.make_portable_backup()
         try:

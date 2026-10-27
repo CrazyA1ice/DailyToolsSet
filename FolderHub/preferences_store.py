@@ -11,7 +11,7 @@ DEFAULTS = {
     'font': 'large', 'density': 'comfortable', 'listDensity': 'normal', 'sidebar': 'normal',
     'columns': 'auto', 'accent': 'blue', 'showCovers': True,
     'coverHeight': 'normal', 'coverFit': 'cover', 'sidebarCollapsed': False,
-    'theme': 'cloud', 'layout': 'grid', 'expanded': None,
+    'theme': 'cloud', 'layout': 'grid', 'expanded': None, 'savedViews': [],
 }
 CHOICES = {
     'font': ('normal', 'large', 'xlarge'),
@@ -27,11 +27,51 @@ CHOICES = {
 }
 BOOLEAN_KEYS = frozenset(('showCovers', 'sidebarCollapsed'))
 MAX_EXPANDED = 20000
+MAX_SAVED_VIEWS = 24
+MAX_SMART_TAGS = 30
 MAX_BYTES = 128 * 1024
 
 
 class PreferenceError(ValueError):
     pass
+
+
+def validate_saved_views(value):
+    if not isinstance(value, list) or len(value) > MAX_SAVED_VIEWS:
+        raise PreferenceError('智能收藏夹最多保存 24 个')
+    result, used_names = [], set()
+    for entry in value:
+        if not isinstance(entry, dict) or set(entry) != {'name', 'includes', 'excludes', 'mode'}:
+            raise PreferenceError('智能收藏夹字段无效')
+        name = entry['name']
+        if (not isinstance(name, str) or not 1 <= len(name.strip()) <= 40
+                or name != name.strip() or any(ord(c) < 32 or ord(c) == 127 for c in name)):
+            raise PreferenceError('智能收藏夹名称无效（最多 40 字）')
+        key = name.casefold()
+        if key in used_names:
+            raise PreferenceError('智能收藏夹名称不能重复')
+        used_names.add(key)
+        if entry['mode'] not in ('any', 'all') or type(entry['mode']) is not str:
+            raise PreferenceError('智能收藏夹匹配方式无效')
+        selections = []
+        for kind in ('includes', 'excludes'):
+            tags = entry[kind]
+            if (not isinstance(tags, list) or len(tags) > MAX_SMART_TAGS
+                    or any(not isinstance(tag, str) or not 1 <= len(tag) <= 24
+                           or tag != tag.strip()
+                           or any(c in tag for c in ',，;；')
+                           or any(ord(c) < 32 or ord(c) == 127 for c in tag)
+                           for tag in tags)
+                    or len({tag.casefold() for tag in tags}) != len(tags)):
+                raise PreferenceError('智能收藏夹标签无效')
+            selections.append(tags[:])
+        if not (selections[0] or selections[1]):
+            raise PreferenceError('智能收藏夹至少包含一个筛选条件')
+        if {tag.casefold() for tag in selections[0]} & {tag.casefold() for tag in selections[1]}:
+            raise PreferenceError('同一标签不能同时包含和排除')
+        result.append({'name': name, 'includes': selections[0],
+                       'excludes': selections[1], 'mode': entry['mode']})
+    return result
 
 
 def validate(value):
@@ -51,6 +91,8 @@ def validate(value):
                                     or any(type(n) is not int or n < 1 for n in item)
                                     or len(set(item)) != len(item)):
                 raise PreferenceError('目录树展开状态无效')
+        elif key == 'savedViews':
+            item = validate_saved_views(item)
         result[key] = item
     return result
 

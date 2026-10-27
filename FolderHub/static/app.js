@@ -62,7 +62,7 @@ function savePreferences(){
 }
 const validTheme = theme => THEMES.some(t=>t.id===theme) ? theme : "cloud";
 function getSavedTheme(){try{return validTheme(localStorage.getItem("folderhub.theme") || "cloud")}catch(_){return "cloud"}}
-const state = {openingIds:new Set(),nodes:[],trash:[],recent:[], activeTag:null, tagSelection:[], tagExcluded:[], tagMatchMode:"any", tagPickMode:"include", renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
+const state = {savedViews:[],activeSmartView:null,openingIds:new Set(),nodes:[],trash:[],recent:[], activeTag:null, tagSelection:[], tagExcluded:[], tagMatchMode:"any", tagPickMode:"include", renderLimit:100, searchKeyboardIndex:-1, token:"", view:"all", selected:null, search:"", layout:"grid", editing:null, theme:"cloud", startup:null, expanded:new Set(), treeInitialized:false, pendingCover:null, removeCover:false, draggingId:null, sorting:false,selectMode:false,selectedIds:new Set(),visibleIds:[],batchBusy:false,contextId:null};
 
 /* V3.0 — Native browser history for modules and special views.
    Search text is stored in the current tab's history.state, never in the URL. */
@@ -91,6 +91,7 @@ function navigationSnapshot(){
     tagExcluded:state.view==="tags"?[...state.tagExcluded]:[],
     tagMatchMode:state.tagMatchMode,
     tagPickMode:state.tagPickMode,
+    smartView:state.view==="tags"?state.activeSmartView:null,
     search:state.search,renderLimit:state.renderLimit,
     scrollY:Math.max(0,Math.round(window.scrollY||0))};
 }
@@ -125,22 +126,30 @@ let initialExpanded=null;
 let projectSettingsReady=false;
 let pendingSettings=null;
 let settingsWriteInFlight=false;
+let settingsWritePromise=null;
 function collectProjectSettings(){
   return {...preferences,theme:state.theme,layout:state.layout,
-    expanded:state.treeInitialized?[...state.expanded]:initialExpanded};
+    expanded:state.treeInitialized?[...state.expanded]:initialExpanded,
+    savedViews:state.savedViews.map(view=>({name:view.name,includes:[...view.includes],
+      excludes:[...view.excludes],mode:view.mode}))};
 }
 async function persistProjectSettings(){
-  if(!projectSettingsReady)return;
+  if(!projectSettingsReady)return true;
   pendingSettings=collectProjectSettings();
-  if(settingsWriteInFlight)return;
+  if(settingsWriteInFlight)return settingsWritePromise;
   settingsWriteInFlight=true;
-  try{
-    while(pendingSettings){
-      const snapshot=pendingSettings;pendingSettings=null;
-      try{await mutate("PUT","/api/preferences",{settings:snapshot})}
-      catch(e){toast("保存项目个性化设置失败："+e.message,true)}
-    }
-  }finally{settingsWriteInFlight=false}
+  settingsWritePromise=(async()=>{
+    let success=true;
+    try{
+      while(pendingSettings){
+        const snapshot=pendingSettings;pendingSettings=null;
+        try{await mutate("PUT","/api/preferences",{settings:snapshot})}
+        catch(e){success=false;toast("保存项目个性化设置失败："+e.message,true)}
+      }
+    }finally{settingsWriteInFlight=false;settingsWritePromise=null}
+    return success;
+  })();
+  return settingsWritePromise;
 }
 function legacyBrowserSettings(){
   const settings={...readPreferences(),theme:getSavedTheme(),layout:"grid",expanded:loadTreeState()};
@@ -164,6 +173,9 @@ async function loadProjectSettings(){
   state.theme=validTheme(saved.theme);
   state.layout=saved.layout==="list"?"list":"grid";
   initialExpanded=Array.isArray(saved.expanded)?saved.expanded:null;
+  state.savedViews=Array.isArray(saved.savedViews)?saved.savedViews.map(view=>({
+    name:view.name,includes:[...view.includes],excludes:[...view.excludes],mode:view.mode
+  })):[];
   projectSettingsReady=true;
   document.documentElement.dataset.theme=state.theme;
   $("#layoutBtn").textContent=state.layout==="grid"?"▦":"☷";
@@ -305,6 +317,8 @@ function setView(view,id=null,{fromHistory=false,saved=null}={}){
   state.tagMatchMode=fromHistory&&saved?.tagMatchMode==="all"?"all":"any";
   state.tagPickMode=fromHistory&&saved?.tagPickMode==="exclude"?"exclude":"include";
   state.activeTag=view==="tags"&&state.tagSelection.length===1?state.tagSelection[0]:null;
+  state.activeSmartView=view==="tags"&&fromHistory&&
+    state.savedViews.some(view=>view.name===saved?.smartView)?saved.smartView:null;
   state.search=fromHistory&&typeof saved?.search==="string"?saved.search.slice(0,300):"";
   state.searchKeyboardIndex=-1;
   state.renderLimit=fromHistory&&Number.isSafeInteger(saved?.renderLimit)?
@@ -369,6 +383,16 @@ function renderNav(){
     </div>`;
   }).join("");
   $("#treeNav").innerHTML=walk(roots);
+  renderSavedViews();
+}
+function renderSavedViews(){
+  const list=$("#smartViewNav"),section=$("#smartViewSection");
+  section.classList.toggle("hidden",!state.savedViews.length);
+  $("#smartViewCount").textContent=String(state.savedViews.length);
+  list.innerHTML=state.savedViews.map((view,index)=>{
+    const desc=`${view.mode==="all"?"全部匹配":"任一匹配"} · 包含 ${view.includes.length} · 排除 ${view.excludes.length}`;
+    return `<button type="button" class="nav-item saved-view-link ${state.view==="tags"&&state.activeSmartView===view.name?"active":""}" data-saved-view="${index}" title="${h(desc)}：${h(view.name)}"><span>◇</span><span class="saved-view-title">${h(view.name)}</span><span class="saved-view-counter">${view.includes.length+view.excludes.length}</span></button>`;
+  }).join("");
 }
 function renderCrumb(){
   const bits=[`<button type="button" data-crumb="all">首页</button>`];
@@ -400,6 +424,7 @@ function filterTaggedNodes(nodes,includes,excludes,mode="any"){
 }
 function chooseTag(tag){
   if(tag&&!state.nodes.some(node=>(node.tags||[]).includes(tag)))return;
+  state.activeSmartView=null;
   if(state.view!=="tags")setView("tags");
   if(!tag){state.tagSelection=[];state.tagExcluded=[]}
   else{
@@ -418,11 +443,88 @@ function chooseTag(tag){
 }
 function updateTagFilterMode(mode,value){
   if(state.view!=="tags" || state.search.trim())return;
+  state.activeSmartView=null;
   if(mode==="match" && ["any","all"].includes(value))state.tagMatchMode=value;
   if(mode==="pick" && ["include","exclude"].includes(value))state.tagPickMode=value;
   state.renderLimit=100;state.searchKeyboardIndex=-1;
   render(true);rememberNavigation();
 }
+
+/* V3.5 — saved, portable smart filters (no filesystem operations). */
+function validateSmartViewName(value){
+  if(typeof value!=="string" || !value.trim() || value.trim().length>40 ||
+     /[\x00-\x1f\x7f]/.test(value))
+    throw new Error("名称必须是 1—40 个字符，不能包含控制字符");
+  return value.trim();
+}
+function smartViewDefinition(name){
+  return {name,includes:[...state.tagSelection],excludes:[...state.tagExcluded],
+    mode:state.tagMatchMode};
+}
+function openSmartView(index){
+  const view=state.savedViews[index];
+  if(!view)return;
+  setView("tags");
+  // Preserve saved conditions even when an original tag is no longer assigned
+  // to any module: they will match again once the label is restored.
+  state.tagSelection=[...view.includes];
+  state.tagExcluded=[...view.excludes];
+  state.tagMatchMode=view.mode;
+  state.tagPickMode="include";
+  state.activeTag=view.includes.length===1?view.includes[0]:null;
+  state.activeSmartView=view.name;
+  render();rememberNavigation();
+}
+async function editSavedViews(action){
+  if(state.view!=="tags" || state.search.trim())return;
+  const previous=state.savedViews,previousName=state.activeSmartView;
+  let changed;
+  if(action==="save"){
+    if(!state.tagSelection.length&&!state.tagExcluded.length){
+      toast("请先选择需要保存的标签条件",true);return;
+    }
+    const input=prompt("为当前标签组合命名（最多 40 字）：",state.activeSmartView||"");
+    if(input===null)return;
+    let name;
+    try{name=validateSmartViewName(input)}catch(e){toast(e.message,true);return}
+    const index=previous.findIndex(view=>view.name.toLocaleLowerCase()===name.toLocaleLowerCase());
+    if(index>=0 && !confirm(`智能收藏夹「${previous[index].name}」已存在，覆盖原有筛选条件吗？`))return;
+    if(index<0&&previous.length>=24){toast("最多保存 24 个智能收藏夹",true);return}
+    changed=previous.map(view=>({...view}));
+    if(index>=0)changed[index]=smartViewDefinition(name);
+    else changed.push(smartViewDefinition(name));
+    state.activeSmartView=name;
+  }else if(action==="rename" || action==="delete"){
+    const index=previous.findIndex(view=>view.name===state.activeSmartView);
+    if(index<0)return;
+    changed=previous.map(view=>({...view}));
+    if(action==="rename"){
+      const input=prompt("智能收藏夹的新名称：",previous[index].name);
+      if(input===null)return;
+      let name;
+      try{name=validateSmartViewName(input)}catch(e){toast(e.message,true);return}
+      if(previous.some((view,i)=>i!==index&&view.name.toLocaleLowerCase()===name.toLocaleLowerCase())){
+        toast("已有同名智能收藏夹",true);return;
+      }
+      changed[index]={...changed[index],name};
+      state.activeSmartView=name;
+    }else{
+      if(!confirm(`删除智能收藏夹「${previous[index].name}」？\n不会删除模块、标签或真实文件夹。`))return;
+      changed.splice(index,1);
+      state.activeSmartView=null;
+    }
+  }else return;
+  state.savedViews=changed;
+  const success=await persistProjectSettings();
+  if(!success){
+    state.savedViews=previous;
+    state.activeSmartView=previousName;
+    render();return;
+  }
+  render();rememberNavigation();
+  toast(action==="save"?"智能收藏夹已保存":action==="rename"?"智能收藏夹已重命名":"智能收藏夹已删除");
+}
+
 function renderTagFilters(){
   const box=$("#tagFilters"),show=state.view==="tags"&&!state.search.trim();
   box.classList.toggle("hidden",!show);if(!show)return;
@@ -452,6 +554,10 @@ function renderTagFilters(){
     <button type="button" class="tag-mode tag-reset" data-tag-clear="1" ${!include.length&&!exclude.length?"disabled":""}>清空条件</button>
   </div>
   <p class="tag-filter-summary" role="status">${h(summary)} · 点击下方标签可切换当前选择状态。</p>
+  <div class="smart-view-actions" role="group" aria-label="智能收藏夹管理">
+    <button type="button" class="tag-mode smart-save" data-smart-action="save" ${!include.length&&!exclude.length?"disabled":""}>◇ 保存当前组合</button>
+    ${state.activeSmartView?`<span class="smart-active" title="${h(state.activeSmartView)}">已打开：${h(state.activeSmartView)}</span><button type="button" class="tag-mode" data-smart-action="rename">重命名</button><button type="button" class="tag-mode" data-smart-action="delete">删除收藏夹</button>`:""}
+  </div>
   <div class="tag-filter-options" role="group" aria-label="标签列表">
     <button type="button" class="tag-choice ${!include.length&&!exclude.length?"active":""}" data-tag-filter="" aria-pressed="${!include.length&&!exclude.length}">全部标签</button>
     ${subset.map(([tag,n])=>{
@@ -1356,7 +1462,13 @@ function bind(){
   $("#entries").addEventListener("keydown",e=>{if((e.key==="F10"&&e.shiftKey)||e.key==="ContextMenu"){const card=e.target.closest(".entry-card");if(!card)return;e.preventDefault();const r=card.getBoundingClientRect();openCardMenu(Number(card.dataset.id),r.left+32,r.top+32)}});
   document.addEventListener("pointerdown",e=>{if(!e.target.closest("#cardContextMenu"))closeCardMenu()});
   $("#specialNav").addEventListener("click",e=>{const item=e.target.closest("[data-view]");if(item)setView(item.dataset.view)});
+  $("#smartViewNav").addEventListener("click",e=>{
+    const btn=e.target.closest("[data-saved-view]");
+    if(btn)openSmartView(Number(btn.dataset.savedView));
+  });
   $("#tagFilters").addEventListener("click",e=>{
+    const smart=e.target.closest("[data-smart-action]");
+    if(smart){editSavedViews(smart.dataset.smartAction);return}
     if(e.target.closest("[data-tag-rename]")){renameCurrentTag();return}
     const mode=e.target.closest("[data-tag-match]");
     if(mode){updateTagFilterMode("match",mode.dataset.tagMatch);return}

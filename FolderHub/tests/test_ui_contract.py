@@ -286,6 +286,21 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('.tag-filter-toolbar',self.css)
         self.assertIn('.tag-choice.excluded',self.css)
 
+    def test_saved_smart_views_are_portable_and_usable(self):
+        self.assertIn('id="smartViewSection"',self.html)
+        self.assertIn('id="smartViewNav"',self.html)
+        self.assertIn('function renderSavedViews()',self.js)
+        self.assertIn('function openSmartView(index)',self.js)
+        self.assertIn('async function editSavedViews(action)',self.js)
+        self.assertIn('data-smart-action="save"',self.js)
+        self.assertIn('data-smart-action="rename"',self.js)
+        self.assertIn('data-smart-action="delete"',self.js)
+        self.assertIn('savedViews:state.savedViews.map',self.js)
+        self.assertIn('state.savedViews=Array.isArray(saved.savedViews)',self.js)
+        self.assertIn('smartView:state.view==="tags"?state.activeSmartView:null',self.js)
+        self.assertIn('.saved-view-section',self.css)
+        self.assertIn('display=children(null);sectionTitle="根模块";',self.js)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)

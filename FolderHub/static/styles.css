@@ -889,3 +889,17 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
   font-weight:700;
 }
 @media(max-width:650px){.tag-filter-toolbar .tag-reset{margin-left:0}.tag-filter-separator{display:none}}
+
+/* V3.5 — smart saved filter shortcuts, without adding cards to the home screen. */
+.saved-view-section{padding:6px 0 11px;border-bottom:1px solid var(--line)}
+.saved-view-count{float:right;font-size:.76rem;font-weight:550;color:var(--muted)}
+.saved-view-link{width:100%;min-width:0;display:flex;gap:9px;align-items:center}
+.saved-view-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.saved-view-counter{font-size:.74rem;color:var(--muted)}
+.tag-filter-toolbar .smart-view-actions{
+  width:100%;display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  border-top:1px solid var(--line);padding-top:10px;margin-top:5px
+}
+.tag-filter-toolbar .smart-view-actions .tag-mode.smart-save{font-weight:750;color:var(--accent)}
+.smart-active{font-size:.81rem;max-width:230px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;color:var(--muted)}
