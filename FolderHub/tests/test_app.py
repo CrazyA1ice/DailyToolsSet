@@ -367,8 +367,24 @@ class HttpTests(unittest.TestCase):
             code,response=self.request("GET","/api/everything/search?q=report")
             self.assertEqual((code,response),(200,payload))
             search.assert_called_once_with("report")
+        self.assertTrue(response["items"][0]["supported"])
         self.assertEqual(self.request("GET","/api/everything/search?q=a")[0],400)
         self.assertEqual(self.request("GET","/api/everything/search")[0],400)
+
+    def test_v51_everything_marks_executable_results_unavailable_for_import(self):
+        payload={"items":[{"name":"installer.exe","path":r"C:\Tools\installer.exe",
+                            "kind":"file"},
+                           {"name":"研究报告.pdf","path":r"C:\Docs\研究报告.pdf",
+                            "kind":"file"},
+                           {"name":"资料目录","path":r"C:\Docs",
+                            "kind":"folder"}],"source":"Everything","limit":30}
+        with patch.object(app.everything_search,"search",return_value=payload):
+            code,body=self.request("GET","/api/everything/search?q=report")
+        self.assertEqual(code,200)
+        self.assertEqual([item["supported"] for item in body["items"]],
+                         [False,True,True])
+        self.assertTrue(all(item["path"]==payload["items"][i]["path"]
+                            for i,item in enumerate(body["items"])))
 
     def test_static_and_crud(self):
         status,page=self.request("GET","/")
