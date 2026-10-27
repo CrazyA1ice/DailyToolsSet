@@ -925,7 +925,7 @@ async function submitDialog(event){
     // Keep current node edits if image upload fails so the cover can be retried.
     if(state.pendingCover)await mutate("POST",`/api/nodes/${actualId}/image`,{data_url:state.pendingCover});
     else if(state.removeCover&&savedId!==null)await mutate("DELETE",`/api/nodes/${actualId}/image`,{});
-    closeDialog();await refresh();
+    closeDialog();clearPathHealthResults("模块已更改，建议重新检查关联路径。");await refresh();
     if(savedId!==null)expandLineage(savedId);
     else if(type==="root"&&created?.id)state.expanded.add(created.id);
     else if(created?.id)expandLineage(created.id);
@@ -1372,6 +1372,18 @@ async function downloadPortableBackup(){
   }catch(e){toast("备份下载失败："+e.message,true)}
   finally{setTimeout(()=>{button.disabled=false},1800)}
 }
+// Path health results are an explicit, in-memory scan snapshot; never persisted or uploaded.
+let pathHealthSnapshot = null;
+let pathHealthLimit = 60;
+let pathHealthRequest = 0;
+function clearPathHealthResults(message="尚未执行检查。"){
+  pathHealthRequest++;
+  pathHealthSnapshot=null;
+  pathHealthLimit=60;
+  $("#pathExport").disabled=true;
+  $("#pathHealthSummary").textContent=message;
+  $("#pathHealthList").replaceChildren();
+}
 // Path migration must be explicit: a preview is invalidated when either input changes.
 let currentPathPlan = null;
 let pathPreviewGeneration = 0;
@@ -1384,23 +1396,71 @@ function clearPathPlan(){
 }
 function pathRows(items,kind){
   const shown=kind==="health"?items.filter(x=>!x.exists):items;
-  const limit=60;
+  const limit=kind==="health"?pathHealthLimit:60;
   let result=shown.slice(0,limit).map(item=>{
-    if(kind==="health")return `<div class="path-row"><strong>${h(item.title)}</strong><span class="path-warning">无法访问</span><code title="${h(item.path)}">${h(item.path)}</code></div>`;
+    if(kind==="health")return `<div class="path-row"><strong>${h(item.title)}</strong><span class="path-warning">无法访问</span><code title="${h(item.path)}">${h(item.path)}</code><div class="path-row-actions"><button type="button" class="outline-btn" data-path-action="locate" data-path-id="${item.id}">定位模块</button><button type="button" class="outline-btn" data-path-action="edit" data-path-id="${item.id}">修改关联路径</button></div></div>`;
     return `<div class="path-row"><strong>${h(item.title)}</strong><code title="${h(item.old_path)}">${h(item.old_path)}</code><span class="path-arrow">↓</span><code title="${h(item.new_path)}">${h(item.new_path)}</code></div>`;
   }).join("");
-  if(shown.length>limit)result+=`<p class="settings-note">仅显示前 ${limit} 条，共 ${shown.length} 条记录。</p>`;
+  if(shown.length>limit){
+    if(kind==="health")result+=`<button type="button" class="outline-btn path-load-more" data-path-action="more">再显示 ${Math.min(60,shown.length-limit)} 条（剩余 ${shown.length-limit} 条）</button>`;
+    else result+=`<p class="settings-note">仅显示前 ${limit} 条，共 ${shown.length} 条记录。</p>`;
+  }
   return result;
+}
+function csvPathCell(value){
+  const raw=String(value??"");
+  // Excel may evaluate CSV formulas from untrusted names/paths; neutralize before quoting.
+  const safe=/^[\s\u0000-\u001f]*[=+\-@]/.test(raw)?"'"+raw:raw;
+  return '"'+safe.replace(/"/g,'""')+'"';
+}
+function exportMissingPaths(){
+  const missing=pathHealthSnapshot?.items.filter(item=>!item.exists)||[];
+  if(!missing.length)return;
+  const lines=[["模块 ID","模块名称","原始关联路径"],...missing.map(item=>[item.id,item.title,item.path])];
+  const csv="\uFEFF"+lines.map(row=>row.map(csvPathCell).join(",")).join("\r\n")+"\r\n";
+  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+  const link=document.createElement("a");link.href=url;link.download=`folderhub-missing-paths-${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.append(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  toast(`已导出 ${missing.length} 条失效路径（包含私人文件夹路径，请妥善保管）`);
+}
+function actOnPathHealth(event){
+  const button=event.target.closest("[data-path-action]");
+  if(!button)return;
+  if(button.dataset.pathAction==="more"){
+    if(!pathHealthSnapshot)return;
+    pathHealthLimit+=60;
+    $("#pathHealthList").innerHTML=pathRows(pathHealthSnapshot.items,"health");
+    return;
+  }
+  if(!pathHealthSnapshot)return;
+  const id=Number(button.dataset.pathId);
+  if(!Number.isSafeInteger(id)||!pathHealthSnapshot.items.some(item=>item.id===id&&!item.exists)){
+    toast("检测结果已过期，请重新检查",true);return;
+  }
+  if(!byId(id)){
+    clearPathHealthResults("模块已被删除，请重新检查关联路径。");
+    return;
+  }
+  closeSettings();
+  if(button.dataset.pathAction==="locate")locateNode(id);
+  else if(button.dataset.pathAction==="edit")editDialog(id);
 }
 async function checkPaths(){
   const button=$("#pathCheck");button.disabled=true;
-  $("#pathHealthSummary").textContent="正在检查关联的文件夹... 网络盘可能需要一些时间。";
+  clearPathHealthResults("正在检查关联的文件夹... 网络盘可能需要一些时间。");
+  const generation=pathHealthRequest;
   try {
     const result=await mutate("POST","/api/paths/check");
+    if(generation!==pathHealthRequest)return;
+    pathHealthSnapshot=result;
+    $("#pathExport").disabled=!result.missing;
     $("#pathHealthSummary").textContent=`已检查 ${result.total} 条：可访问 ${result.accessible}，不可访问 ${result.missing}。`;
     $("#pathHealthList").innerHTML=result.missing?pathRows(result.items,"health"):'<p class="path-success">✓ 所有已关联文件夹均可访问。</p>';
-  }catch(e){$("#pathHealthSummary").textContent="检查失败："+e.message;$("#pathHealthList").replaceChildren();toast(e.message,true)}
-  finally{button.disabled=false}
+  }catch(e){
+    if(generation===pathHealthRequest)clearPathHealthResults("检查失败："+e.message);
+    toast(e.message,true);
+  }finally{button.disabled=false}
 }
 async function previewPaths(){
   clearPathPlan();
@@ -1429,8 +1489,7 @@ async function applyPaths(){
     const result=await mutate("POST","/api/paths/apply",{source:plan.source,target:plan.target,fingerprint:plan.fingerprint});
     clearPathPlan();
     $("#pathPlanSummary").textContent=`已修改 ${result.changed} 条关联路径。可点击上方按钮重新检查。`;
-    $("#pathHealthSummary").textContent="关联路径已更新，请重新执行检查。";
-    $("#pathHealthList").replaceChildren();
+    clearPathHealthResults("关联路径已更新，请重新执行检查。");
     await refresh();
     toast(`已更新 ${result.changed} 条导航路径，真实文件夹未受影响`);
   }catch(e){currentPathPlan=null;$("#pathPlanSummary").textContent="提交失败："+e.message+"；请重新生成预览。";toast(e.message,true)}
@@ -1738,6 +1797,8 @@ function bind(){
   $("#storageRefresh").addEventListener("click",refreshStorage);
   $("#storageBackup").addEventListener("click",downloadPortableBackup);
   $("#pathCheck").addEventListener("click",checkPaths);
+  $("#pathExport").addEventListener("click",exportMissingPaths);
+  $("#pathHealthList").addEventListener("click",actOnPathHealth);
   $("#pathPreview").addEventListener("click",previewPaths);
   $("#pathApply").addEventListener("click",applyPaths);
   for(const selector of ["#pathPrefixFrom","#pathPrefixTo"]){

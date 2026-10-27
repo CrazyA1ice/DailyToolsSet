@@ -133,8 +133,9 @@
     <div id="settingsPanelPaths" class="settings-page hidden" data-settings-page="paths" role="tabpanel" aria-labelledby="settingsTabPaths">
       <section class="settings-section">
         <div class="setting-heading"><h3>📂 关联文件夹检测</h3><p>手动检查已关联的文件夹路径能否访问，不递归扫描文件，不修改实际目录。网络共享盘检查可能较慢。</p></div>
-        <div class="storage-actions"><button id="pathCheck" type="button" class="outline-btn">检查所有关联路径</button></div>
+        <div class="storage-actions"><button id="pathCheck" type="button" class="outline-btn">检查所有关联路径</button><button id="pathExport" type="button" class="outline-btn" disabled>导出失效路径 CSV</button></div>
         <p id="pathHealthSummary" class="settings-note" role="status">尚未执行检查。</p>
+        <p class="settings-note">可从检测结果中直接定位或修改模块路径；CSV 只保存在你主动下载的位置，含私人本地路径，切勿上传到公开仓库。</p>
         <div id="pathHealthList" class="path-results" aria-live="polite"></div>
       </section>
       <section class="settings-section">

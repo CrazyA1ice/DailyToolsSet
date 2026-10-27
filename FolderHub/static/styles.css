@@ -930,3 +930,8 @@ html[data-density="compact"] .entries.list .entry-card .card-primary {
 .group-report-row>div{min-width:0;display:flex;flex-direction:column;gap:3px}
 .group-report-row strong{font-size:.93rem;overflow-wrap:anywhere}
 .group-report-row small{font-size:.8rem;color:var(--muted);overflow-wrap:anywhere}
+
+/* Actionable path health results: keyboard accessible repair and pagination. */
+.path-row-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:3px}
+.path-row-actions .outline-btn{padding:6px 10px;font-size:.82rem}
+.path-results .path-load-more{justify-self:start;margin:5px 0}

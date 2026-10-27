@@ -117,6 +117,18 @@ class AdminUiContractTests(unittest.TestCase):
             self.assertIn(endpoint, self.js)
         self.assertIn('.path-results', self.css)
 
+    def test_path_health_repair_and_export_contract(self):
+        self.assertIn('id="pathExport"', self.html)
+        self.assertIn('data-path-action="locate"', self.js)
+        self.assertIn('data-path-action="edit"', self.js)
+        self.assertIn('data-path-action="more"', self.js)
+        self.assertIn('function actOnPathHealth(event)', self.js)
+        self.assertIn('function exportMissingPaths()', self.js)
+        self.assertIn('function csvPathCell(value)', self.js)
+        self.assertIn('clearPathHealthResults("模块已更改', self.js)
+        self.assertIn('$("#pathHealthList").addEventListener("click",actOnPathHealth)', self.js)
+        self.assertIn('.path-row-actions', self.css)
+
     def test_recent_usage_nav_and_controls(self):
         self.assertIn('data-view="recent"',self.html)
         self.assertIn('id="recentCount"',self.html)
