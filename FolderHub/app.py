@@ -25,6 +25,7 @@ from urllib.parse import urlparse, parse_qs, urlsplit
 import webbrowser
 import startup
 import explorer_window
+import everything_search
 import path_management
 from preferences_store import PreferencesStore, PreferenceError, PreferenceConflict
 
@@ -1240,6 +1241,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply_download(filename)
                 finally:
                     filename.unlink(missing_ok=True)
+            if method=="GET" and path=="/api/everything/search":
+                terms=parse_qs(urlparse(self.path).query).get("q",[])
+                if len(terms)!=1:
+                    raise UserError("请填写搜索词")
+                try:
+                    result=everything_search.search(terms[0])
+                except (ValueError,everything_search.EverythingUnavailable) as error:
+                    raise UserError(str(error)) from error
+                return self.reply(200,result)
             if method=="GET" and path=="/api/nodes":
                 return self.reply(200,{"nodes":self.server.store.all()})
             if path=="/api/recent/pin":
