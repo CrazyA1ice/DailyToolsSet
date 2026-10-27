@@ -100,12 +100,26 @@
       <input id="workspaceMemberSearch" type="search" autocomplete="off" placeholder="筛选模块名称或所属目录">
       <p id="workspaceMemberSummary" class="settings-note" role="status">请选择需要集中浏览的模块</p>
       <div id="workspaceMemberList" class="workspace-member-list" role="group" aria-label="工作区成员"></div>
+      <div class="workspace-launch-settings">
+        <div class="workspace-link-heading"><label>一键启动清单（最多8项）</label></div>
+        <p id="workspaceLaunchHint" class="settings-note">仅会打开明确勾选的文件夹、文件或网页。分类模块不可启动。</p>
+        <div id="workspaceLaunchList" class="workspace-launch-list" role="group" aria-label="选择一键启动资源"></div>
+      </div>
       <p class="settings-note">工作区只保存已有模块的引用，不移动真实文件夹；分类模块和文件夹入口都可加入。</p>
       <div class="dialog-footer">
         <button id="workspaceCancel" type="button" class="outline-btn">取消</button>
         <button id="workspaceSave" type="submit" class="primary-btn">保存工作区</button>
       </div>
     </form>
+  </div>
+</div>
+<div id="workspaceLaunchLayer" class="dialog-layer hidden" role="presentation">
+  <div class="dialog group-report-dialog" role="dialog" aria-modal="true" aria-labelledby="workspaceLaunchTitle">
+    <div class="dialog-header"><div><div class="eyebrow">WORKSPACE LAUNCH</div><h2 id="workspaceLaunchTitle">工作区启动结果</h2></div>
+      <button type="button" id="workspaceLaunchClose" class="icon-button" aria-label="关闭启动结果">✕</button></div>
+    <div id="workspaceLaunchSummary" class="group-result-summary" role="status"></div>
+    <div id="workspaceLaunchRows" class="group-report-rows" aria-label="启动逐项结果"></div>
+    <div class="dialog-footer"><button type="button" id="workspaceLaunchDone" class="primary-btn">完成</button></div>
   </div>
 </div>
 <div id="groupResultLayer" class="dialog-layer hidden" role="presentation">

@@ -1046,6 +1046,52 @@ class Store:
                            (node_id,mime,image_path,now()))
 
 
+def launch_workspace(store, name):
+    """Open only explicitly selected, saved workspace members (at most eight).
+
+    Client supplies a workspace NAME, never arbitrary node IDs or executable
+    paths. Every selected target is validated again by open_saved_resource.
+    One bad/missing node must not prevent remaining resources from opening.
+    """
+    if type(name) is not str or not 1 <= len(name) <= 40:
+        raise UserError("请选择有效的项目工作区")
+    workspaces = store.preferences.get()["settings"]["workspaces"]
+    workspace = next((item for item in workspaces if item["name"] == name), None)
+    if workspace is None:
+        raise UserError("项目工作区不存在或已更名")
+    selected = workspace.get("launch_ids", [])
+    if not selected:
+        raise UserError("这个工作区尚未设置一键启动资源，请先编辑工作区")
+    if len(selected) > 8 or not set(selected).issubset(workspace["members"]):
+        raise UserError("工作区启动清单无效")
+    # Take a snapshot before opening anything; do not hold a SQLite lock while
+    # Windows Explorer, document associations or web browsers start.
+    with store.connect() as db:
+        records = {node_id: db.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+                   for node_id in selected}
+    results = []
+    for node_id in selected:
+        node = records[node_id]
+        title = node["title"] if node is not None else "已删除模块 #" + str(node_id)
+        try:
+            if node is None:
+                raise UserError("模块已删除，请编辑工作区移除该条目")
+            if node["node_type"] != "leaf":
+                raise UserError("分类模块不能直接启动，请选择其中的文件夹、文件或网页")
+            open_saved_resource(node)
+            results.append({"id": node_id, "title": title, "ok": True})
+            try:
+                store.record_open(node_id)
+            except (sqlite3.Error, UserError):
+                pass  # history is best effort, not a false launch failure
+        except (UserError, OSError, ValueError) as error:
+            results.append({"id": node_id, "title": title, "ok": False,
+                            "error": str(error)})
+    return {"workspace": name, "attempted": len(results),
+            "succeeded": sum(bool(row["ok"]) for row in results),
+            "results": results}
+
+
 def open_saved_resource(node):
     kind = node["resource_kind"]
     if kind == "folder":
@@ -1307,6 +1353,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(404,{"error":"未知接口"})
             if method=="GET" and path=="/api/export":
                 return self.reply(200,self.server.store.export(),disposition='attachment; filename="folderhub-backup.json"')
+            if path=="/api/workspaces/launch":
+                if method=="POST":
+                    data=self.request_json()
+                    return self.reply(200,launch_workspace(self.server.store,data.get("name")))
+                return self.reply(405,{"error":"不支持的请求方法"})
             if method=="POST" and path=="/api/nodes":
                 node_id=self.server.store.create(self.request_json())
                 return self.reply(201,{"id":node_id})

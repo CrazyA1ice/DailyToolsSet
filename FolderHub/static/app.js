@@ -140,7 +140,8 @@ const WORKSPACE_STATUS_NAMES={planning:"筹备中",active:"进行中",paused:"�
 function copyWorkspaceRecord(item){
   return {name:item.name,description:item.description,members:[...item.members],
     status:item.status||"planning",
-    links:Array.isArray(item.links)?item.links.map(link=>({name:link.name,url:link.url})):[]};
+    links:Array.isArray(item.links)?item.links.map(link=>({name:link.name,url:link.url})):[],
+    launch_ids:Array.isArray(item.launch_ids)?[...item.launch_ids]:[]};
 }
 function validWorkspaceUrl(value){
   if(typeof value!=="string"||!value||value.length>2048||/[\x00-\x20\x7f\\]/.test(value))return null;
@@ -855,7 +856,7 @@ function render(skipNav=false){
   $("#newBtnText").textContent=canAddChild?"新建子模块":"新建根模块";
   $("#searchHint").textContent=searching?`${display.length} 项结果`:"Ctrl K";
   $("#sectionOperations").innerHTML=state.view==="workspace"&&!searching?
-    '<button type="button" data-action="edit-workspace">编辑工作区</button><button type="button" data-action="copy-workspace">复制工作区</button>':
+    '<button type="button" data-action="launch-workspace" '+(workspaceLaunchBusy?'disabled':'')+'>▶ 一键启动</button><button type="button" data-action="edit-workspace">编辑工作区</button><button type="button" data-action="copy-workspace">复制工作区</button>':
     state.view==="node"&&!searching?
     `<button data-action="edit-current">编辑当前模块</button>`:
     "";
@@ -1096,6 +1097,7 @@ async function act(action,id){
     case "delete":await removeNode(id);break;
     case "empty-create":editDialog();break;
     case "edit-current":editDialog(state.selected);break;
+    case "launch-workspace":await launchActiveWorkspace();break;
     case "edit-workspace":openWorkspaceDialog(state.workspaces.findIndex(item=>item.name===state.activeWorkspace));break;
     case "copy-workspace":duplicateWorkspace(state.workspaces.findIndex(item=>item.name===state.activeWorkspace));break;
     case "load-more":{
@@ -1130,7 +1132,9 @@ function toggleSelected(id){
    folder groups that bulk-open 2–8 Windows Explorer windows. */
 let editingWorkspaceIndex=-1;
 let workspaceDraftMembers=new Set();
+let workspaceDraftLaunchIds=new Set();
 let workspaceDraftLinks=[];
+let workspaceLaunchBusy=false;
 let workspaceSaving=false;
 function validateWorkspaceName(value){
   const name=String(value??"").trim();
@@ -1177,6 +1181,50 @@ function renderWorkspaceMembers(){
     +(available.length?available.join(""):'<p class="settings-note">没有其他匹配的模块。</p>')
     +(remaining.length>page.length?'<p class="settings-note">仅显示前 120 个匹配模块，请继续输入关键词缩小范围。</p>':"");
   $("#workspaceMemberSummary").textContent="已选择 "+selected.length+"/30 个模块；可添加候选 "+remaining.length+" 个。";
+  for(const id of workspaceDraftLaunchIds)if(!workspaceDraftMembers.has(id))workspaceDraftLaunchIds.delete(id);
+  renderWorkspaceLaunchChoices();
+}
+function renderWorkspaceLaunchChoices(){
+  const ids=[...workspaceDraftMembers].filter(id=>byId(id)?.node_type==="leaf");
+  const chosen=ids.filter(id=>workspaceDraftLaunchIds.has(id));
+  $("#workspaceLaunchHint").textContent="已选 "+chosen.length+"/8 项；按工作区成员顺序依次打开。仅打开已勾选的文件夹、文件或网页。";
+  $("#workspaceLaunchList").innerHTML=ids.length?ids.map(id=>{
+    const node=byId(id),checked=workspaceDraftLaunchIds.has(id);
+    const disabled=!checked&&chosen.length>=8;
+    const kind=node.resource_kind==="url"?"网页":node.resource_kind==="file"?"文件":"文件夹";
+    return '<label class="workspace-member-row workspace-launch-choice"><input type="checkbox" data-workspace-launch="'+id+'" '
+      +(checked?'checked ':'')+(disabled?'disabled ':'')+'>'
+      +'<span>'+h(node.title)+'<small>'+h(kind)+'</small></span></label>';
+  }).join(""):'<p class="settings-note">选择工作区中的叶子模块后，可设置一键启动清单。</p>';
+}
+function showWorkspaceLaunchResult(data){
+  $("#workspaceLaunchSummary").textContent="工作区「"+data.workspace+"」：成功 "+data.succeeded+" / "+data.attempted+" 项";
+  $("#workspaceLaunchRows").innerHTML=data.results.map(item=>
+    '<div class="group-report-row"><span>'+h(item.title)+'</span><span>'
+      +(item.ok?'<strong>✓ 已发送打开请求</strong>':'<strong>✕ 启动失败</strong><small>'+h(item.error||"未知错误")+'</small>')
+      +'</span></div>').join("");
+  $("#workspaceLaunchLayer").classList.remove("hidden");
+  $("#workspaceLaunchDone").focus();
+}
+function closeWorkspaceLaunchResult(){
+  $("#workspaceLaunchLayer").classList.add("hidden");
+}
+async function launchActiveWorkspace(){
+  if(workspaceLaunchBusy||state.view!=="workspace"||!state.activeWorkspace)return;
+  const item=state.workspaces.find(w=>w.name===state.activeWorkspace);
+  if(!item)return;
+  const ids=item.launch_ids||[];
+  if(!ids.length){toast("请先编辑工作区，在「一键启动清单」勾选需要打开的资源",true);return}
+  const names=ids.map(id=>byId(id)?.title||"已删除模块 #"+id);
+  if(!confirm("即将依次打开 "+ids.length+" 项资源：\n"+names.join("\n")
+      +"\n\n只启动已选择的资源，不修改文件。是否继续？"))return;
+  workspaceLaunchBusy=true;
+  render(true);
+  try{
+    const result=await mutate("POST","/api/workspaces/launch",{name:item.name});
+    showWorkspaceLaunchResult(result);
+  }catch(error){toast("启动工作区失败："+error.message,true)}
+  finally{workspaceLaunchBusy=false;render(true)}
 }
 function movedWorkspaceLinkItems(links,index,direction){
   const next=links.map(link=>({...link})),target=index+direction;
@@ -1226,6 +1274,7 @@ function openWorkspaceDialog(index=-1,initialMembers=null){
   editingWorkspaceIndex=record?index:-1;
   workspaceDraftMembers=new Set(record?record.members:
     (initialMembers||[]).filter(id=>byId(id)).slice(0,30));
+  workspaceDraftLaunchIds=new Set(record?.launch_ids||[]);
   $("#workspaceDialogTitle").textContent=record?"编辑项目工作区":"新建项目工作区";
   $("#workspaceName").value=record?.name||"";
   $("#workspaceDescription").value=record?.description||"";
@@ -1242,6 +1291,7 @@ function closeWorkspaceDialog(){
   $("#workspaceLayer").classList.add("hidden");
   editingWorkspaceIndex=-1;
   workspaceDraftMembers=new Set();
+  workspaceDraftLaunchIds=new Set();
   workspaceDraftLinks=[];
 }
 async function submitWorkspace(event){
@@ -1269,7 +1319,11 @@ async function submitWorkspace(event){
   try{links=validateWorkspaceDraftLinks()}catch(error){toast(error.message,true);return}
   const previous=state.workspaces;
   const updated=previous.map(item=>copyWorkspaceRecord(item));
-  const current={name,description,members:ids,status,links};
+  const launch_ids=ids.filter(id=>workspaceDraftLaunchIds.has(id));
+  if(launch_ids.length>8||launch_ids.some(id=>byId(id)?.node_type!=="leaf")){
+    toast("启动清单最多8项，且只能包含叶子资源",true);return;
+  }
+  const current={name,description,members:ids,status,links,launch_ids};
   if(editingWorkspaceIndex<0)updated.push(current);
   else updated[editingWorkspaceIndex]=current;
   workspaceSaving=true;
@@ -1310,7 +1364,9 @@ function duplicateWorkspace(index){
   $("#workspaceDescription").value=item.description;
   $("#workspaceStatus").value=item.status||"planning";
   workspaceDraftLinks=(item.links||[]).map(link=>({...link}));
+  workspaceDraftLaunchIds=new Set(item.launch_ids||[]);
   renderWorkspaceLinkEditor();
+  renderWorkspaceLaunchChoices();
   toast("已复制工作区内容，请检查名称、资源与模块后点击保存");
 }
 async function deleteWorkspace(index){
@@ -2127,6 +2183,25 @@ function bind(){
     if(remove)deleteWorkspace(Number(remove.dataset.workspaceDelete));
   });
   $("#workspaceForm").addEventListener("submit",submitWorkspace);
+  $("#workspaceLaunchList").addEventListener("change",event=>{
+    const target=event.target.closest("[data-workspace-launch]");
+    if(!target)return;
+    const id=Number(target.dataset.workspaceLaunch);
+    if(!workspaceDraftMembers.has(id)||byId(id)?.node_type!=="leaf"){target.checked=false;return}
+    if(target.checked){
+      if(workspaceDraftLaunchIds.size>=8){target.checked=false;toast("一次最多启动8项资源",true);return}
+      workspaceDraftLaunchIds.add(id);
+    }else workspaceDraftLaunchIds.delete(id);
+    renderWorkspaceLaunchChoices();
+  });
+  $("#workspaceLaunchClose").addEventListener("click",closeWorkspaceLaunchResult);
+  $("#workspaceLaunchDone").addEventListener("click",closeWorkspaceLaunchResult);
+  $("#workspaceLaunchLayer").addEventListener("click",event=>{
+    if(event.target===$("#workspaceLaunchLayer"))closeWorkspaceLaunchResult();
+  });
+  $("#workspaceLaunchLayer").addEventListener("keydown",event=>{
+    if(event.key==="Escape"){event.stopPropagation();closeWorkspaceLaunchResult()}
+  });
   $("#workspaceLinkAdd").addEventListener("click",()=>{
     if(workspaceDraftLinks.length>=8)return;
     workspaceDraftLinks.push({name:"",url:""});

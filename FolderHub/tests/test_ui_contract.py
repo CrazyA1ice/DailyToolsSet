@@ -31,6 +31,22 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('当前文件类型不支持加入导航',self.js)
         self.assertIn('.everything-result button:disabled',self.css)
 
+    def test_v53_workspace_launch_is_explicit_bounded_and_reported(self):
+        for ctrl in ("workspaceLaunchList","workspaceLaunchHint","workspaceLaunchLayer",
+                     "workspaceLaunchTitle","workspaceLaunchRows","workspaceLaunchSummary",
+                     "workspaceLaunchDone","workspaceLaunchClose"):
+            self.assertIn('id="'+ctrl+'"',self.html)
+            self.assertIn(ctrl,self.js)
+        self.assertIn('function renderWorkspaceLaunchChoices()',self.js)
+        self.assertIn('const current={name,description,members:ids,status,links,launch_ids};',self.js)
+        self.assertIn('data-action="launch-workspace"',self.js)
+        self.assertIn('case "launch-workspace":await launchActiveWorkspace();break;',self.js)
+        self.assertIn('"/api/workspaces/launch"',self.js)
+        self.assertIn('showWorkspaceLaunchResult(result);',self.js)
+        self.assertIn('workspaceDraftLaunchIds.size>=8',self.js)
+        self.assertIn('h(item.error||"未知错误")',self.js)
+        self.assertIn('.workspace-launch-settings',self.css)
+
     def test_everything_search_is_optional_local_and_explicit(self):
         for control in ("everythingBtn","everythingLayer","everythingForm",
                         "everythingQuery","everythingResults","everythingStatus","everythingClose"):
@@ -230,7 +246,7 @@ class AdminUiContractTests(unittest.TestCase):
             self.assertIn(code, self.js)
         self.assertIn('workspaces:state.workspaces.map(item=>copyWorkspaceRecord(item))',self.js)
         self.assertIn('saved.workspaces.map(item=>copyWorkspaceRecord(item))',self.js)
-        self.assertIn('const current={name,description,members:ids,status,links};',self.js)
+        self.assertIn('const current={name,description,members:ids,status,links,launch_ids};',self.js)
         self.assertIn('$("#workspaceStatus").value=item.status||"planning"',self.js)
         self.assertIn('renderWorkspaceLinkEditor();',self.js)
         self.assertIn('.workspace-resources',self.css)

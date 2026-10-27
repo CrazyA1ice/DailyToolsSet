@@ -651,3 +651,14 @@ powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1
 - **验证：** 在 JavaScript 环境模拟16,000个导航模块构建搜索索引、30,000个快捷入口候选、查询结果缓存及浏览器帧合并；额外增加前端静态契约回归测试。这里的模拟数据不能等同于 Windows 浏览器实际耗时测量。
 - **本机测试：** 更新主分支后运行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`。日志及临时目录继续只写到 `FolderHub/test-results/` 和 `FolderHub/tmp/`。强烈建议对大量模块场景进行实际操作验收，重点检查浏览器搜索、↑/↓/回车操作、收藏夹高亮状态以及浏览器前进/后退。
 
+## V5.3：项目工作环境一键启动
+
+继续使用已经存在的**项目工作区**，不增加新的独立页面、不增加 Windows 全局快捷键：
+
+- 进入项目工作区 → 「编辑工作区」→ 在「一键启动清单」勾选需要启动的叶子模块。支持 FolderHub 已保存的文件夹、PDF/Word/Excel 等安全文件类型和 HTTP/HTTPS 网页。最多8项；分类模块不能加入启动清单。
+- 选择「保存工作区」后，工作区页面会出现「▶ 一键启动」按钮。**不会在进入工作区或启动 FolderHub 时自动打开任何文件。** 点击启动按钮后会显示每个拟打开的模块名称，用户确认才会依次启动；逐项报告成功或失败，个别资源失效不影响其余资源尝试。
+- 启动接口 `POST /api/workspaces/launch` 只接受**已经保存的工作区名称**。资源 ID 必须来自服务端已保存的 `launch_ids`，并且属于该工作区的 `members`；客户端无法自行传入可执行命令、文件路径或临时 ID。每个资源继续经过原有 `open_saved_resource()` 的类型、路径及 URL 安全校验。
+- 旧工作区的 `launch_ids` 默认空（必须主动配置），不会在升级时自动启动已有成员。原有最多30个工作区成员、最多8个网页资源链接及已有启动快捷键规则保持不变。**工作区“常用网页资源链接”不是启动清单的一部分**；需要一起启动的网页应先添加为网页类型的叶子模块并关联工作区。
+- 启动方案作为工作区配置的一部分存入 `FolderHub/data/preferences.json`，随完整 ZIP 备份迁移。无新数据库结构和第三方依赖。Windows 环境中打开文件夹、文档或网页依赖系统本身的文件关联程序或默认浏览器。
+- 本地回归：在仓库根目录执行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`，日志仍保存在 `FolderHub/test-results/`，临时目录仍保存在 `FolderHub/tmp/`。实机仍需验证多窗口启动、失效资源提示和浏览器默认打开行为。
+
