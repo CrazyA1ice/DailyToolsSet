@@ -94,6 +94,12 @@ class PortablePreferencesTests(unittest.TestCase):
                 self.prefs.save(payload)
             self.assertEqual((self.root/'data'/'preferences.json').read_bytes(),before)
 
+    def test_default_saved_views_are_not_shared_mutable_state(self):
+        first=self.prefs.get()['settings']
+        first['savedViews'].append({'name':'临时'})
+        self.assertEqual(self.prefs.get()['settings']['savedViews'],[])
+        self.assertEqual(self.prefs.snapshot_bytes().count(b'"savedViews"'),1)
+
     def test_backup_includes_preferences_even_when_not_created(self):
         archive=self.store.make_portable_backup()
         try:

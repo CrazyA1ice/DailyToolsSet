@@ -78,7 +78,7 @@ def validate(value):
     """Validate a complete/partial settings object without coercing or trusting unknown keys."""
     if not isinstance(value, dict) or set(value) - set(DEFAULTS):
         raise PreferenceError('个性化设置格式或字段无效')
-    result = dict(DEFAULTS)
+    result = {**DEFAULTS, 'savedViews': []}
     for key, item in value.items():
         if key in CHOICES:
             if type(item) is not str or item not in CHOICES[key]:
@@ -123,7 +123,8 @@ class PreferencesStore:
     def get(self):
         with self._lock:
             settings = self._read()
-            return {'configured': settings is not None, 'settings': settings or dict(DEFAULTS)}
+            return {'configured': settings is not None,
+                    'settings': settings if settings is not None else {**DEFAULTS, 'savedViews': []}}
 
     def _write(self, settings):
         data = json.dumps({'format': 'FolderHubPreferences', 'version': 1, 'settings': settings},
@@ -159,6 +160,6 @@ class PreferencesStore:
         with self._lock:
             settings = self._read()
             if settings is None:
-                settings = dict(DEFAULTS)
+                settings = {**DEFAULTS, 'savedViews': []}
             return (json.dumps({'format': 'FolderHubPreferences', 'version': 1, 'settings': settings},
                                ensure_ascii=False, indent=2) + '\n').encode('utf-8')

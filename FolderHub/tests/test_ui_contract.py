@@ -309,6 +309,10 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('const rewritten=state.savedViews.map(view=>{',self.js)
         self.assertIn('state.savedViews=rewritten;',self.js)
 
+    def test_saved_views_keep_unassigned_tags_removable(self):
+        self.assertIn('const previouslySelected=state.tagSelection.includes(tag)',self.js)
+        self.assertIn('subset.push(row||[tag,0]);',self.js)
+
     def test_presentation_settings_are_portable(self):
         self.assertIn('async function loadProjectSettings()', self.js)
         self.assertIn('async function persistProjectSettings()', self.js)

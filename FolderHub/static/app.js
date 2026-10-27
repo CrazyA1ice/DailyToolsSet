@@ -429,7 +429,8 @@ function filterTaggedNodes(nodes,includes,excludes,mode="any"){
   });
 }
 function chooseTag(tag){
-  if(tag&&!state.nodes.some(node=>(node.tags||[]).includes(tag)))return;
+  const previouslySelected=state.tagSelection.includes(tag)||state.tagExcluded.includes(tag);
+  if(tag&&!previouslySelected&&!state.nodes.some(node=>(node.tags||[]).includes(tag)))return;
   state.activeSmartView=null;
   if(state.view!=="tags")setView("tags");
   if(!tag){state.tagSelection=[];state.tagExcluded=[]}
@@ -542,7 +543,7 @@ function renderTagFilters(){
   for(const tag of selectedTags){
     if(subset.some(([name])=>name===tag))continue;
     const row=ordered.find(([name])=>name===tag);
-    if(row)subset.push(row);
+    subset.push(row||[tag,0]);
   }
   const include=state.tagSelection,exclude=state.tagExcluded;
   const mode=state.tagMatchMode, pick=state.tagPickMode;
