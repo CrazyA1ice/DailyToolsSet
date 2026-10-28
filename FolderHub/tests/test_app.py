@@ -201,7 +201,8 @@ class StoreTests(unittest.TestCase):
         # text. Explicit chr() calls make escaping across editors unambiguous.
         newline_value="bad"+chr(10)+"newline"
         nul_value="bad"+chr(0)+"zero"
-        assert ord(newline_value[3])==10 and ord(nul_value[3])==0
+        self.assertEqual(ord(newline_value[3]),10)
+        self.assertEqual(ord(nul_value[3]),0)
         for key,value in (("created_at",None),("updated_at",42),
                           ("created_at","x" * 129),
                           ("updated_at",newline_value),
