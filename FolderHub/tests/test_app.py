@@ -197,10 +197,18 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.export()["nodes"],backup["nodes"])
 
         before=self.store.export()["nodes"]
+        # Build actual control characters, not literal backslash-n/backslash-x00
+        # text. Explicit chr() calls make escaping across editors unambiguous.
+        newline_value="bad"+chr(10)+"newline"
+        nul_value="bad"+chr(0)+"zero"
+        self.assertEqual(ord(newline_value[3]),10)
+        self.assertEqual(ord(nul_value[3]),0)
         for key,value in (("created_at",None),("updated_at",42),
                           ("created_at","x" * 129),
-                          ("updated_at","bad\\nnewline"),
-                          ("created_at","bad\\x00zero")):
+                          ("updated_at",newline_value),
+                          ("created_at",nul_value),
+                          ("updated_at","bad"+chr(9)+"tab"),
+                          ("created_at","bad"+chr(127)+"del")):
             corrupt=json.loads(json.dumps(backup))
             corrupt["nodes"][0][key]=value
             with self.subTest(key=key,value=repr(value)):

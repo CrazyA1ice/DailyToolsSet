@@ -726,3 +726,9 @@ powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1
 - **导入保真**：导入时保留备份中的 `created_at`、`updated_at`，恢复后的导出节点数据不再因等待时间不同而改变。旧版本备份和手动制作的备份如果省略某个时间字段，则使用导入时刻作为兼容默认值；旧数据中原本存在的非标准时间文本也保持原样。
 - **输入安全**：导入之前校验时间字段为长度不超过 128 的字符串且没有控制字符；损坏的时间字段直接拒绝，原数据库节点保持不变。此变更不调整模块创建、编辑的正常更新时间逻辑，也不改变备份格式版本。
 - **回归验证**：将原有往返测试改为强制在时间不同的情况下执行恢复，新增旧时间文本保留、非法时间值原子拒绝、旧备份缺失时间字段的兼容用例。建议本地运行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`，日志仍写入 `FolderHub/test-results/`。202 项基线为用户修复前的实测结果，本提交尚需 Windows 全量测试确认。
+
+## V5.6.6：修正时间戳非法控制字符的测试数据
+
+- 修正 V5.6.5 新增的时间字段校验测试：旧测试误用了字面字符串 `\\n` 和 `\\x00`（反斜杠加字母），而不是**真正的换行符或 NUL 字符**。这些普通字符串自然不会触发非法控制字符校验，导致两项 `assertRaisesRegex` 测试失败。
+- 使用明确的 `chr(10)`（换行）、`chr(0)`（NUL）构造数据，并补充 `chr(9)`（Tab）、`chr(127)`（DEL）覆盖；额外断言测试字符串确实包含预期字符。恢复原备份时间戳、时间字段长度和非法字符拒绝逻辑**不变**，不新增业务规则或数据格式。
+- 先快速执行 `python -m unittest tests.test_app.StoreTests.test_backup_keeps_legacy_timestamp_text_and_rejects_malformed_fields -v`，再执行完整 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`。本轮修复不会在仓库根目录写日志或缓存。
