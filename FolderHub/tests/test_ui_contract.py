@@ -436,6 +436,26 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('renderSavedViews(); // Invalidate selected saved-view state',self.js)
         self.assertNotIn('else {renderSavedViews();renderFolderGroups();renderWorkspaces()}',self.js)
 
+    def test_v58_search_keyboard_highlight_preserves_cards_and_cached_lineage(self):
+        self.assertIn("let lineageById = new Map();", self.js)
+        self.assertIn("lineageById=new Map(searchRecords.map(item=>[item.node.id,item.lineage]));",
+                      self.js)
+        self.assertIn("return {node,own,lineage:full,body:", self.js)
+        self.assertIn("const lineage=lineageById.get(n.id)||n.title;", self.js)
+        self.assertNotIn('const lineage=ancestors(n.id).map(a=>a.title).join(" / ");',
+                         self.js)
+        self.assertIn("function highlightSearchKeyboard(results,nextIndex)", self.js)
+        start=self.js.index("function highlightSearchKeyboard(results,nextIndex)")
+        end=self.js.index("\\nfunction searchAll(term)",start)
+        body=self.js[start:end]
+        self.assertIn('classList.remove("keyboard-active")',body)
+        self.assertIn('classList.add("keyboard-active")',body)
+        self.assertIn("if(searchRenderFrame!==null)flushSearchRender();",body)
+        self.assertIn("if(!nextCard)",body)
+        self.assertIn("render(true);rememberNavigation();",body)
+        self.assertIn('nextCard?.scrollIntoView({block:"nearest"});',body)
+        self.assertIn("highlightSearchKeyboard(results,next);", self.js)
+
     def test_v57_sidebar_tree_only_rebuilds_on_data_or_expansion_changes(self):
         self.assertIn("let navTreeDataVersion = 0;", self.js)
         self.assertIn("let navTreeRenderedVersion = -1;", self.js)
