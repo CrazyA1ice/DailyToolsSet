@@ -732,3 +732,11 @@ powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1
 - 修正 V5.6.5 新增的时间字段校验测试：旧测试误用了字面字符串 `\\n` 和 `\\x00`（反斜杠加字母），而不是**真正的换行符或 NUL 字符**。这些普通字符串自然不会触发非法控制字符校验，导致两项 `assertRaisesRegex` 测试失败。
 - 使用明确的 `chr(10)`（换行）、`chr(0)`（NUL）构造数据，并补充 `chr(9)`（Tab）、`chr(127)`（DEL）覆盖；额外断言测试字符串确实包含预期字符。恢复原备份时间戳、时间字段长度和非法字符拒绝逻辑**不变**，不新增业务规则或数据格式。
 - 先快速执行 `python -m unittest tests.test_app.StoreTests.test_backup_keeps_legacy_timestamp_text_and_rejects_malformed_fields -v`，再执行完整 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`。本轮修复不会在仓库根目录写日志或缓存。
+
+## V5.7：大型目录树切换与侧栏响应优化
+
+- **侧栏树按变化重建**：旧版每次点击节点或切换栏目都会重新生成整个展开目录树的 HTML，导致不必要的 DOM 替换和焦点丢失。新版通过节点数据版本号区分**结构变化**与**仅选中项变化**；普通切换只移除旧行的 `active` 并高亮新行，不重建树 DOM，已有节点按钮保持原身份。
+- **正确触发失效**：服务器刷新节点数据、点击展开/折叠或自动展开选中节点的上级分类时，才重新生成树；节点名称、排列顺序和展开结构会及时更新。折叠/展开按钮重建后恢复键盘焦点，并通过 `preventScroll` 避免视图跳动。原有委托点击、`aria-expanded`、根节点数和其他侧栏项目仍保留。
+- **避免标签全表重复扫描**：节点索引更新时同步缓存已有标签集合。原来每次 `setView()` 都运行 `state.nodes.flatMap(...tags)`；现在复用索引中的标签集合，不必在切换目录时遍历全部资源。标签仍随节点刷新更新，原有标签筛选与历史导航规则不变。
+- **动态回归**：增加无需第三方包的 Node.js 轻量模拟测试，直接提取并运行 `app.js` 中的真实树渲染、节点索引、折叠与祖先展开函数，覆盖高亮变化不重建、重绘后恢复焦点、数据刷新更新及连续 400 次视图切换。对应 Python unittest 包装器仅在本机已安装 Node.js 时运行，未安装则跳过；另增加静态契约检查。不会新增运行时依赖，也不会在 `FolderHub/` 以外创建测试文件。
+- **验收限制**：动态验证关注重绘次数与交互逻辑，不代表 Windows 浏览器真实毫秒延迟。完整 Python 测试套件和 Windows 交互性能仍以本机验收为准。命令：仓库根目录先 `git pull origin main`，然后 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`。
