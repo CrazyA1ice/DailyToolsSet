@@ -73,6 +73,11 @@ const $ = selector => {
   assert(Object.hasOwn(elements, selector), "Unexpected UI element: " + selector);
   return elements[selector];
 };
+// Include many visible children to catch accidental O(tree size) remounts.
+const extraLeaves = Array.from({length: 1200}, (_, i) => ({
+  id: i + 100, parent_id: 1, sort_order: i + 1, node_type: "leaf",
+  title: "Document " + i, icon: "folder", tags: [],
+}));
 const state = {
   nodes: [
     {id: 1, parent_id: null, sort_order: 0, node_type: "root",
@@ -81,6 +86,7 @@ const state = {
       title: "Articles", icon: "folder", tags: []},
     {id: 3, parent_id: 1, sort_order: 0, node_type: "leaf",
       title: "Paper.pdf", icon: "folder", tags: ["research"]},
+    ...extraLeaves,
   ],
   expanded: new Set([1]),
   view: "node",
@@ -163,11 +169,14 @@ assert.equal(savedStateCount, savedBefore + 1,
   "already-expanded lineage must not trigger another persistence");
 
 // A true server data refresh invalidates cached markup, even without new view.
-state.nodes[0] = {...state.nodes[0], title: "Renamed projects"};
+state.nodes[0] = {...state.nodes[0], title: "Renamed projects",
+  tags: ["research", "research-new"]};
 nav.rebuildNodeIndex();
 nav.renderNav();
 assert.equal(htmlAssignments, 4);
 assert.match(tree.html, /Renamed projects/);
+assert.equal(elements["#tagCount"].textContent, 2,
+  "tag index must refresh when server data changes");
 
 // Many ordinary view changes avoid recreating the large sidebar tree.
 for (let i = 0; i < 400; i++) {
@@ -176,4 +185,4 @@ for (let i = 0; i < 400; i++) {
 }
 assert.equal(htmlAssignments, 4);
 assert.equal(otherSidebarRefreshes, 3 * (1 + 1 + 1 + 1 + 1 + 1 + 1 + 400));
-console.log("Sidebar tree lifecycle: selection, collapse/focus, lineage, refresh and 400 view changes passed");
+console.log("Sidebar tree lifecycle: 1200 extra nodes, selection, collapse/focus, lineage, refresh and 400 view changes passed");
