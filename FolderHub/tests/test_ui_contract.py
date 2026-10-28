@@ -446,7 +446,7 @@ class AdminUiContractTests(unittest.TestCase):
                          self.js)
         self.assertIn("function highlightSearchKeyboard(results,nextIndex)", self.js)
         start=self.js.index("function highlightSearchKeyboard(results,nextIndex)")
-        end=self.js.index("\\nfunction searchAll(term)",start)
+        end=self.js.index("function searchAll(term){",start)
         body=self.js[start:end]
         self.assertIn('classList.remove("keyboard-active")',body)
         self.assertIn('classList.add("keyboard-active")',body)
