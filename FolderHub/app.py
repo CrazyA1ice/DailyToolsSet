@@ -993,6 +993,7 @@ class Store:
         if len(raw)>20000:
             raise UserError("备份包含过多模块")
         prepared = {}
+        fallback_stamp = now()
         for n in raw:
             if not isinstance(n,dict) or type(n.get("id"))!=int or n["id"]<1 or n["id"] in prepared:
                 raise UserError("备份存在重复或非法 ID")
@@ -1000,7 +1001,18 @@ class Store:
             order = n.get("sort_order",0)
             if type(order)!=int or order<0:
                 raise UserError("备份排序字段无效")
+            # A restore must not rewrite the creation/update history. Older
+            # handcrafted backups may omit these fields, so default only then.
+            # Legacy databases can hold non-ISO strings; keep them unchanged
+            # while enforcing a small, control-character-free text bound.
+            created_at = n.get("created_at", fallback_stamp)
+            updated_at = n.get("updated_at", fallback_stamp)
+            if any(type(value) is not str or len(value) > 128 or
+                   any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+                   for value in (created_at, updated_at)):
+                raise UserError("备份时间字段无效")
             prepared[n["id"]] = {
+                "created_at": created_at, "updated_at": updated_at,
                 "parent": parent, "title": validate_title(n.get("title")),
                 "path": validate_path(n.get("folder_path")),
                 "favorite": int(bool(n.get("favorite",False))), "order": order,
@@ -1061,8 +1073,8 @@ class Store:
                             (id,parent_id,title,folder_path,node_type,icon,favorite,tags,sort_order,created_at,updated_at,resource_kind,resource_target)
                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", (node_id,n["parent"],n["title"],
                             n["path"],n["type"],n["icon"],n["favorite"],
-                            json.dumps(n["tags"],ensure_ascii=False),n["order"],now(),now(),
-                            n["kind"],n["target"]))
+                            json.dumps(n["tags"],ensure_ascii=False),n["order"],
+                            n["created_at"],n["updated_at"],n["kind"],n["target"]))
                         del pending[node_id]
                         progressed = True
                 if not progressed:

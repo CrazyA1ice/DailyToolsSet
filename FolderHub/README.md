@@ -719,3 +719,10 @@ powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1
 - **V5.1 旧数据库夹具**：调整测试使用的 `sqlite3.Connection` 上下文管理，保证提交后立即关闭连接，减少 Windows 下临时数据库被残留句柄占用的风险。该项之前只有 `ERROR` 摘要，**尚不能确认其真实异常是否由句柄问题引起**。
 - **失败时可见 traceback**：`run_tests.ps1` 在 Python 返回非零退出码时自动打印 UTF-8 测试日志最后 180 行，保留完整文件在 `FolderHub/test-results/`。这样可以直接看到 `Traceback`、`File ... line ...` 和异常类型，不会把真实错误隐藏在单行 `ERROR` 摘要后。
 - **验收**：在仓库根目录运行 `git pull origin main` 和 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`。若仍报旧数据库升级错误，请提供终端显示的 traceback 或上传该次 `FolderHub/test-results/folderhub-tests-*.txt`，才能准确修复实际迁移问题。
+
+## V5.6.5：备份恢复保留原始创建与修改时间
+
+- **修复实测的最后一项失败**：202 项单元测试中，`test_backup_round_trip_and_rollback` 报告原备份与恢复结果的 `created_at` / `updated_at` 相差一秒。原因是 `Store._apply_import()` 导入节点时使用 `now()`，覆盖了原始时间字段。这是实际的数据恢复保真问题，而非仅仅测试速度偶发影响。
+- **导入保真**：导入时保留备份中的 `created_at`、`updated_at`，恢复后的导出节点数据不再因等待时间不同而改变。旧版本备份和手动制作的备份如果省略某个时间字段，则使用导入时刻作为兼容默认值；旧数据中原本存在的非标准时间文本也保持原样。
+- **输入安全**：导入之前校验时间字段为长度不超过 128 的字符串且没有控制字符；损坏的时间字段直接拒绝，原数据库节点保持不变。此变更不调整模块创建、编辑的正常更新时间逻辑，也不改变备份格式版本。
+- **回归验证**：将原有往返测试改为强制在时间不同的情况下执行恢复，新增旧时间文本保留、非法时间值原子拒绝、旧备份缺失时间字段的兼容用例。建议本地运行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`，日志仍写入 `FolderHub/test-results/`。202 项基线为用户修复前的实测结果，本提交尚需 Windows 全量测试确认。

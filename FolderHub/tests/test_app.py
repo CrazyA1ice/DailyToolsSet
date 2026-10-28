@@ -175,12 +175,53 @@ class StoreTests(unittest.TestCase):
         self.store.create({"title":"课程", "parent_id":p,"node_type":"leaf","folder_path":r"C:\文档"})
         backup=self.store.export()
         self.store.delete(p)
-        self.store.import_backup(backup)
+        # Import must preserve the archive's timestamps even when it happens
+        # much later. Previously this only failed when a second ticked over.
+        with patch.object(app, "now", return_value="2099-01-01T00:00:00+00:00"):
+            self.store.import_backup(backup)
         self.assertEqual(len(self.store.all()),2)
+        self.assertEqual(self.store.export()["nodes"], backup["nodes"])
         corrupt=json.loads(json.dumps(backup))
         corrupt["nodes"][0]["parent_id"]=corrupt["nodes"][1]["id"]
         with self.assertRaises(app.UserError):self.store.import_backup(corrupt)
         self.assertEqual(self.store.export()["nodes"],backup["nodes"])
+
+    def test_backup_keeps_legacy_timestamp_text_and_rejects_malformed_fields(self):
+        root=self.store.create({"title":"Time capsule","node_type":"root"})
+        with self.store.connect() as db:
+            db.execute("UPDATE nodes SET created_at=?,updated_at=? WHERE id=?",
+                       ("old-created-at", "old-updated-at", root))
+        backup=self.store.export()
+        with patch.object(app,"now",return_value="2099-01-01T00:00:00+00:00"):
+            self.store.import_backup(backup)
+        self.assertEqual(self.store.export()["nodes"],backup["nodes"])
+
+        before=self.store.export()["nodes"]
+        for key,value in (("created_at",None),("updated_at",42),
+                          ("created_at","x" * 129),
+                          ("updated_at","bad\\nnewline"),
+                          ("created_at","bad\\x00zero")):
+            corrupt=json.loads(json.dumps(backup))
+            corrupt["nodes"][0][key]=value
+            with self.subTest(key=key,value=repr(value)):
+                with self.assertRaisesRegex(app.UserError,"时间字段"):
+                    self.store.import_backup(corrupt)
+                self.assertEqual(self.store.export()["nodes"],before)
+
+    def test_backup_without_time_fields_remains_compatible(self):
+        self.store.create({"title":"Legacy root","node_type":"root"})
+        backup=self.store.export()
+        for node in backup["nodes"]:
+            node.pop("created_at")
+            node.pop("updated_at")
+        # Older manually assembled backups may omit both time fields.
+        # The fallback must use one consistent timestamp per import.
+        with patch.object(app,"now",return_value="2099-01-01T00:00:00+00:00"):
+            self.store.import_backup(backup)
+        restored=self.store.all()
+        self.assertEqual(len(restored),1)
+        self.assertEqual(restored[0]["created_at"],"2099-01-01T00:00:00+00:00")
+        self.assertEqual(restored[0]["updated_at"],"2099-01-01T00:00:00+00:00")
 
     def test_batch_favorite_and_atomic_validation(self):
         root=self.store.create({"title":"科研","node_type":"root"})
