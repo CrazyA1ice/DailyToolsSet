@@ -740,3 +740,11 @@ powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1
 - **避免标签全表重复扫描**：节点索引更新时同步缓存已有标签集合。原来每次 `setView()` 都运行 `state.nodes.flatMap(...tags)`；现在复用索引中的标签集合，不必在切换目录时遍历全部资源。标签仍随节点刷新更新，原有标签筛选与历史导航规则不变。
 - **动态回归**：增加无需第三方包的 Node.js 轻量模拟测试，直接提取并运行 `app.js` 中的真实树渲染、节点索引、折叠与祖先展开函数，覆盖高亮变化不重建、重绘后恢复焦点、数据刷新更新及连续 400 次视图切换。对应 Python unittest 包装器仅在本机已安装 Node.js 时运行，未安装则跳过；另增加静态契约检查。不会新增运行时依赖，也不会在 `FolderHub/` 以外创建测试文件。
 - **验收限制**：动态验证关注重绘次数与交互逻辑，不代表 Windows 浏览器真实毫秒延迟。完整 Python 测试套件和 Windows 交互性能仍以本机验收为准。命令：仓库根目录先 `git pull origin main`，然后 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`。
+
+## V5.8：搜索键盘导航与卡片路径缓存
+
+- **方向键只更新高亮，不重建卡片**：此前在搜索框中每按一次上/下箭头，都会执行 `flushSearchRender()`、调用 `render(true)` 并替换整个 `#entries` 区域。新逻辑只更改旧结果和新结果卡片的 `keyboard-active` 样式，并滚动到可见位置；`Enter` 打开、`Escape` 清空、最多已渲染数量内循环选择的行为保持不变。
+- **处理未完成的搜索渲染和失效节点**：若刚输入文字，浏览器还存在一个待执行的搜索帧，会先完成**一次**结果刷新再移动高亮；若目标卡片不在 DOM 中，则回退到完整渲染，保证安全和状态一致。搜索框连续输入仍保留 V5.2 的逐帧合并，不改变用户操作。
+- **卡片路径复用节点索引**：过去每渲染一张结果卡片都会调用 `ancestors()` 逐级向上拼接完整所属层级；`buildSearchRecords()` 已在刷新时计算该层级，新版将其直接缓存到 `lineageById` 并复用，减轻大型目录和深层目录的卡片生成开销。节点刷新、重命名和移动时同时重建路径索引，不沿用旧路径。
+- **可执行回归**：新增可选 Node.js 动态测试，实际执行 `app.js` 的索引、卡片渲染和键盘高亮函数，模拟 120 条搜索结果与 400 次方向键移动，并覆盖待渲染帧、目标丢失后的回退和父级目录改名后的路径更新；新增 Python unittest 包装器和静态契约检查。Node.js 不属于运行依赖，未安装会跳过这项动态回归。
+- **性能验证边界**：动态测试验证卡片 DOM 不重复重建，不等于已测得 Windows 浏览器的实际耗时。更新后可先运行 `node .\\FolderHub\\tests\\test_search_card_lifecycle.cjs`（可选），再执行 `powershell -ExecutionPolicy Bypass -File .\\FolderHub\\run_tests.ps1`。所有项目内测试文件和日志仍位于 `FolderHub/`。
