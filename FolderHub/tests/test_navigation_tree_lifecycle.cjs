@@ -107,7 +107,7 @@ const sandbox = {
   renderWorkspaces() {otherSidebarRefreshes++;},
   document: {
     querySelectorAll() {
-      return [{classList: {toggle() {}}}];
+      return [{dataset: {view: "all"}, classList: {toggle() {}}}];
     },
   },
 };
