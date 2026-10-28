@@ -436,6 +436,29 @@ class AdminUiContractTests(unittest.TestCase):
         self.assertIn('renderSavedViews(); // Invalidate selected saved-view state',self.js)
         self.assertNotIn('else {renderSavedViews();renderFolderGroups();renderWorkspaces()}',self.js)
 
+    def test_v57_sidebar_tree_only_rebuilds_on_data_or_expansion_changes(self):
+        self.assertIn("let navTreeDataVersion = 0;", self.js)
+        self.assertIn("let navTreeRenderedVersion = -1;", self.js)
+        self.assertIn("let navTreeActiveId = null;", self.js)
+        self.assertIn("let indexedTagNames = new Set();", self.js)
+        self.assertIn("indexedTagNames=tagNames;", self.js)
+        self.assertIn("const available=indexedTagNames;", self.js)
+        self.assertNotIn("new Set(state.nodes.flatMap(n=>n.tags||[]))", self.js)
+        self.assertIn("if(navTreeRenderedVersion!==navTreeDataVersion)", self.js)
+        self.assertIn("tree.innerHTML=walk(roots);", self.js)
+        self.assertIn("navTreeRenderedVersion=navTreeDataVersion;", self.js)
+        self.assertIn('tree.querySelector(".tree-row.active")?.classList.remove("active");',
+                      self.js)
+        self.assertIn('tree.querySelector(\'[data-node="\'+activeId+\'"]\')?.closest(".tree-row")?.classList.add("active");',
+                      self.js)
+        self.assertIn("if(changed){navTreeDataVersion++;saveTreeState();}", self.js)
+        self.assertIn("saveTreeState();renderNav();", self.js)
+        self.assertIn('?.focus({preventScroll:true});', self.js)
+        self.assertIn("  navTreeDataVersion++;", self.js)
+        self.assertIn("  renderSavedViews();", self.js)
+        self.assertIn("  renderFolderGroups();", self.js)
+        self.assertIn("  renderWorkspaces();", self.js)
+
     def test_indexed_navigation_progressive_render_and_focus(self):
         self.assertIn('function rebuildNodeIndex()',self.js)
         self.assertIn('const byId = id => nodeById.get(id)',self.js)
