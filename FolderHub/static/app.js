@@ -273,6 +273,11 @@ let childrenByParent = new Map();
 let searchRecords = [];
 let indexedTagCount = 0;
 let cachedSearch = null;
+// A changing selection must not remount the entire expanded sidebar tree.
+// Only refreshed nodes or a changed expansion state invalidate the markup.
+let navTreeDataVersion = 0;
+let navTreeRenderedVersion = -1;
+let navTreeActiveId = null;
 const byId = id => nodeById.get(id);
 const sorted = nodes => [...nodes].sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
 const children = id => childrenByParent.get(id??null) || [];
@@ -318,6 +323,7 @@ function rebuildNodeIndex(){
   for(const nodes of childrenByParent.values())nodes.sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
   searchRecords=buildSearchRecords(state.nodes,nodeById);
   cachedSearch=null;
+  navTreeDataVersion++;
 }
 
 function toast(message, error=false, action=null) {
@@ -359,8 +365,13 @@ function loadTreeState() {
 }
 function saveTreeState(){persistProjectSettings()}
 function expandLineage(id){
-  for(const node of ancestors(id)){if(node.node_type!=="leaf")state.expanded.add(node.id)}
-  saveTreeState();
+  let changed=false;
+  for(const node of ancestors(id)){
+    if(node.node_type!=="leaf"&&!state.expanded.has(node.id)){
+      state.expanded.add(node.id);changed=true;
+    }
+  }
+  if(changed){navTreeDataVersion++;saveTreeState();}
 }
 async function refresh(){
   const data=await api("/api/nodes");
@@ -461,27 +472,43 @@ const coverUrl = n => `/api/nodes/${n.id}/image?v=${encodeURIComponent(n.updated
 
 function toggleBranch(id){
   if(state.expanded.has(id))state.expanded.delete(id);else state.expanded.add(id);
+  navTreeDataVersion++;
   saveTreeState();renderNav();
+  // Keep keyboard focus on the branch toggle after the subtree is replaced.
+  $("#treeNav").querySelector('[data-toggle="'+id+'"]')?.focus({preventScroll:true});
 }
 function renderNav(){
   const roots=children(null);
   $("#rootCount").textContent=roots.length;
   $("#tagCount").textContent=indexedTagCount;
   document.querySelectorAll("#specialNav [data-view]").forEach(el=>el.classList.toggle("active",state.view===el.dataset.view));
-  const walk=(nodes) => nodes.map(n=>{
-    const sub=children(n.id), expand=sub.length>0 && state.expanded.has(n.id), isLeaf=n.node_type==="leaf";
-    return `<div class="tree-branch" role="group">
-      <div class="tree-row ${state.view==='node'&&state.selected===n.id?'active':''}">
-        ${sub.length?`<button type="button" class="tree-toggle" data-toggle="${n.id}" aria-expanded="${expand}" aria-label="${expand?'折叠':'展开'} ${h(n.title)}"><span class="tree-chevron ${expand?'is-open':''}">›</span></button>`
-          :'<span class="tree-spacer" aria-hidden="true"></span>'}
-        <button type="button" class="tree-item" data-node="${n.id}" title="${h(n.title)} (${TYPE_LABEL[n.node_type]||'模块'})">
-          <span class="tree-folder" aria-hidden="true">${h(iconFor(n))}</span>
-          <span class="tree-text">${h(n.title)}</span>${isLeaf?'<span class="tree-leaf-mark" title="关联的文件夹">↗</span>':''}
-        </button>
-      </div>${sub.length&&expand?`<div class="tree-children" role="group">${walk(sub)}</div>`:''}
-    </div>`;
-  }).join("");
-  $("#treeNav").innerHTML=walk(roots);
+  const tree=$("#treeNav");
+  if(navTreeRenderedVersion!==navTreeDataVersion){
+    const walk=(nodes) => nodes.map(n=>{
+      const sub=children(n.id), expand=sub.length>0 && state.expanded.has(n.id), isLeaf=n.node_type==="leaf";
+      return `<div class="tree-branch" role="group">
+        <div class="tree-row">
+          ${sub.length?`<button type="button" class="tree-toggle" data-toggle="${n.id}" aria-expanded="${expand}" aria-label="${expand?'折叠':'展开'} ${h(n.title)}"><span class="tree-chevron ${expand?'is-open':''}">›</span></button>`
+            :'<span class="tree-spacer" aria-hidden="true"></span>'}
+          <button type="button" class="tree-item" data-node="${n.id}" title="${h(n.title)} (${TYPE_LABEL[n.node_type]||'模块'})">
+            <span class="tree-folder" aria-hidden="true">${h(iconFor(n))}</span>
+            <span class="tree-text">${h(n.title)}</span>${isLeaf?'<span class="tree-leaf-mark" title="关联的文件夹">↗</span>':''}
+          </button>
+        </div>${sub.length&&expand?`<div class="tree-children" role="group">${walk(sub)}</div>`:''}
+      </div>`;
+    }).join("");
+    tree.innerHTML=walk(roots);
+    navTreeRenderedVersion=navTreeDataVersion;
+    navTreeActiveId=null;
+  }
+  const activeId=state.view==="node"?state.selected:null;
+  if(navTreeActiveId!==activeId){
+    tree.querySelector(".tree-row.active")?.classList.remove("active");
+    if(activeId!==null){
+      tree.querySelector('[data-node="'+activeId+'"]')?.closest(".tree-row")?.classList.add("active");
+    }
+    navTreeActiveId=activeId;
+  }
   renderSavedViews();
   renderFolderGroups();
   renderWorkspaces();
