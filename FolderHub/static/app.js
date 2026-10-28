@@ -272,6 +272,7 @@ let nodeById = new Map();
 let childrenByParent = new Map();
 let searchRecords = [];
 let indexedTagCount = 0;
+let indexedTagNames = new Set();
 let cachedSearch = null;
 // A changing selection must not remount the entire expanded sidebar tree.
 // Only refreshed nodes or a changed expansion state invalidate the markup.
@@ -319,6 +320,7 @@ function rebuildNodeIndex(){
     childrenByParent.get(parent).push(node);
     for(const tag of node.tags||[])tagNames.add(tag);
   }
+  indexedTagNames=tagNames;
   indexedTagCount=tagNames.size;
   for(const nodes of childrenByParent.values())nodes.sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
   searchRecords=buildSearchRecords(state.nodes,nodeById);
@@ -413,7 +415,8 @@ function setView(view,id=null,{fromHistory=false,saved=null}={}){
   if(view==="workspace"&&!state.workspaces.some(item=>item.name===id)){view="all";id=null}
   state.view=view;state.selected=view==="node"?id:null;
   state.activeWorkspace=view==="workspace"?id:null;
-  const available=new Set(state.nodes.flatMap(n=>n.tags||[]));
+  // Reuse the node index: opening a view must not scan every node's tags.
+  const available=indexedTagNames;
   const restoredSmartView=fromHistory&&view==="tags"?
     state.savedViews.find(item=>item.name===saved?.smartView):null;
   const previousIncludes=restoredSmartView?restoredSmartView.includes:
