@@ -271,6 +271,7 @@ let toastTimer;
 let nodeById = new Map();
 let childrenByParent = new Map();
 let searchRecords = [];
+let lineageById = new Map();
 let indexedTagCount = 0;
 let indexedTagNames = new Set();
 let cachedSearch = null;
@@ -306,8 +307,8 @@ function buildSearchRecords(nodes,lookup){
   }
   return nodes.map(node=>{
     const own=(node.title+" "+(node.folder_path||node.resource_target||"")).toLocaleLowerCase();
-    const full=lineage(node).toLocaleLowerCase();
-    return {node,own,body:own+" "+full+" "+(node.tags||[]).join(" ").toLocaleLowerCase()};
+    const full=lineage(node);
+    return {node,own,lineage:full,body:own+" "+full.toLocaleLowerCase()+" "+(node.tags||[]).join(" ").toLocaleLowerCase()};
   });
 }
 function rebuildNodeIndex(){
@@ -324,6 +325,7 @@ function rebuildNodeIndex(){
   indexedTagCount=tagNames.size;
   for(const nodes of childrenByParent.values())nodes.sort((a,b)=>a.sort_order-b.sort_order || a.id-b.id);
   searchRecords=buildSearchRecords(state.nodes,nodeById);
+  lineageById=new Map(searchRecords.map(item=>[item.node.id,item.lineage]));
   cachedSearch=null;
   navTreeDataVersion++;
 }
@@ -769,7 +771,8 @@ function card(n,reorderable=false,keyboardActive=false){
   const resourceLabel=resourceKind==='file'?'文件':resourceKind==='url'?'网页':'文件夹';
   const linked=!!resourceTarget;
   const leaf=n.node_type==="leaf";
-  const lineage=ancestors(n.id).map(a=>a.title).join(" / ");
+  // The same lineage was already computed once while indexing all nodes.
+  const lineage=lineageById.get(n.id)||n.title;
   const contextText=state.search?`所属：${lineage}`:"";
   const listContext=state.layout==="list" && contextText?
     `<span class="list-card-context" title="${h(contextText)}">${highlightSearch(contextText,state.search)}</span>`:"";
@@ -825,6 +828,28 @@ function queueSearchRender(){
     searchRenderFrame=null;
     render(true);rememberNavigation();
   });
+}
+// Arrow-key movement changes only two CSS classes, not 100+ card nodes.
+// If typing has a queued frame, materialize the current results once first.
+// If the target was removed by a concurrent refresh, fall back to a redraw.
+function highlightSearchKeyboard(results,nextIndex){
+  if(searchRenderFrame!==null)flushSearchRender();
+  const previousIndex=state.searchKeyboardIndex;
+  const target=results[nextIndex];
+  if(!target)return;
+  let nextCard=document.getElementById(`folderhub-entry-${target.id}`);
+  if(!nextCard){
+    state.searchKeyboardIndex=nextIndex;
+    render(true);rememberNavigation();
+    nextCard=document.getElementById(`folderhub-entry-${target.id}`);
+  }else{
+    if(previousIndex>=0 && previousIndex<results.length && previousIndex!==nextIndex)
+      document.getElementById(`folderhub-entry-${results[previousIndex].id}`)?.classList.remove("keyboard-active");
+    nextCard.classList.add("keyboard-active");
+    state.searchKeyboardIndex=nextIndex;
+    rememberNavigation();
+  }
+  nextCard?.scrollIntoView({block:"nearest"});
 }
 function searchAll(term){
   const query=String(term).trim().toLocaleLowerCase();
@@ -2442,10 +2467,9 @@ function bind(){
     // immediately built up to 20k DOM cards just to move keyboard focus.
     const visibleCount=Math.min(results.length,state.renderLimit);
     const old=state.searchKeyboardIndex;
-    state.searchKeyboardIndex=e.key==="ArrowDown"?(old+1)%visibleCount:
+    const next=e.key==="ArrowDown"?(old+1)%visibleCount:
       old<0?visibleCount-1:(old-1+visibleCount)%visibleCount;
-    flushSearchRender();
-    document.getElementById(`folderhub-entry-${results[state.searchKeyboardIndex].id}`)?.scrollIntoView({block:"nearest"});
+    highlightSearchKeyboard(results,next);
   });
   $("#layoutBtn").addEventListener("click",()=>{
     const scrollY=window.scrollY;
